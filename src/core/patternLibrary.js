@@ -10,13 +10,15 @@ function loadPresets() {
   return PRESET_FILES.map((file) => JSON.parse(readFileSync(join(PRESET_DIR, file), 'utf-8')))
 }
 
+const PRESETS = loadPresets()
+
 export function resolveImageIndices(spec, imageCount) {
   if (spec === 'all') return Array.from({ length: imageCount }, (_, i) => i)
   if (Array.isArray(spec)) return spec
   throw new Error(`잘못된 imageIndices 지정: ${JSON.stringify(spec)}`)
 }
 
-export function getCandidatePattern(imageCount, candidate, presets = loadPresets()) {
+export function getCandidatePattern(imageCount, candidate, presets = PRESETS) {
   const preset = presets.find((p) => imageCount >= p.imageCountMin && imageCount <= p.imageCountMax)
   if (!preset) throw new Error(`이미지 개수(${imageCount})에 맞는 패턴을 찾을 수 없습니다`)
   const pattern = preset.candidates[candidate]
