@@ -66,3 +66,17 @@ test('LLM response with an out-of-vocabulary style falls back to rules', async (
   assert.equal(result.source, 'rule-based-fallback')
   assert.equal(result.style, 'Magazine')
 })
+
+test('fallbackReason captures the underlying error message', async () => {
+  const fakeClient = {
+    messages: {
+      create: async () => { throw new Error('API timeout') },
+    },
+  }
+  const result = await inferStyle(
+    { imageCount: 1, textLength: 3000, imageAspectRatios: [1] },
+    { apiKey: 'sk-fake', mockMode: false, client: fakeClient },
+  )
+  assert.equal(result.source, 'rule-based-fallback')
+  assert.match(result.fallbackReason, /API timeout/)
+})
