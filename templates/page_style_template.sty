@@ -1,0 +1,36 @@
+% templates/page_style_template.sty
+\ProvidesPackage{page_style}[2026/07/06 Imprint Image+Text Page Style]
+
+\RequirePackage{fontspec}
+\RequirePackage{xeCJK}
+\RequirePackage{geometry}
+\RequirePackage[absolute,overlay]{textpos}
+\RequirePackage{graphicx}
+
+% 한국어는 어절 단위 공백이 의미를 가지므로 xeCJK의 공백 무시 기본값을 꺼야 한다.
+\xeCJKsetup{CJKspace = true}
+
+\geometry{
+  paperwidth={{PAGE_WIDTH}}mm,
+  paperheight={{PAGE_HEIGHT}}mm,
+  top={{MARGIN_TOP}}mm,
+  bottom={{MARGIN_BOTTOM}}mm,
+  inner={{MARGIN_INNER}}mm,
+  outer={{MARGIN_OUTER}}mm,
+}
+\setlength{\TPHorizModule}{1mm}
+\setlength{\TPVertModule}{1mm}
+
+% 본문 세리프: PRD 지정 Noto Serif KR은 이 PC에 정적 폰트가 없어(가변폰트만 존재,
+% xdvipdfmx 임베드 실패 이력) IBM Plex Serif로 대체한다.
+\setmainfont{{{BODY_FONT_FILE_EN}}}[
+  Path = {{{FONTS_DIR}}/}, Extension = .{{BODY_FONT_FILE_EXT}}, BoldFont = {{{BODY_FONT_FILE_BOLD}}},
+]
+\setCJKmainfont{{{BODY_FONT_FILE_KR}}}[
+  Path = {{{FONTS_DIR}}/}, Extension = .{{BODY_FONT_FILE_EXT}}, BoldFont = {{{BODY_FONT_FILE_KR_BOLD}}},
+]
+
+\newcommand{\BodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont #1\par}
+
+\pagestyle{empty}
+\endinput
