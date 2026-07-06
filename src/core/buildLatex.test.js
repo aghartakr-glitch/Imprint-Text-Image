@@ -51,3 +51,32 @@ test('buildMainTex embeds the page body into the document template', () => {
   assert.match(tex, /\\BodyText\{본문\}/)
   assert.doesNotMatch(tex, /\{\{BODY_LATEX\}\}/)
 })
+
+test('escapeLatex handles a literal backslash without double-escaping', () => {
+  const resolvedPages = [{
+    type: 'text-only',
+    images: [],
+    textZone: { xMm: 0, yMm: 0, wMm: 116, hMm: 176 },
+    textSlice: 'C:\\Users\\test',
+  }]
+  const body = buildPagesLatex(resolvedPages)
+  assert.match(body, /C:\\textbackslash\{\}Users\\textbackslash\{\}test/)
+  assert.doesNotMatch(body, /\\textbackslash\\\{/, 'braces after \\textbackslash must not be re-escaped')
+})
+
+test('escapeLatex escapes tilde and caret', () => {
+  const resolvedPages = [{
+    type: 'text-only',
+    images: [],
+    textZone: { xMm: 0, yMm: 0, wMm: 116, hMm: 176 },
+    textSlice: '5~10 x^2',
+  }]
+  const body = buildPagesLatex(resolvedPages)
+  assert.match(body, /5\\textasciitilde\{\}10 x\\textasciicircum\{\}2/)
+})
+
+test('buildStyleTex normalizes a Windows-style fontsDir to forward slashes', () => {
+  const tex = buildStyleTex({ fontsDir: 'C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\assets\\fonts' })
+  assert.match(tex, /Path = \{C:\/Users\/mjungpk\/Desktop\/Imprint\(Image\+Text\)\/assets\/fonts\/\}/)
+  assert.doesNotMatch(tex, /Path = \{C:\\/, 'fontsDir must not contain backslashes in the rendered .sty')
+})

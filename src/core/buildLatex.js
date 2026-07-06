@@ -27,7 +27,7 @@ export function buildStyleTex({ fontsDir }) {
     MARGIN_BOTTOM: MARGIN_BOTTOM_MM,
     MARGIN_INNER: MARGIN_INNER_MM,
     MARGIN_OUTER: MARGIN_OUTER_MM,
-    FONTS_DIR: fontsDir,
+    FONTS_DIR: fontsDir.replace(/\\/g, '/'),
     BODY_FONT_FILE_EN: 'IBMPlexSerif-Regular',
     BODY_FONT_FILE_KR: 'IBMPlexSerif-Regular',
     BODY_FONT_FILE_BOLD: 'IBMPlexSerif-Bold',
@@ -45,11 +45,15 @@ function leftMarginForPage(pageNumber) {
 }
 
 function escapeLatex(text) {
+  const BACKSLASH_SENTINEL = ' BACKSLASH '
   return text
-    .replace(/\\/g, '\\textbackslash{}')
+    .replace(/\\/g, BACKSLASH_SENTINEL)
     .replace(/([{}#%&_$])/g, '\\$1')
+    .replace(/~/g, '\\textasciitilde{}')
+    .replace(/\^/g, '\\textasciicircum{}')
     .replace(/\n\s*\n/g, '\\par ')
     .replace(/\n/g, ' ')
+    .split(BACKSLASH_SENTINEL).join('\\textbackslash{}')
 }
 
 function imageBlock(image, pageNumber) {
