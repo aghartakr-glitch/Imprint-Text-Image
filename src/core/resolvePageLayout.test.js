@@ -55,3 +55,10 @@ test('image-grid-margin arranges images inside the margin box with text below', 
   assert.ok(layout.images.every((img) => img.fullBleed === false))
   assert.equal(layout.textZone.yMm, 120 + IMAGE_TEXT_GAP_MM)
 })
+
+test('unknown page type throws descriptive error', () => {
+  assert.throws(
+    () => resolvePageLayout({ type: 'invalid-type' }, 1, imagePaths),
+    /알 수 없는 페이지 타입/,
+  )
+})
