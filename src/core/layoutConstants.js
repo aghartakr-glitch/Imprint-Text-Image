@@ -1,0 +1,19 @@
+export const PAGE_WIDTH_MM = 148
+export const PAGE_HEIGHT_MM = 210
+
+export const MARGIN_TOP_MM = 16
+export const MARGIN_BOTTOM_MM = 18
+export const MARGIN_INNER_MM = 18
+export const MARGIN_OUTER_MM = 14
+
+export const TEXT_BOX_WIDTH_MM = PAGE_WIDTH_MM - MARGIN_INNER_MM - MARGIN_OUTER_MM
+export const TEXT_BOX_HEIGHT_MM = PAGE_HEIGHT_MM - MARGIN_TOP_MM - MARGIN_BOTTOM_MM
+
+export const BODY_FONT_SIZE_PT = 9
+export const BODY_LEADING_PT = 14
+export const PT_TO_MM = 0.3528
+
+export const CHAR_WIDTH_MM = BODY_FONT_SIZE_PT * PT_TO_MM
+export const LINE_HEIGHT_MM = BODY_LEADING_PT * PT_TO_MM
+
+export const IMAGE_TEXT_GAP_MM = 6
