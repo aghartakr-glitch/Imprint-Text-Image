@@ -1,0 +1,28 @@
+{
+  "imageCountMin": 3,
+  "imageCountMax": 4,
+  "overflowPageType": "text-only",
+  "candidates": {
+    "A": {
+      "patternId": "a-3-4img-grid-full-bleed",
+      "pages": [
+        { "type": "image-grid", "imageIndices": "all" },
+        { "type": "text-only" }
+      ]
+    },
+    "B": {
+      "patternId": "b-3-4img-grid-margin-then-text",
+      "pages": [
+        { "type": "image-grid-margin", "imageIndices": "all", "gridHeightMm": 120 },
+        { "type": "text-only" }
+      ]
+    },
+    "C": {
+      "patternId": "c-3-4img-text-first-grid",
+      "pages": [
+        { "type": "text-only" },
+        { "type": "image-grid-margin", "imageIndices": "all", "gridHeightMm": 80 }
+      ]
+    }
+  }
+}

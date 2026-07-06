@@ -1,0 +1,30 @@
+{
+  "imageCountMin": 2,
+  "imageCountMax": 2,
+  "overflowPageType": "text-only",
+  "candidates": {
+    "A": {
+      "patternId": "a-2img-full-bleed-pair",
+      "pages": [
+        { "type": "full-bleed-image", "imageIndices": [0] },
+        { "type": "full-bleed-image", "imageIndices": [1] },
+        { "type": "text-only" }
+      ]
+    },
+    "B": {
+      "patternId": "b-2img-top-text-bottom-pair",
+      "pages": [
+        { "type": "image-top-text-bottom", "imageIndices": [0], "imageHeightMm": 90 },
+        { "type": "image-top-text-bottom", "imageIndices": [1], "imageHeightMm": 90 }
+      ]
+    },
+    "C": {
+      "patternId": "c-2img-text-first",
+      "pages": [
+        { "type": "text-only" },
+        { "type": "image-top-text-bottom", "imageIndices": [0], "imageHeightMm": 55 },
+        { "type": "image-top-text-bottom", "imageIndices": [1], "imageHeightMm": 55 }
+      ]
+    }
+  }
+}
