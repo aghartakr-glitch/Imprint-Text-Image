@@ -54,8 +54,16 @@ export async function runGeneration({
         dir, patternId: generated.patternId, pageCount: generated.pageCount, compile: compileResult, spread: spreadResult,
       }
     } catch (e) {
+      // Normalized to the same shape as a successful result (dir/compile/spread always
+      // present, compile.ok/spread.ok always readable) so downstream consumers (the HTTP
+      // layer, the e2e script) never need to special-case `.error` before reading `.compile.ok`.
       candidateResults[candidate] = {
         error: e && e.message ? e.message : String(e),
+        dir: null,
+        patternId: null,
+        pageCount: null,
+        compile: { ok: false, reason: '후보 생성 실패' },
+        spread: { ok: false, reason: '후보 생성 실패로 스프레드 생략' },
       }
     }
   }

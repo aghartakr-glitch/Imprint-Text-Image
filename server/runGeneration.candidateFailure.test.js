@@ -66,9 +66,14 @@ test('runGeneration isolates one candidate throwing: others still run and the lo
   })
 
   // Candidate B failed and is recorded as an error, not silently dropped and not looking like success.
+  // The shape is normalized to match a successful result (dir/compile/spread always present, both
+  // ok:false) so downstream consumers can safely read `.compile.ok`/`.spread.ok` without special-casing
+  // `.error` first.
   assert.ok(result.candidateResults.B.error, 'candidate B should carry an error field')
   assert.match(result.candidateResults.B.error, /injected failure for candidate B/)
-  assert.equal(result.candidateResults.B.compile, undefined)
+  assert.equal(result.candidateResults.B.dir, null)
+  assert.equal(result.candidateResults.B.compile.ok, false)
+  assert.equal(result.candidateResults.B.spread.ok, false)
 
   // Candidates A and C were not blocked by B's failure and completed for real.
   for (const candidate of ['A', 'C']) {
