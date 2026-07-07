@@ -4,8 +4,19 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { exec } from 'node:child_process'
+import { promisify } from 'node:util'
 import { runGeneration } from './runGeneration.mjs'
 import { FONTS_DIR } from './env.mjs'
+
+const run = promisify(exec)
+
+async function getPdfPageCount(pdfPath) {
+  const { stdout } = await run(`pdfinfo "${pdfPath}"`)
+  const match = stdout.match(/^Pages:\s+(\d+)/m)
+  if (!match) throw new Error(`pdfinfo 출력에서 페이지 수를 찾을 수 없습니다: ${stdout}`)
+  return Number(match[1])
+}
 
 // A real, fully valid 1x1 PNG (not just a header) so XeLaTeX's \includegraphics can embed it.
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
@@ -35,6 +46,13 @@ test('runGeneration produces 3 real, compiled candidates in mock style mode', as
     assert.ok(existsSync(join(r.dir, 'spread-preview.pdf')))
     assert.ok(existsSync(join(r.dir, 'main.tex')))
     assert.ok(existsSync(join(r.dir, 'layout.json')))
+
+    // Regression guard: overlay textblocks (textpos [absolute,overlay]) contribute nothing to the
+    // main vertical list, so \newpage alone can silently collapse multiple logical pages into one
+    // physical PDF page. Verify the *real* compiled PDF has the expected physical page count.
+    const realPageCount = await getPdfPageCount(join(r.dir, 'pages.pdf'))
+    assert.equal(realPageCount, r.pageCount, `candidate ${candidate}: expected ${r.pageCount} physical pages, got ${realPageCount}`)
+    assert.ok(r.pageCount > 1, `candidate ${candidate}: test fixture should exercise a multi-page candidate (got pageCount=${r.pageCount})`)
   }
   assert.ok(existsSync(join(result.runDir, 'generation-log.json')))
   assert.ok(existsSync(join(result.runDir, 'input', 'input-text.txt')))

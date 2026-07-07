@@ -77,7 +77,8 @@ export function buildPagesLatex(resolvedPages) {
   return resolvedPages
     .map((page, i) => {
       const pageNumber = i + 1
-      const parts = page.images.map((img) => imageBlock(img, pageNumber))
+      const parts = ['\\mbox{}']
+      parts.push(...page.images.map((img) => imageBlock(img, pageNumber)))
       if (page.textZone && page.textSlice) {
         parts.push(textBlock(page.textZone, pageNumber, page.textSlice))
       }

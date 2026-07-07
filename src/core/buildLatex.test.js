@@ -31,6 +31,8 @@ test('buildPagesLatex emits one textblock per image and \\newpage between pages'
   assert.match(body, /includegraphics\[width=148mm,height=210mm,keepaspectratio\]\{\/a\.jpg\}/)
   assert.match(body, /\\newpage/)
   assert.match(body, /\\BodyText\{가나다\}/)
+  const mboxCount = (body.match(/\\mbox\{\}/g) || []).length
+  assert.equal(mboxCount, resolvedPages.length, 'each page must have exactly one \\mbox{} content anchor so \\newpage actually ejects a page with overlay-only textblocks')
 })
 
 test('buildPagesLatex escapes LaTeX special characters in body text', () => {
