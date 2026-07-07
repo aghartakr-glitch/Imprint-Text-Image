@@ -33,7 +33,7 @@ Imprint(Image+Text)/
 ├─ server/             HTTP 서버, XeLaTeX 컴파일, 출력 폴더/로그 저장, 전체 오케스트레이션
 ├─ src/frontend/        React UI (업로드 폼, Generate 버튼, 결과 보기)
 ├─ templates/           .tex/.sty 템플릿 + 패턴 프리셋 JSON
-├─ assets/fonts/        IBM Plex Serif(본문 세리프 대체), Noto Sans KR(제목/구조용)
+├─ assets/fonts/        Noto Sans KR (본문 + 제목/구조용)
 ├─ uploads/             업로드된 원본 이미지(임시)
 ├─ outputs/             생성 결과 (타임스탬프 폴더별)
 └─ docs/superpowers/    설계 스펙 + 구현 계획 문서
@@ -42,6 +42,8 @@ Imprint(Image+Text)/
 ## 폰트에 대한 참고
 
 PRD는 본문 세리프로 "Noto Serif KR"을 지정하지만, 이 폰트는 정적(static) 빌드가 없고
-가변폰트(variable font)만 배포되어 XeLaTeX(xdvipdfmx)에서 임베드에 실패한다. 대신 정적 빌드가
-있는 **IBM Plex Serif**를 본문 세리프로 사용한다. 자세한 배경은
+가변폰트(variable font)만 배포되어 XeLaTeX(xdvipdfmx)에서 임베드에 실패한다. 대체 세리프로
+시도한 IBM Plex Serif는 한글 글리프 자체가 없어 본문이 빈 사각형으로 나왔다. 그래서 본문·제목
+모두 실제 컴파일로 한글 렌더링이 확인된 **Noto Sans KR**을 사용한다(세리프 대신 산세리프이며,
+본문/제목은 크기·굵기로만 구분). 자세한 배경은
 `docs/superpowers/specs/2026-07-06-imprint-image-text-design.md` 3장 참고.

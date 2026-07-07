@@ -29,10 +29,16 @@ export function buildStyleTex({ fontsDir }) {
     MARGIN_INNER: MARGIN_INNER_MM,
     MARGIN_OUTER: MARGIN_OUTER_MM,
     FONTS_DIR: fontsDir.replace(/\\/g, '/'),
-    BODY_FONT_FILE_EN: 'IBMPlexSerif-Regular',
-    BODY_FONT_FILE_KR: 'IBMPlexSerif-Regular',
-    BODY_FONT_FILE_BOLD: 'IBMPlexSerif-Bold',
-    BODY_FONT_FILE_KR_BOLD: 'IBMPlexSerif-Bold',
+    // IBM Plex Serif has no Hangul glyphs at all (confirmed by a real compile: Latin/numbers
+    // rendered fine, every Hangul syllable came out as an empty box). Noto Sans KR is already
+    // proven (real compile + visual check) to render Hangul correctly, so the body now uses
+    // it too — sans-serif instead of PRD's serif spec, but reliably correct rather than
+    // silently broken. Distinguished from the title purely by size/weight (9pt/regular vs
+    // 28pt/bold), not by typeface family.
+    BODY_FONT_FILE_EN: 'NotoSansKR-Regular',
+    BODY_FONT_FILE_KR: 'NotoSansKR-Regular',
+    BODY_FONT_FILE_BOLD: 'NotoSansKR-Bold',
+    BODY_FONT_FILE_KR_BOLD: 'NotoSansKR-Bold',
     BODY_FONT_FILE_EXT: 'ttf',
     BODY_FONT_SIZE: BODY_FONT_SIZE_PT,
     BODY_LEADING: BODY_LEADING_PT,
