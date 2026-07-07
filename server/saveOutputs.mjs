@@ -12,13 +12,29 @@ function timestampFolderName(date = new Date(), seq = 1) {
 }
 
 export function createRunFolder(outputsRoot, { date, seq } = {}) {
-  const runId = timestampFolderName(date, seq)
-  const runDir = join(outputsRoot, runId)
-  if (existsSync(runDir)) {
-    throw new Error(`이미 존재하는 결과 폴더입니다(seq 충돌 가능성): ${runDir}`)
+  if (seq != null) {
+    // Caller explicitly picked a seq (e.g. a test asserting collision behavior) — honor
+    // their claim of uniqueness and fail loud rather than silently reusing the folder.
+    const runId = timestampFolderName(date, seq)
+    const runDir = join(outputsRoot, runId)
+    if (existsSync(runDir)) {
+      throw new Error(`이미 존재하는 결과 폴더입니다(seq 충돌 가능성): ${runDir}`)
+    }
+    mkdirSync(join(runDir, 'input', 'images'), { recursive: true })
+    return { runId, runDir }
   }
-  mkdirSync(join(runDir, 'input', 'images'), { recursive: true })
-  return { runId, runDir }
+
+  // No seq supplied (the real HTTP server never tracks one): auto-increment until an
+  // unused slot is found, instead of always trying seq=1 and throwing whenever two
+  // requests land in the same minute.
+  for (let n = 1; ; n += 1) {
+    const runId = timestampFolderName(date, n)
+    const runDir = join(outputsRoot, runId)
+    if (!existsSync(runDir)) {
+      mkdirSync(join(runDir, 'input', 'images'), { recursive: true })
+      return { runId, runDir }
+    }
+  }
 }
 
 function dedupeName(name, usedNames) {

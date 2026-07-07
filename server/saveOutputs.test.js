@@ -17,6 +17,19 @@ test('createRunFolder makes a timestamped run dir with input/images inside it', 
   rmSync(outputsRoot, { recursive: true, force: true })
 })
 
+test('createRunFolder with no seq auto-increments instead of colliding on repeated calls in the same minute', () => {
+  const outputsRoot = mkdtempSync(join(tmpdir(), 'imprint-it-outputs-'))
+  const date = new Date(2026, 6, 6, 10, 30)
+  const first = createRunFolder(outputsRoot, { date })
+  const second = createRunFolder(outputsRoot, { date })
+  const third = createRunFolder(outputsRoot, { date })
+  assert.equal(first.runId, '2026-07-06_1030_001')
+  assert.equal(second.runId, '2026-07-06_1030_002')
+  assert.equal(third.runId, '2026-07-06_1030_003')
+  assert.ok(existsSync(join(second.runDir, 'input', 'images')))
+  rmSync(outputsRoot, { recursive: true, force: true })
+})
+
 test('saveInputCopies copies images and writes the text file verbatim', () => {
   const outputsRoot = mkdtempSync(join(tmpdir(), 'imprint-it-outputs-'))
   const srcDir = mkdtempSync(join(tmpdir(), 'imprint-it-src-'))
