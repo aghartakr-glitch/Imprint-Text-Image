@@ -172,6 +172,89 @@ test('multipart Content-Type with no boundary= returns an error response instead
   rmSync(uploadsDir, { recursive: true, force: true })
 })
 
+// Regression test for the unguarded decodeURIComponent DoS: a malformed percent-encoding
+// sequence in the URL path (e.g. a lone "%") makes decodeURIComponent throw a synchronous
+// URIError from inside serveStatic. Without a try/catch around that call, this is an uncaught
+// exception that crashes the whole Node process on a single bad GET request.
+test('GET /outputs/% (malformed percent-encoding) returns a 4xx and the server survives', async () => {
+  const outputsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-outputs-'))
+  const app = createApp({ outputsDir, uploadsDir: outputsDir })
+  const port = await startServer(app)
+
+  const response = await fetch(`http://localhost:${port}/outputs/%`)
+  assert.ok(response.status >= 400 && response.status < 500, `expected a 4xx response, got ${response.status}`)
+
+  // Prove the server process/instance is still alive and serving requests after the bad path.
+  const followUp = await fetch(`http://localhost:${port}/outputs/does-not-exist.pdf`)
+  assert.equal(followUp.status, 404)
+
+  app.close()
+  rmSync(outputsDir, { recursive: true, force: true })
+})
+
+// Regression test for the unguarded info.filename.replace(...) DoS: busboy classifies a
+// multipart part as a *file* (rather than a field) whenever its Content-Type is
+// "application/octet-stream", even with no filename= parameter at all on the
+// Content-Disposition header (an explicit filename="" quoted-empty-string, by contrast, makes
+// busboy treat the part as a plain field, since its own truthy check on disp.params.filename
+// never even sets `filename`, so it can't reach the 'file' listener at all — verified directly
+// against busboy 1.6.0). With no filename param, info.filename is undefined, and calling
+// `.replace` on it directly throws a synchronous TypeError from inside busboy's own file-event
+// emission — which does NOT surface as a `bb.on('error', ...)` event (it's an unhandled throw
+// from inside the 'file' listener itself), so the existing busboy-error handler never sees it.
+// This is triggerable with a perfectly well-formed multipart body, not a corrupted one, so it's
+// built with a raw http.request/hand-crafted body to control the exact headers (FormData's
+// Blob-based append always sets a filename and an image/* Content-Type, so it can't reach this
+// code path). The "text" field is deliberately omitted so that, once the fixed file handler
+// falls back to a default name instead of crashing, the request still reaches a normal 400
+// ("text required") from the existing close-handler validation rather than falling through to
+// real image-parsing of the fake file content — isolating this test to just the filename bug.
+test('multipart file part with no filename= (application/octet-stream) returns a 4xx and the server survives', async () => {
+  const outputsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-outputs-'))
+  const uploadsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-uploads-'))
+  const app = createApp({ outputsDir, uploadsDir })
+  const port = await startServer(app)
+
+  const boundary = 'X'
+  const body = [
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="images"',
+    'Content-Type: application/octet-stream',
+    '',
+    'not-really-an-image',
+    `--${boundary}--`,
+    '',
+  ].join('\r\n')
+
+  const noFilenameStatus = await new Promise((resolve, reject) => {
+    const req = request({
+      hostname: 'localhost',
+      port,
+      path: '/api/generate?mock=1',
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, (res) => {
+      res.resume()
+      res.on('end', () => resolve(res.statusCode))
+    })
+    req.on('error', reject)
+    req.end(body)
+  })
+
+  assert.ok(noFilenameStatus >= 400 && noFilenameStatus < 500, `expected a 4xx response, got ${noFilenameStatus}`)
+
+  // Prove the server process/instance is still alive and serving requests after the bad part.
+  const followUp = await fetch(`http://localhost:${port}/outputs/does-not-exist.pdf`)
+  assert.equal(followUp.status, 404)
+
+  app.close()
+  rmSync(outputsDir, { recursive: true, force: true })
+  rmSync(uploadsDir, { recursive: true, force: true })
+})
+
 test('POST /api/generate rejects a 7th image over the 6-file limit', async () => {
   const outputsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-outputs-'))
   const uploadsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-uploads-'))
