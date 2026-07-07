@@ -1,5 +1,5 @@
-import { mkdirSync, copyFileSync, writeFileSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { mkdirSync, copyFileSync, writeFileSync, existsSync } from 'node:fs'
+import { join, basename, extname } from 'node:path'
 
 function timestampFolderName(date = new Date(), seq = 1) {
   const pad = (n) => String(n).padStart(2, '0')
@@ -14,12 +14,33 @@ function timestampFolderName(date = new Date(), seq = 1) {
 export function createRunFolder(outputsRoot, { date, seq } = {}) {
   const runId = timestampFolderName(date, seq)
   const runDir = join(outputsRoot, runId)
+  if (existsSync(runDir)) {
+    throw new Error(`이미 존재하는 결과 폴더입니다(seq 충돌 가능성): ${runDir}`)
+  }
   mkdirSync(join(runDir, 'input', 'images'), { recursive: true })
   return { runId, runDir }
 }
 
+function dedupeName(name, usedNames) {
+  if (!usedNames.has(name)) return name
+  const ext = extname(name)
+  const stem = name.slice(0, name.length - ext.length)
+  let n = 2
+  let candidate = `${stem}-${n}${ext}`
+  while (usedNames.has(candidate)) {
+    n += 1
+    candidate = `${stem}-${n}${ext}`
+  }
+  return candidate
+}
+
 export function saveInputCopies(runDir, { imagePaths, text }) {
-  const imageNames = imagePaths.map((p) => basename(p))
+  const usedNames = new Set()
+  const imageNames = imagePaths.map((p) => {
+    const name = dedupeName(basename(p), usedNames)
+    usedNames.add(name)
+    return name
+  })
   imagePaths.forEach((p, i) => {
     copyFileSync(p, join(runDir, 'input', 'images', imageNames[i]))
   })

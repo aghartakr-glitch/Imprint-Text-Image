@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import {
+  mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync, mkdirSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -27,6 +29,35 @@ test('saveInputCopies copies images and writes the text file verbatim', () => {
   assert.deepEqual(imageNames, ['photo.jpg'])
   assert.ok(existsSync(join(runDir, 'input', 'images', 'photo.jpg')))
   assert.equal(readFileSync(join(runDir, 'input', 'input-text.txt'), 'utf-8'), '본문 텍스트')
+
+  rmSync(outputsRoot, { recursive: true, force: true })
+  rmSync(srcDir, { recursive: true, force: true })
+})
+
+test('createRunFolder throws instead of silently reusing an existing run folder', () => {
+  const outputsRoot = mkdtempSync(join(tmpdir(), 'imprint-it-outputs-'))
+  const date = new Date(2026, 6, 6, 10, 30)
+  createRunFolder(outputsRoot, { date, seq: 1 })
+  assert.throws(() => createRunFolder(outputsRoot, { date, seq: 1 }), /이미 존재하는/)
+  rmSync(outputsRoot, { recursive: true, force: true })
+})
+
+test('saveInputCopies disambiguates duplicate basenames instead of overwriting', () => {
+  const outputsRoot = mkdtempSync(join(tmpdir(), 'imprint-it-outputs-'))
+  const srcDir = mkdtempSync(join(tmpdir(), 'imprint-it-src-'))
+  const subDir = join(srcDir, 'sub')
+  mkdirSync(subDir)
+  const file1 = join(srcDir, 'photo.jpg')
+  const file2 = join(subDir, 'photo.jpg')
+  writeFileSync(file1, Buffer.from([0x01]))
+  writeFileSync(file2, Buffer.from([0x02]))
+
+  const { runDir } = createRunFolder(outputsRoot, { date: new Date(2026, 6, 6, 10, 31), seq: 1 })
+  const { imageNames } = saveInputCopies(runDir, { imagePaths: [file1, file2], text: 'x' })
+
+  assert.deepEqual(imageNames, ['photo.jpg', 'photo-2.jpg'])
+  assert.deepEqual([...readFileSync(join(runDir, 'input', 'images', 'photo.jpg'))], [0x01])
+  assert.deepEqual([...readFileSync(join(runDir, 'input', 'images', 'photo-2.jpg'))], [0x02])
 
   rmSync(outputsRoot, { recursive: true, force: true })
   rmSync(srcDir, { recursive: true, force: true })
