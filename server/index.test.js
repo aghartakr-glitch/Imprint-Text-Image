@@ -37,12 +37,32 @@ test('POST /api/generate accepts multipart images+text, returns 3 candidate PDF 
   rmSync(uploadsDir, { recursive: true, force: true })
 })
 
+// Note: fetch() normalizes "../" client-side, so this request actually reaches the server as
+// GET /etc/passwd (no /outputs/ prefix) and is rejected by the generic catch-all route below,
+// not by serveStatic's own path-traversal guard. See the percent-encoded-slash test further down
+// for a request that genuinely exercises serveStatic's `relative.includes('..')` check.
 test('GET /outputs/ rejects path traversal with 400', async () => {
   const outputsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-outputs-'))
   const app = createApp({ outputsDir, uploadsDir: outputsDir })
   const port = await startServer(app)
 
   const response = await fetch(`http://localhost:${port}/outputs/../../etc/passwd`)
+  assert.equal(response.status, 400)
+
+  app.close()
+  rmSync(outputsDir, { recursive: true, force: true })
+})
+
+test('GET /outputs/ rejects path traversal that reaches serveStatic (percent-encoded slash)', async () => {
+  const outputsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-outputs-'))
+  const app = createApp({ outputsDir, uploadsDir: outputsDir })
+  const port = await startServer(app)
+
+  // fetch() normalizes literal "../" client-side, so a plain "/outputs/../../etc/passwd" never
+  // reaches serveStatic's own ".." guard (see the other traversal test above, which only hits the
+  // generic catch-all). A percent-encoded slash survives fetch's normalization, so this URL keeps
+  // the /outputs/ prefix and actually exercises serveStatic's relative.includes('..') check.
+  const response = await fetch(`http://localhost:${port}/outputs/..%2f..%2fetc/passwd`)
   assert.equal(response.status, 400)
 
   app.close()
