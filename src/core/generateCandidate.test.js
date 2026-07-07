@@ -32,6 +32,30 @@ test('style scales the image height for image-top-text-bottom pages (candidate B
   assert.ok(exhibitionImg.hMm > editorialImg.hMm, 'Exhibition Catalog should render a larger image than Editorial')
 })
 
+test('a non-empty title prepends a title-page with no image, before the pattern\'s own pages', () => {
+  const withTitle = generateCandidate({
+    imageCount: 1, imagePaths, text: '본문', candidate: 'A', style: 'Editorial', fontsDir: '/fonts', title: '어떤 여름',
+  })
+  assert.equal(withTitle.resolvedPages[0].type, 'title-page')
+  assert.equal(withTitle.resolvedPages[0].title, '어떤 여름')
+  assert.equal(withTitle.resolvedPages[0].images.length, 0)
+  // the pattern's own pages (full-bleed-image then text-only) still follow, unchanged
+  assert.equal(withTitle.resolvedPages[1].type, 'full-bleed-image')
+  assert.equal(withTitle.resolvedPages[2].type, 'text-only')
+  assert.match(withTitle.mainTex, /\\TitleText\{어떤 여름\}/)
+})
+
+test('an empty/whitespace-only title behaves exactly like no title at all', () => {
+  const noTitle = generateCandidate({
+    imageCount: 1, imagePaths, text: '본문', candidate: 'A', style: 'Editorial', fontsDir: '/fonts',
+  })
+  const blankTitle = generateCandidate({
+    imageCount: 1, imagePaths, text: '본문', candidate: 'A', style: 'Editorial', fontsDir: '/fonts', title: '   ',
+  })
+  assert.equal(blankTitle.pageCount, noTitle.pageCount)
+  assert.equal(blankTitle.resolvedPages[0].type, 'full-bleed-image')
+})
+
 test('long text produces more pages than short text for the same candidate', () => {
   const short = generateCandidate({
     imageCount: 1, imagePaths, text: '가나다', candidate: 'C', style: 'Magazine', fontsDir: '/fonts',

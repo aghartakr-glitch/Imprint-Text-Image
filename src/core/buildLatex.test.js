@@ -35,6 +35,35 @@ test('buildPagesLatex emits one textblock per image and \\newpage between pages'
   assert.equal(mboxCount, resolvedPages.length, 'each page must have exactly one \\mbox{} content anchor so \\newpage actually ejects a page with overlay-only textblocks')
 })
 
+test('buildPagesLatex renders a title-page with \\TitleText instead of \\BodyText, no images', () => {
+  const resolvedPages = [
+    {
+      type: 'title-page',
+      images: [],
+      textZone: { xMm: 0, yMm: 0, wMm: 116, hMm: 176 },
+      textSlice: null,
+      title: '어떤 여름',
+    },
+    {
+      type: 'text-only',
+      images: [],
+      textZone: { xMm: 0, yMm: 0, wMm: 116, hMm: 176 },
+      textSlice: '본문 시작',
+    },
+  ]
+  const body = buildPagesLatex(resolvedPages)
+  assert.match(body, /\\TitleText\{어떤 여름\}/)
+  assert.match(body, /\\BodyText\{본문 시작\}/)
+  assert.doesNotMatch(body, /includegraphics/, 'title-page must not place any image')
+})
+
+test('buildStyleTex fills in the heading font and title size placeholders too', () => {
+  const tex = buildStyleTex({ fontsDir: '/abs/path/assets/fonts' })
+  assert.match(tex, /\\newfontfamily\\HeadingENFace\{NotoSansKR-Regular\}/)
+  assert.match(tex, /\\newCJKfontfamily\\HeadingKRFace\{NotoSansKR-Regular\}/)
+  assert.match(tex, /\\fontsize\{28pt\}\{34pt\}/)
+})
+
 test('buildPagesLatex escapes LaTeX special characters in body text', () => {
   const resolvedPages = [{
     type: 'text-only',

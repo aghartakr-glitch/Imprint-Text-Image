@@ -21,6 +21,7 @@ const fieldWrapper = { marginBottom: 16 }
 
 export default function App() {
   const [images, setImages] = useState([])
+  const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
@@ -45,6 +46,7 @@ export default function App() {
 
     const form = new FormData()
     images.forEach((file) => form.append('images', file))
+    form.append('title', title)
     form.append('text', text)
 
     try {
@@ -80,6 +82,12 @@ export default function App() {
             <div style={groupTitle}>이미지 (최대 6장)</div>
             <input type="file" accept="image/*" multiple onChange={handleImageChange} />
             <p style={{ fontSize: 12, color: T.muted }}>{images.length}장 선택됨</p>
+          </div>
+
+          <div style={fieldWrapper}>
+            <div style={groupTitle}>제목 (선택)</div>
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
+            <p style={{ fontSize: 12, color: T.muted }}>제목을 넣으면 각 후보 맨 앞에 섹션 오프너 페이지가 추가됩니다. 비워두면 기존처럼 본문 레이아웃만 생성됩니다.</p>
           </div>
 
           <div style={fieldWrapper}>

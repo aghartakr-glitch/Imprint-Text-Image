@@ -5,6 +5,7 @@ import {
   PAGE_WIDTH_MM, PAGE_HEIGHT_MM, MARGIN_TOP_MM, MARGIN_BOTTOM_MM,
   MARGIN_INNER_MM, MARGIN_OUTER_MM,
   BODY_FONT_SIZE_PT, BODY_LEADING_PT,
+  TITLE_FONT_SIZE_PT, TITLE_LEADING_PT, TITLE_VERTICAL_POSITION_RATIO,
 } from './layoutConstants.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -35,6 +36,13 @@ export function buildStyleTex({ fontsDir }) {
     BODY_FONT_FILE_EXT: 'ttf',
     BODY_FONT_SIZE: BODY_FONT_SIZE_PT,
     BODY_LEADING: BODY_LEADING_PT,
+    HEADING_FONT_FILE_EN: 'NotoSansKR-Regular',
+    HEADING_FONT_FILE_KR: 'NotoSansKR-Regular',
+    HEADING_FONT_FILE_BOLD: 'NotoSansKR-Bold',
+    HEADING_FONT_FILE_KR_BOLD: 'NotoSansKR-Bold',
+    HEADING_FONT_FILE_EXT: 'ttf',
+    TITLE_FONT_SIZE: TITLE_FONT_SIZE_PT,
+    TITLE_LEADING: TITLE_LEADING_PT,
   })
 }
 
@@ -73,13 +81,26 @@ function textBlock(textZone, pageNumber, textSlice) {
     + '\\end{textblock}'
 }
 
+// Section-opener title page: large heading type sitting in generous whitespace, not
+// dead-center (TITLE_VERTICAL_POSITION_RATIO nudges it toward the upper-middle third,
+// which reads more like a real editorial opener than a perfectly centered title slide).
+function titleBlock(textZone, pageNumber, title) {
+  const xMm = leftMarginForPage(pageNumber) + textZone.xMm
+  const yMm = MARGIN_TOP_MM + textZone.yMm + textZone.hMm * TITLE_VERTICAL_POSITION_RATIO
+  return `\\begin{textblock}{${textZone.wMm}}(${xMm},${yMm})\n`
+    + `  \\TitleText{${escapeLatex(title)}}\n`
+    + '\\end{textblock}'
+}
+
 export function buildPagesLatex(resolvedPages) {
   return resolvedPages
     .map((page, i) => {
       const pageNumber = i + 1
       const parts = ['\\mbox{}']
       parts.push(...page.images.map((img) => imageBlock(img, pageNumber)))
-      if (page.textZone && page.textSlice) {
+      if (page.type === 'title-page') {
+        parts.push(titleBlock(page.textZone, pageNumber, page.title))
+      } else if (page.textZone && page.textSlice) {
         parts.push(textBlock(page.textZone, pageNumber, page.textSlice))
       }
       return parts.join('\n')

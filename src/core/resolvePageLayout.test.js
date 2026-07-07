@@ -5,6 +5,14 @@ import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM, PAGE_WIDTH_MM, PAGE_HEIGHT_MM, I
 
 const imagePaths = ['/a.jpg', '/b.jpg']
 
+test('title-page fills the full text box, no images, carries the title string', () => {
+  const layout = resolvePageLayout({ type: 'title-page', title: '어떤 여름' }, 1, imagePaths)
+  assert.equal(layout.images.length, 0)
+  assert.deepEqual(layout.textZone, { xMm: 0, yMm: 0, wMm: TEXT_BOX_WIDTH_MM, hMm: TEXT_BOX_HEIGHT_MM })
+  assert.equal(layout.textSlice, null)
+  assert.equal(layout.title, '어떤 여름')
+})
+
 test('text-only page fills the full text box, no images', () => {
   const layout = resolvePageLayout({ type: 'text-only', textSlice: '가나다' }, 1, imagePaths)
   assert.equal(layout.images.length, 0)

@@ -35,5 +35,16 @@
 
 \newcommand{\BodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont #1\par}
 
+% 제목(섹션 오프너) 전용 서체: PRD 4.5의 제목/구조용 산세리프인 Noto Sans KR을
+% 본문 세리프(IBM Plex Serif)와는 별도의 폰트 패밀리로 선언한다.
+\newfontfamily\HeadingENFace{{{HEADING_FONT_FILE_EN}}}[
+  Path = {{{FONTS_DIR}}/}, Extension = .{{HEADING_FONT_FILE_EXT}}, BoldFont = {{{HEADING_FONT_FILE_BOLD}}},
+]
+\newCJKfontfamily\HeadingKRFace{{{HEADING_FONT_FILE_KR}}}[
+  Path = {{{FONTS_DIR}}/}, Extension = .{{HEADING_FONT_FILE_EXT}}, BoldFont = {{{HEADING_FONT_FILE_KR_BOLD}}},
+]
+\newcommand{\HeadingFontSet}{\HeadingENFace\HeadingKRFace}
+\newcommand{\TitleText}[1]{{\HeadingFontSet\bfseries\fontsize{{{TITLE_FONT_SIZE}}pt}{{{TITLE_LEADING}}pt}\selectfont #1\par}}
+
 \pagestyle{empty}
 \endinput

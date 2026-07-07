@@ -15,7 +15,7 @@ const CANDIDATES = ['A', 'B', 'C']
 const CANDIDATE_MEANINGS = { A: 'image-first', B: 'balanced', C: 'text-first' }
 
 export async function runGeneration({
-  imagePaths, text, outputsRoot = OUTPUTS_DIR, fontsDir = FONTS_DIR, date, seq, llmOptions = {},
+  imagePaths, text, title, outputsRoot = OUTPUTS_DIR, fontsDir = FONTS_DIR, date, seq, llmOptions = {},
 }) {
   const analysis = analyzeInput({ imagePaths, text })
   const styleResult = await inferStyle(
@@ -40,6 +40,7 @@ export async function runGeneration({
         candidate,
         style: styleResult.style,
         fontsDir,
+        title,
       })
       const dir = writeCandidateSources(runDir, candidate, {
         mainTex: generated.mainTex,
@@ -72,6 +73,7 @@ export async function runGeneration({
     project: 'Imprint(Image+Text)',
     created_at: runId,
     input: {
+      title: typeof title === 'string' && title.trim() ? title.trim() : null,
       image_count: analysis.imageCount,
       image_names: imageNames,
       text_length: analysis.textLength,

@@ -9,6 +9,16 @@ import { computeGridBoxes } from './gridLayout.js'
 import { resolveImageIndices } from './patternLibrary.js'
 
 export function resolvePageLayout(pageSpec, imageCount, imagePaths) {
+  if (pageSpec.type === 'title-page') {
+    return {
+      type: 'title-page',
+      images: [],
+      textZone: { xMm: 0, yMm: 0, wMm: TEXT_BOX_WIDTH_MM, hMm: TEXT_BOX_HEIGHT_MM },
+      textSlice: null,
+      title: pageSpec.title,
+    }
+  }
+
   if (pageSpec.type === 'text-only') {
     return {
       type: 'text-only',

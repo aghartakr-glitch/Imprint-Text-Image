@@ -60,3 +60,47 @@ test('runGeneration produces 3 real, compiled candidates in mock style mode', as
   rmSync(srcDir, { recursive: true, force: true })
   rmSync(outputsRoot, { recursive: true, force: true })
 })
+
+test('a title adds one real compiled title-page (Noto Sans KR) ahead of the normal pages', async () => {
+  const srcDir = mkdtempSync(join(tmpdir(), 'imprint-it-src-'))
+  const outputsRoot = mkdtempSync(join(tmpdir(), 'imprint-it-outputs-'))
+  const imgPath = join(srcDir, 'photo.png')
+  writeFileSync(imgPath, Buffer.from(TINY_PNG_BASE64, 'base64'))
+
+  const withoutTitle = await runGeneration({
+    imagePaths: [imgPath],
+    text: '가나다',
+    outputsRoot,
+    fontsDir: FONTS_DIR,
+    date: new Date(2026, 6, 6, 12, 0),
+    seq: 1,
+    llmOptions: { mockMode: true },
+  })
+  const withTitle = await runGeneration({
+    imagePaths: [imgPath],
+    text: '가나다',
+    title: '어떤 여름',
+    outputsRoot,
+    fontsDir: FONTS_DIR,
+    date: new Date(2026, 6, 6, 12, 1),
+    seq: 1,
+    llmOptions: { mockMode: true },
+  })
+
+  for (const candidate of ['A', 'B', 'C']) {
+    const r = withTitle.candidateResults[candidate]
+    assert.equal(r.compile.ok, true, `candidate ${candidate} with title failed to compile: ${JSON.stringify(r.compile)}`)
+    const realPageCount = await getPdfPageCount(join(r.dir, 'pages.pdf'))
+    assert.equal(realPageCount, r.pageCount)
+    assert.equal(
+      r.pageCount,
+      withoutTitle.candidateResults[candidate].pageCount + 1,
+      `candidate ${candidate}: adding a title should add exactly one page`,
+    )
+  }
+  assert.equal(withTitle.log.input.title, '어떤 여름')
+  assert.equal(withoutTitle.log.input.title, null)
+
+  rmSync(srcDir, { recursive: true, force: true })
+  rmSync(outputsRoot, { recursive: true, force: true })
+})

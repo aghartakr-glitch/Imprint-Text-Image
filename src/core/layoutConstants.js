@@ -17,3 +17,8 @@ export const CHAR_WIDTH_MM = BODY_FONT_SIZE_PT * PT_TO_MM
 export const LINE_HEIGHT_MM = BODY_LEADING_PT * PT_TO_MM
 
 export const IMAGE_TEXT_GAP_MM = 6
+
+// Section-opener title page (used only when the user supplies a title).
+export const TITLE_FONT_SIZE_PT = 28
+export const TITLE_LEADING_PT = 34
+export const TITLE_VERTICAL_POSITION_RATIO = 0.4 // title baseline sits 40% down the text box, not dead-center

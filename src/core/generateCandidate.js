@@ -19,11 +19,22 @@ function applyStyleScale(pattern, style) {
   }
 }
 
-export function generateCandidate({ imageCount, imagePaths, text, candidate, style, fontsDir }) {
+export function generateCandidate({
+  imageCount, imagePaths, text, candidate, style, fontsDir, title,
+}) {
   const basePattern = getCandidatePattern(imageCount, candidate)
   const pattern = applyStyleScale(basePattern, style)
   const paginatedPages = paginateContent({ pattern, text, imageCount })
-  const resolvedPages = paginatedPages.map((page) => resolvePageLayout(page, imageCount, imagePaths))
+
+  // A title turns the candidate into a section opener: one pure-typography page (no
+  // image, per PRD's "no text over images" rule) prepended before the pattern's own
+  // pages, which keep using the same carefully-tuned image placement as always.
+  const hasTitle = typeof title === 'string' && title.trim().length > 0
+  const allPages = hasTitle
+    ? [{ type: 'title-page', title: title.trim() }, ...paginatedPages]
+    : paginatedPages
+
+  const resolvedPages = allPages.map((page) => resolvePageLayout(page, imageCount, imagePaths))
 
   return {
     patternId: basePattern.patternId,
