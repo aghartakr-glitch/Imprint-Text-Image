@@ -7,7 +7,7 @@
     "dev": "vite --port 5175",
     "server": "node --env-file-if-exists=.env.local server/index.mjs",
     "dev:all": "concurrently -n vite,server \"npm:dev\" \"npm:server\"",
-    "test": "node --test \"src/core/**/*.test.js\" \"server/**/*.test.js\""
+    "test": "node --experimental-test-module-mocks --test \"src/core/**/*.test.js\" \"server/**/*.test.js\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",

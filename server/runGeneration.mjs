@@ -7,6 +7,9 @@ import {
   createRunFolder, saveInputCopies, writeCandidateSources, writeGenerationLog,
 } from './saveOutputs.mjs'
 import { FONTS_DIR, OUTPUTS_DIR } from './env.mjs'
+import {
+  BODY_FONT_SIZE_PT, BODY_LEADING_PT, MARGIN_TOP_MM, MARGIN_BOTTOM_MM, MARGIN_INNER_MM, MARGIN_OUTER_MM,
+} from '../src/core/layoutConstants.js'
 
 const CANDIDATES = ['A', 'B', 'C']
 const CANDIDATE_MEANINGS = { A: 'image-first', B: 'balanced', C: 'text-first' }
@@ -29,25 +32,31 @@ export async function runGeneration({
 
   const candidateResults = {}
   for (const candidate of CANDIDATES) {
-    const generated = generateCandidate({
-      imageCount: analysis.imageCount,
-      imagePaths,
-      text,
-      candidate,
-      style: styleResult.style,
-      fontsDir,
-    })
-    const dir = writeCandidateSources(runDir, candidate, {
-      mainTex: generated.mainTex,
-      styleTex: generated.styleTex,
-      layout: { patternId: generated.patternId, pageCount: generated.pageCount, pages: generated.resolvedPages },
-    })
-    const compileResult = await compileMainTex(dir)
-    const spreadResult = compileResult.ok
-      ? await compileSpreadPreview(dir)
-      : { ok: false, reason: '개별 페이지 컴파일 실패로 스프레드 생략' }
-    candidateResults[candidate] = {
-      dir, patternId: generated.patternId, pageCount: generated.pageCount, compile: compileResult, spread: spreadResult,
+    try {
+      const generated = generateCandidate({
+        imageCount: analysis.imageCount,
+        imagePaths,
+        text,
+        candidate,
+        style: styleResult.style,
+        fontsDir,
+      })
+      const dir = writeCandidateSources(runDir, candidate, {
+        mainTex: generated.mainTex,
+        styleTex: generated.styleTex,
+        layout: { patternId: generated.patternId, pageCount: generated.pageCount, pages: generated.resolvedPages },
+      })
+      const compileResult = await compileMainTex(dir)
+      const spreadResult = compileResult.ok
+        ? await compileSpreadPreview(dir)
+        : { ok: false, reason: '개별 페이지 컴파일 실패로 스프레드 생략' }
+      candidateResults[candidate] = {
+        dir, patternId: generated.patternId, pageCount: generated.pageCount, compile: compileResult, spread: spreadResult,
+      }
+    } catch (e) {
+      candidateResults[candidate] = {
+        error: e && e.message ? e.message : String(e),
+      }
     }
   }
 
@@ -72,21 +81,31 @@ export async function runGeneration({
       style_inference_reason: styleResult.reason ?? styleResult.fallbackReason ?? null,
       body_font: 'IBM Plex Serif (Noto Serif KR 정적 폰트 부재로 대체)',
       heading_font: 'Noto Sans KR',
-      body_font_size_pt: 9,
-      body_leading_pt: 14,
-      margins_mm: { top: 16, bottom: 18, inner: 18, outer: 14 },
+      body_font_size_pt: BODY_FONT_SIZE_PT,
+      body_leading_pt: BODY_LEADING_PT,
+      margins_mm: {
+        top: MARGIN_TOP_MM, bottom: MARGIN_BOTTOM_MM, inner: MARGIN_INNER_MM, outer: MARGIN_OUTER_MM,
+      },
     },
     overflow_policy: { auto_shrink: false, move_to_next_page: true, move_to_next_spread: true },
-    outputs: Object.fromEntries(CANDIDATES.map((c) => [
-      `candidate_${c.toLowerCase()}`,
-      {
-        folder: `${candidateResults[c].dir.split(/[\\/]/).pop()}/`,
-        pattern_id: candidateResults[c].patternId,
-        page_count: candidateResults[c].pageCount,
-        compile_ok: candidateResults[c].compile.ok,
-        spread_ok: candidateResults[c].spread.ok,
-      },
-    ])),
+    outputs: Object.fromEntries(CANDIDATES.map((c) => {
+      const result = candidateResults[c]
+      if (result.error) {
+        return [`candidate_${c.toLowerCase()}`, { error: result.error }]
+      }
+      return [
+        `candidate_${c.toLowerCase()}`,
+        {
+          folder: `${result.dir.split(/[\\/]/).pop()}/`,
+          pattern_id: result.patternId,
+          page_count: result.pageCount,
+          compile_ok: result.compile.ok,
+          compile_reason: result.compile.reason ?? null,
+          spread_ok: result.spread.ok,
+          spread_reason: result.spread.reason ?? null,
+        },
+      ]
+    })),
   }
   writeGenerationLog(runDir, log)
 
