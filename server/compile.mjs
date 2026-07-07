@@ -15,10 +15,14 @@ export async function hasXelatex() {
   }
 }
 
-function cleanupAuxFiles(dir, basename) {
+export function cleanupAuxFiles(dir, basename) {
   for (const ext of ['aux', 'log', 'synctex.gz', 'out']) {
     const p = join(dir, `${basename}.${ext}`)
-    if (existsSync(p)) unlinkSync(p)
+    try {
+      if (existsSync(p)) unlinkSync(p)
+    } catch {
+      // best-effort cleanup; a locked/missing aux file must not mask a successful compile
+    }
   }
 }
 
@@ -29,7 +33,7 @@ export async function compileMainTex(candidateDir) {
     return { ok: false, reason: 'xelatex 미설치', hint: 'TeX(XeLaTeX)를 설치하면 PDF가 생성됩니다.' }
   }
   try {
-    const { stdout } = await run(
+    const { stdout, stderr } = await run(
       'xelatex -interaction=nonstopmode -halt-on-error "main.tex"',
       { cwd: candidateDir, timeout: 120000 },
     )
@@ -40,9 +44,13 @@ export async function compileMainTex(candidateDir) {
     const pagesPdf = join(candidateDir, 'pages.pdf')
     renameSync(producedPdf, pagesPdf)
     cleanupAuxFiles(candidateDir, 'main')
-    return { ok: true, pdf: pagesPdf, log: stdout.slice(-800) }
+    return { ok: true, pdf: pagesPdf, log: stdout.slice(-800) + (stderr ? `\n[stderr]\n${stderr.slice(-500)}` : '') }
   } catch (e) {
-    return { ok: false, reason: '컴파일 오류', log: String(e.stdout || e.message).slice(-1500) }
+    if (e.killed && e.signal === 'SIGTERM') {
+      return { ok: false, reason: '컴파일 시간 초과(120초)', log: String(e.stdout || '').slice(-1500) }
+    }
+    const combinedLog = `${e.stdout || ''}\n${e.stderr || ''}`.trim() || e.message
+    return { ok: false, reason: '컴파일 오류', log: String(combinedLog).slice(-1500) }
   }
 }
 
@@ -62,7 +70,7 @@ export async function compileSpreadPreview(candidateDir) {
   writeFileSync(join(candidateDir, `${wrapperBasename}.tex`), wrapperTex, 'utf-8')
 
   try {
-    const { stdout } = await run(
+    const { stdout, stderr } = await run(
       `xelatex -interaction=nonstopmode -halt-on-error "${wrapperBasename}.tex"`,
       { cwd: candidateDir, timeout: 120000 },
     )
@@ -72,12 +80,20 @@ export async function compileSpreadPreview(candidateDir) {
     }
     const spreadPdf = join(candidateDir, 'spread-preview.pdf')
     renameSync(producedPdf, spreadPdf)
-    return { ok: true, pdf: spreadPdf }
+    return { ok: true, pdf: spreadPdf, log: stdout.slice(-800) + (stderr ? `\n[stderr]\n${stderr.slice(-500)}` : '') }
   } catch (e) {
-    return { ok: false, reason: '스프레드 컴파일 오류', log: String(e.stdout || e.message).slice(-1500) }
+    if (e.killed && e.signal === 'SIGTERM') {
+      return { ok: false, reason: '스프레드 컴파일 시간 초과(120초)', log: String(e.stdout || '').slice(-1500) }
+    }
+    const combinedLog = `${e.stdout || ''}\n${e.stderr || ''}`.trim() || e.message
+    return { ok: false, reason: '스프레드 컴파일 오류', log: String(combinedLog).slice(-1500) }
   } finally {
-    cleanupAuxFiles(candidateDir, wrapperBasename)
-    const wrapperTexPath = join(candidateDir, `${wrapperBasename}.tex`)
-    if (existsSync(wrapperTexPath)) unlinkSync(wrapperTexPath)
+    try {
+      cleanupAuxFiles(candidateDir, wrapperBasename)
+      const wrapperTexPath = join(candidateDir, `${wrapperBasename}.tex`)
+      if (existsSync(wrapperTexPath)) unlinkSync(wrapperTexPath)
+    } catch {
+      // best-effort cleanup; never let this mask the try block's result
+    }
   }
 }
