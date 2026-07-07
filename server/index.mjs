@@ -20,12 +20,25 @@ function sendJson(res, status, body) {
 
 function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
   mkdirSync(uploadsDir, { recursive: true })
-  const bb = Busboy({ headers: req.headers, limits: { files: 6, fileSize: 30 * 1024 * 1024 } })
+  // limits.files is set to 7 (one above the intended cap of 6), not 6: busboy silently stops
+  // emitting 'file' events once the limit is reached (no error, no event), which would make our
+  // own `fileCount > 6` rejection below dead code. Raising the busboy limit by 1 lets a 7th file
+  // actually reach the 'file' handler so the manual check can see it and reject it.
+  const bb = Busboy({ headers: req.headers, limits: { files: 7, fileSize: 30 * 1024 * 1024 } })
   const imagePaths = []
   const writePromises = []
   let text = ''
   let fileCount = 0
   let rejected = null
+  // busboy can fire 'error' and then still fire 'close' (behavior varies by version/error type),
+  // so guard against sending a second response by only letting the first respond() call through.
+  let responded = false
+
+  function respond(status, body) {
+    if (responded) return
+    responded = true
+    sendJson(res, status, body)
+  }
 
   bb.on('field', (name, value) => {
     if (name === 'text') text = value
@@ -47,23 +60,38 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
       writeStream.on('error', reject)
       stream.on('error', reject)
     }))
+    // busboy truncates the stream (rather than erroring) once fileSize is hit and emits 'limit'
+    // on the per-file stream. Without this, an oversized upload silently saves a truncated file
+    // and returns 200 ok:true.
+    stream.on('limit', () => {
+      rejected = '이미지 파일이 너무 큽니다(최대 30MB)'
+    })
     stream.pipe(writeStream)
   })
 
+  // A malformed multipart body (bad boundary, truncated body, etc.) makes busboy emit 'error'.
+  // Without this listener, that error is unhandled and crashes the whole Node process, taking
+  // down every other concurrent request with it.
+  bb.on('error', (err) => {
+    respond(400, { ok: false, error: '잘못된 요청 본문입니다: ' + String(err.message || err) })
+    req.unpipe(bb)
+    req.resume()
+  })
+
   bb.on('close', async () => {
-    if (rejected) return sendJson(res, 400, { ok: false, error: rejected })
+    if (rejected) return respond(400, { ok: false, error: rejected })
     try {
       await Promise.all(writePromises)
     } catch (err) {
-      return sendJson(res, 500, { ok: false, error: String(err.message || err) })
+      return respond(500, { ok: false, error: String(err.message || err) })
     }
-    if (imagePaths.length < 1) return sendJson(res, 400, { ok: false, error: '이미지를 1장 이상 업로드해야 합니다' })
-    if (!text.trim()) return sendJson(res, 400, { ok: false, error: '본문 텍스트를 입력해야 합니다' })
+    if (imagePaths.length < 1) return respond(400, { ok: false, error: '이미지를 1장 이상 업로드해야 합니다' })
+    if (!text.trim()) return respond(400, { ok: false, error: '본문 텍스트를 입력해야 합니다' })
     try {
       const result = await runGeneration({
         imagePaths, text, outputsRoot: outputsDir, llmOptions: { mockMode },
       })
-      sendJson(res, 200, {
+      respond(200, {
         ok: true,
         runId: result.runId,
         style: result.styleResult.style,
@@ -81,7 +109,7 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
         })),
       })
     } catch (err) {
-      sendJson(res, 500, { ok: false, error: String(err.message || err) })
+      respond(500, { ok: false, error: String(err.message || err) })
     }
   })
 
@@ -110,10 +138,10 @@ export function createApp({ uploadsDir = DEFAULT_UPLOADS_DIR, outputsDir = OUTPU
     // Any other request (including a would-be "/outputs/../../etc/passwd" traversal —
     // browsers/fetch normalize dot-segments client-side, so by the time it arrives here
     // it no longer even has the /outputs/ prefix) doesn't match this server's known
-    // surface (POST /api/generate, GET /outputs/*). Treat it as a bad request rather than
-    // a generic 404, since a request that can't even address a route is malformed, not
-    // merely "not found".
-    sendJson(res, 400, { ok: false, error: 'Bad request' })
+    // surface (POST /api/generate, GET /outputs/*). This is a genuinely unmatched route
+    // (e.g. a stray /favicon.ico request), so respond with a normal 404 rather than 400 —
+    // 400 should mean "malformed request", not "route doesn't exist".
+    sendJson(res, 404, { ok: false, error: 'Not found' })
   })
 }
 
