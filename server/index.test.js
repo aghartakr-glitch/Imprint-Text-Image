@@ -129,6 +129,49 @@ test('malformed multipart body returns an error response instead of crashing the
   rmSync(uploadsDir, { recursive: true, force: true })
 })
 
+// Regression test for the synchronous-Busboy-constructor-throw DoS: a multipart Content-Type
+// header with no boundary= parameter makes `Busboy({ headers })` throw synchronously, before any
+// event listener can even be attached. Without a try/catch around that construction, this is an
+// uncaught exception that crashes the whole Node process on a single request. Built with a raw
+// http.request (not fetch+FormData, which always produces a well-formed boundary) so the header
+// busboy receives genuinely lacks a boundary.
+test('multipart Content-Type with no boundary= returns an error response instead of crashing the server', async () => {
+  const outputsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-outputs-'))
+  const uploadsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-uploads-'))
+  const app = createApp({ outputsDir, uploadsDir })
+  const port = await startServer(app)
+
+  const body = 'irrelevant, the constructor throws before any body parsing happens'
+
+  const noBoundaryStatus = await new Promise((resolve, reject) => {
+    const req = request({
+      hostname: 'localhost',
+      port,
+      path: '/api/generate',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, (res) => {
+      res.resume()
+      res.on('end', () => resolve(res.statusCode))
+    })
+    req.on('error', reject)
+    req.end(body)
+  })
+
+  assert.ok(noBoundaryStatus >= 400 && noBoundaryStatus < 500, `expected a 4xx response, got ${noBoundaryStatus}`)
+
+  // Prove the server process/instance is still alive and serving requests after the bad header.
+  const followUp = await fetch(`http://localhost:${port}/outputs/does-not-exist.pdf`)
+  assert.equal(followUp.status, 404)
+
+  app.close()
+  rmSync(outputsDir, { recursive: true, force: true })
+  rmSync(uploadsDir, { recursive: true, force: true })
+})
+
 test('POST /api/generate rejects a 7th image over the 6-file limit', async () => {
   const outputsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-outputs-'))
   const uploadsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-uploads-'))

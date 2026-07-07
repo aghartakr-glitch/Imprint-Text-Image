@@ -24,7 +24,16 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
   // emitting 'file' events once the limit is reached (no error, no event), which would make our
   // own `fileCount > 6` rejection below dead code. Raising the busboy limit by 1 lets a 7th file
   // actually reach the 'file' handler so the manual check can see it and reject it.
-  const bb = Busboy({ headers: req.headers, limits: { files: 7, fileSize: 30 * 1024 * 1024 } })
+  let bb
+  try {
+    // Busboy's constructor throws *synchronously* (before any listener can be attached) for
+    // things like a Content-Type of "multipart/form-data" with no boundary= parameter, or a
+    // missing/malformed Content-Type entirely. Without this try/catch, that throw is an uncaught
+    // exception that crashes the whole Node process on a single bad request.
+    bb = Busboy({ headers: req.headers, limits: { files: 7, fileSize: 30 * 1024 * 1024 } })
+  } catch (err) {
+    return sendJson(res, 400, { ok: false, error: `잘못된 업로드 요청입니다: ${String(err.message || err)}` })
+  }
   const imagePaths = []
   const writePromises = []
   let text = ''
