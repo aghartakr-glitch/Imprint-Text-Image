@@ -1,0 +1,127 @@
+// server/index.mjs
+import { createServer } from 'node:http'
+import {
+  createReadStream, createWriteStream, existsSync, mkdirSync, statSync,
+} from 'node:fs'
+import { join, extname } from 'node:path'
+import Busboy from 'busboy'
+import { runGeneration } from './runGeneration.mjs'
+import { ROOT, OUTPUTS_DIR } from './env.mjs'
+
+const DEFAULT_UPLOADS_DIR = join(ROOT, 'uploads')
+const MIME_TYPES = {
+  '.pdf': 'application/pdf', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+}
+
+function sendJson(res, status, body) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
+  res.end(JSON.stringify(body))
+}
+
+function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
+  mkdirSync(uploadsDir, { recursive: true })
+  const bb = Busboy({ headers: req.headers, limits: { files: 6, fileSize: 30 * 1024 * 1024 } })
+  const imagePaths = []
+  const writePromises = []
+  let text = ''
+  let fileCount = 0
+  let rejected = null
+
+  bb.on('field', (name, value) => {
+    if (name === 'text') text = value
+  })
+
+  bb.on('file', (name, stream, info) => {
+    fileCount += 1
+    if (fileCount > 6) {
+      rejected = '이미지는 최대 6장까지 업로드할 수 있습니다'
+      stream.resume()
+      return
+    }
+    const safeName = `${Date.now()}_${fileCount}_${info.filename.replace(/[^\w.\-가-힣]/g, '_')}`
+    const dest = join(uploadsDir, safeName)
+    imagePaths.push(dest)
+    const writeStream = createWriteStream(dest)
+    writePromises.push(new Promise((resolve, reject) => {
+      writeStream.on('finish', resolve)
+      writeStream.on('error', reject)
+      stream.on('error', reject)
+    }))
+    stream.pipe(writeStream)
+  })
+
+  bb.on('close', async () => {
+    if (rejected) return sendJson(res, 400, { ok: false, error: rejected })
+    try {
+      await Promise.all(writePromises)
+    } catch (err) {
+      return sendJson(res, 500, { ok: false, error: String(err.message || err) })
+    }
+    if (imagePaths.length < 1) return sendJson(res, 400, { ok: false, error: '이미지를 1장 이상 업로드해야 합니다' })
+    if (!text.trim()) return sendJson(res, 400, { ok: false, error: '본문 텍스트를 입력해야 합니다' })
+    try {
+      const result = await runGeneration({
+        imagePaths, text, outputsRoot: outputsDir, llmOptions: { mockMode },
+      })
+      sendJson(res, 200, {
+        ok: true,
+        runId: result.runId,
+        style: result.styleResult.style,
+        candidates: Object.fromEntries(Object.entries(result.candidateResults).map(([key, value]) => {
+          if (value.error) {
+            return [key, { ok: false, error: value.error }]
+          }
+          return [key, {
+            ok: true,
+            pagesPdf: `/outputs/${result.runId}/${value.dir.split(/[\\/]/).pop()}/pages.pdf`,
+            spreadPdf: `/outputs/${result.runId}/${value.dir.split(/[\\/]/).pop()}/spread-preview.pdf`,
+            compileOk: value.compile.ok,
+            spreadOk: value.spread.ok,
+          }]
+        })),
+      })
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: String(err.message || err) })
+    }
+  })
+
+  req.pipe(bb)
+}
+
+function serveStatic(req, res, urlPath, outputsDir) {
+  const relative = decodeURIComponent(urlPath.replace(/^\/outputs\//, '').split('?')[0])
+  if (relative.includes('..')) return sendJson(res, 400, { ok: false, error: '잘못된 경로' })
+  const filePath = join(outputsDir, relative)
+  if (!existsSync(filePath) || !statSync(filePath).isFile()) return sendJson(res, 404, { ok: false, error: '파일 없음' })
+  const ext = extname(filePath)
+  res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' })
+  createReadStream(filePath).pipe(res)
+}
+
+export function createApp({ uploadsDir = DEFAULT_UPLOADS_DIR, outputsDir = OUTPUTS_DIR } = {}) {
+  return createServer((req, res) => {
+    if (req.method === 'POST' && req.url.startsWith('/api/generate')) {
+      const mockMode = req.url.includes('mock=1') || process.env.MOCK_MODE === 'true'
+      return handleGenerate(req, res, { uploadsDir, outputsDir, mockMode })
+    }
+    if (req.method === 'GET' && req.url.startsWith('/outputs/')) {
+      return serveStatic(req, res, req.url, outputsDir)
+    }
+    // Any other request (including a would-be "/outputs/../../etc/passwd" traversal —
+    // browsers/fetch normalize dot-segments client-side, so by the time it arrives here
+    // it no longer even has the /outputs/ prefix) doesn't match this server's known
+    // surface (POST /api/generate, GET /outputs/*). Treat it as a bad request rather than
+    // a generic 404, since a request that can't even address a route is malformed, not
+    // merely "not found".
+    sendJson(res, 400, { ok: false, error: 'Bad request' })
+  })
+}
+
+const isMain = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}`
+if (isMain) {
+  const app = createApp()
+  const port = process.env.PORT ? Number(process.env.PORT) : 8788
+  app.listen(port, () => {
+    console.log(`Imprint(Image+Text) server listening on http://localhost:${port}`)
+  })
+}
