@@ -64,20 +64,11 @@ export function saveInputCopies(runDir, { imagePaths, text }) {
   return { imageNames }
 }
 
-const CANDIDATE_FOLDER_NAMES = {
-  A: 'candidate-a_image-first',
-  B: 'candidate-b_balanced',
-  C: 'candidate-c_text-first',
-}
+export const BEST_LAYOUT_FOLDER_NAME = 'best-layout'
 
-export function candidateFolderName(candidate) {
-  const name = CANDIDATE_FOLDER_NAMES[candidate]
-  if (!name) throw new Error(`알 수 없는 후보: ${candidate}`)
-  return name
-}
-
-export function writeCandidateSources(runDir, candidate, { mainTex, styleTex, layout }) {
-  const dir = join(runDir, candidateFolderName(candidate))
+// Single-result output (no candidate-a/b/c split): everything lives in one best-layout/ folder.
+export function writeBestLayoutSources(runDir, { mainTex, styleTex, layout }) {
+  const dir = join(runDir, BEST_LAYOUT_FOLDER_NAME)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'main.tex'), mainTex, 'utf-8')
   writeFileSync(join(dir, 'page_style.sty'), styleTex, 'utf-8')

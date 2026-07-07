@@ -15,7 +15,7 @@ function startServer(app) {
   })
 }
 
-test('POST /api/generate accepts multipart images+text, returns 3 candidate PDF URLs (mock style mode)', async () => {
+test('POST /api/generate accepts multipart images+text, returns ONE best-layout PDF pair (mock style mode)', async () => {
   const outputsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-outputs-'))
   const uploadsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-uploads-'))
   const app = createApp({ outputsDir, uploadsDir })
@@ -30,8 +30,11 @@ test('POST /api/generate accepts multipart images+text, returns 3 candidate PDF 
 
   assert.equal(response.status, 200)
   assert.equal(body.ok, true)
-  assert.ok(body.candidates.A.pagesPdf.startsWith('/outputs/'))
-  assert.ok(body.candidates.B.spreadPdf.endsWith('spread-preview.pdf'))
+  assert.ok(['image-first', 'balanced', 'text-first'].includes(body.layoutType))
+  assert.ok(body.pagesPdf.startsWith('/outputs/'))
+  assert.ok(body.spreadPdf.endsWith('spread-preview.pdf'))
+  assert.equal(body.compileOk, true)
+  assert.equal(body.spreadOk, true)
 
   app.close()
   rmSync(outputsDir, { recursive: true, force: true })

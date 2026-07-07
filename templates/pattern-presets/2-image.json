@@ -5,6 +5,7 @@
   "candidates": {
     "A": {
       "patternId": "a-2img-full-bleed-pair",
+      "layoutType": "image-first",
       "pages": [
         { "type": "full-bleed-image", "imageIndices": [0] },
         { "type": "full-bleed-image", "imageIndices": [1] },
@@ -13,6 +14,7 @@
     },
     "B": {
       "patternId": "b-2img-top-text-bottom-pair",
+      "layoutType": "balanced",
       "pages": [
         { "type": "image-top-text-bottom", "imageIndices": [0], "imageHeightMm": 90 },
         { "type": "image-top-text-bottom", "imageIndices": [1], "imageHeightMm": 90 }
@@ -20,6 +22,7 @@
     },
     "C": {
       "patternId": "c-2img-text-first",
+      "layoutType": "text-first",
       "pages": [
         { "type": "text-only" },
         { "type": "image-top-text-bottom", "imageIndices": [0], "imageHeightMm": 55 },

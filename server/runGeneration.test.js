@@ -21,7 +21,7 @@ async function getPdfPageCount(pdfPath) {
 // A real, fully valid 1x1 PNG (not just a header) so XeLaTeX's \includegraphics can embed it.
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
-test('runGeneration produces 3 real, compiled candidates in mock style mode', async () => {
+test('runGeneration produces exactly ONE real, compiled best-layout result (no A/B/C) in mock mode', async () => {
   const srcDir = mkdtempSync(join(tmpdir(), 'imprint-it-src-'))
   const outputsRoot = mkdtempSync(join(tmpdir(), 'imprint-it-outputs-'))
   const imgPath = join(srcDir, 'photo.png')
@@ -37,25 +37,29 @@ test('runGeneration produces 3 real, compiled candidates in mock style mode', as
     llmOptions: { mockMode: true },
   })
 
-  assert.equal(result.styleResult.source, 'rule-based')
-  for (const candidate of ['A', 'B', 'C']) {
-    const r = result.candidateResults[candidate]
-    assert.equal(r.compile.ok, true, `candidate ${candidate} compile failed: ${JSON.stringify(r.compile)}`)
-    assert.equal(r.spread.ok, true, `candidate ${candidate} spread failed: ${JSON.stringify(r.spread)}`)
-    assert.ok(existsSync(join(r.dir, 'pages.pdf')))
-    assert.ok(existsSync(join(r.dir, 'spread-preview.pdf')))
-    assert.ok(existsSync(join(r.dir, 'main.tex')))
-    assert.ok(existsSync(join(r.dir, 'layout.json')))
+  assert.equal(result.selection.source, 'rule-based')
+  assert.ok(['image-first', 'balanced', 'text-first'].includes(result.selection.layoutType))
+  assert.equal(result.compile.ok, true, `compile failed: ${JSON.stringify(result.compile)}`)
+  assert.equal(result.spread.ok, true, `spread failed: ${JSON.stringify(result.spread)}`)
+  assert.ok(existsSync(join(result.dir, 'pages.pdf')))
+  assert.ok(existsSync(join(result.dir, 'spread-preview.pdf')))
+  assert.ok(existsSync(join(result.dir, 'main.tex')))
+  assert.ok(existsSync(join(result.dir, 'layout.json')))
+  assert.ok(result.dir.endsWith('best-layout') || result.dir.includes('best-layout'))
 
-    // Regression guard: overlay textblocks (textpos [absolute,overlay]) contribute nothing to the
-    // main vertical list, so \newpage alone can silently collapse multiple logical pages into one
-    // physical PDF page. Verify the *real* compiled PDF has the expected physical page count.
-    const realPageCount = await getPdfPageCount(join(r.dir, 'pages.pdf'))
-    assert.equal(realPageCount, r.pageCount, `candidate ${candidate}: expected ${r.pageCount} physical pages, got ${realPageCount}`)
-    assert.ok(r.pageCount > 1, `candidate ${candidate}: test fixture should exercise a multi-page candidate (got pageCount=${r.pageCount})`)
-  }
+  // Regression guard: overlay textblocks (textpos [absolute,overlay]) contribute nothing to the
+  // main vertical list, so \newpage alone can silently collapse multiple logical pages into one
+  // physical PDF page. Verify the *real* compiled PDF has the expected physical page count.
+  const realPageCount = await getPdfPageCount(join(result.dir, 'pages.pdf'))
+  assert.equal(realPageCount, result.pageCount)
+  assert.ok(result.pageCount > 1, `test fixture should exercise a multi-page layout (got pageCount=${result.pageCount})`)
+
   assert.ok(existsSync(join(result.runDir, 'generation-log.json')))
   assert.ok(existsSync(join(result.runDir, 'input', 'input-text.txt')))
+  assert.equal(result.log.layout_settings.selection_mode, 'best_only')
+  assert.equal(result.log.layout_settings.selected_pattern_id, result.patternId)
+  assert.equal(result.log.outputs.best_layout, 'best-layout/')
+  assert.equal(result.log.validation.passed, true)
 
   rmSync(srcDir, { recursive: true, force: true })
   rmSync(outputsRoot, { recursive: true, force: true })
@@ -87,17 +91,11 @@ test('a title adds one real compiled title-page (Noto Sans KR) ahead of the norm
     llmOptions: { mockMode: true },
   })
 
-  for (const candidate of ['A', 'B', 'C']) {
-    const r = withTitle.candidateResults[candidate]
-    assert.equal(r.compile.ok, true, `candidate ${candidate} with title failed to compile: ${JSON.stringify(r.compile)}`)
-    const realPageCount = await getPdfPageCount(join(r.dir, 'pages.pdf'))
-    assert.equal(realPageCount, r.pageCount)
-    assert.equal(
-      r.pageCount,
-      withoutTitle.candidateResults[candidate].pageCount + 1,
-      `candidate ${candidate}: adding a title should add exactly one page`,
-    )
-  }
+  assert.equal(withTitle.compile.ok, true, `compile with title failed: ${JSON.stringify(withTitle.compile)}`)
+  const realPageCount = await getPdfPageCount(join(withTitle.dir, 'pages.pdf'))
+  assert.equal(realPageCount, withTitle.pageCount)
+  assert.equal(withTitle.pageCount, withoutTitle.pageCount + 1, 'adding a title should add exactly one page')
+
   assert.equal(withTitle.log.input.title, '어떤 여름')
   assert.equal(withoutTitle.log.input.title, null)
 

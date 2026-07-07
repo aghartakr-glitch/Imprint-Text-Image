@@ -1,4 +1,4 @@
-import { getCandidatePattern } from './patternLibrary.js'
+import { getPatternById } from './patternLibrary.js'
 import { paginateContent } from './paginate.js'
 import { resolvePageLayout } from './resolvePageLayout.js'
 import { buildMainTex, buildStyleTex } from './buildLatex.js'
@@ -19,16 +19,16 @@ function applyStyleScale(pattern, style) {
   }
 }
 
-export function generateCandidate({
-  imageCount, imagePaths, text, candidate, style, fontsDir, title,
+// Builds the single, chosen-by-selectLayout best layout (no A/B/C candidates): a pattern is
+// picked by `patternId` (already validated against the available options), style only scales
+// image sizes up/down, and an optional title becomes its own pure-typography opener page.
+export function generateBestLayout({
+  imageCount, imagePaths, text, patternId, style, fontsDir, title,
 }) {
-  const basePattern = getCandidatePattern(imageCount, candidate)
+  const basePattern = getPatternById(imageCount, patternId)
   const pattern = applyStyleScale(basePattern, style)
   const paginatedPages = paginateContent({ pattern, text, imageCount })
 
-  // A title turns the candidate into a section opener: one pure-typography page (no
-  // image, per PRD's "no text over images" rule) prepended before the pattern's own
-  // pages, which keep using the same carefully-tuned image placement as always.
   const hasTitle = typeof title === 'string' && title.trim().length > 0
   const allPages = hasTitle
     ? [{ type: 'title-page', title: title.trim() }, ...paginatedPages]
@@ -38,6 +38,7 @@ export function generateCandidate({
 
   return {
     patternId: basePattern.patternId,
+    layoutType: basePattern.layoutType,
     pageCount: resolvedPages.length,
     resolvedPages,
     mainTex: buildMainTex({ resolvedPages }),

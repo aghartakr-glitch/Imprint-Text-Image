@@ -1,5 +1,31 @@
 # Imprint(Image+Text)
 
+## 0. 개정 사항 (2026-07-07) — Candidate A/B/C 폐지, 최적 레이아웃 1개로 변경
+
+아래 원본 PRD(1~12장)는 초기 버전이며, 실제 구현은 이후 사용자 지시로 다음과 같이 개정되었다.
+**이 0장이 최신 사양이고, 본문 중 "Candidate A/B/C" 관련 내용은 모두 이 개정 사항으로 대체된다.**
+
+- **세 가지 후보(Candidate A/B/C) 동시 생성 금지.** 입력(이미지 개수·비율, 본문 길이, 제목 유무)을 분석해
+  **가장 적합한 레이아웃 1개만** 생성한다. 출력 폴더도 `candidate-a_image-first/` 등 3개가 아니라
+  `best-layout/` 1개다.
+- **LLM의 역할이 실질적 판단으로 바뀜.** 기존에는 LLM이 "스타일" 이름만 고르고 실제 페이지 구성(패턴)은
+  이미지 개수로만 고정 조회했다. 개정 후에는 LLM(또는 API 키 없을 때 규칙 기반 폴백)이 다음 3가지를
+  실제로 판단한다: ① 스타일(Editorial/Magazine/Exhibition Catalog), ② 레이아웃 성격
+  (image-first/balanced/text-first), ③ 미리 정의된 패턴 라이브러리에서 pattern_id 하나. 실제 mm 좌표
+  계산·페이지네이션·PDF 생성은 그 결정을 받아 코드가 결정론적으로 처리한다(LLM이 좌표를 직접 만들지 않음).
+- **제목은 별도 지면에 고정되지 않는다.** (이 부분은 별도 논의로 이미 반영됨: 제목이 있으면 이미지 없는
+  섹션 오프너 페이지가 본문 앞에 추가되고, 없으면 기존과 동일.)
+- **LLM 응답 검증 실패 시 규칙 기반 폴백**으로 전환한다(JSON 파싱, 허용된 style/layout_type 값, pattern_id가
+  available_patterns 안에 실재하는지, 그 pattern_id의 layoutType과 응답의 layout_type이 일치하는지 등을 검증).
+- **`generation-log.json` 스키마 변경**: 후보별 정보 대신 `selection_mode: "best_only"`,
+  `selected_layout_type`, `selected_style`, `selected_pattern_id`, `selection_reason`,
+  `input.image_ratios`, `input.text_density`, `validation.passed/issues` 등을 기록한다.
+- 실제 구현 위치: `src/core/selectLayout.js`(LLM 판단 + 검증), `src/core/layoutTypeRules.js`(규칙 기반
+  폴백), `src/core/textDensity.js`(short/medium/long 판정), `src/core/generateBestLayout.js`(선택된
+  패턴 1개로 실제 레이아웃 생성), `server/runGeneration.mjs`(전체 흐름).
+
+---
+
 ## 1. 프로젝트 개요
 
 ### 1.1 프로젝트명

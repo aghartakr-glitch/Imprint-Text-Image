@@ -6,7 +6,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  createRunFolder, saveInputCopies, candidateFolderName, writeCandidateSources, writeGenerationLog,
+  createRunFolder, saveInputCopies, writeBestLayoutSources, writeGenerationLog,
 } from './saveOutputs.mjs'
 
 test('createRunFolder makes a timestamped run dir with input/images inside it', () => {
@@ -76,24 +76,17 @@ test('saveInputCopies disambiguates duplicate basenames instead of overwriting',
   rmSync(srcDir, { recursive: true, force: true })
 })
 
-test('candidateFolderName maps A/B/C to PRD folder names and rejects anything else', () => {
-  assert.equal(candidateFolderName('A'), 'candidate-a_image-first')
-  assert.equal(candidateFolderName('B'), 'candidate-b_balanced')
-  assert.equal(candidateFolderName('C'), 'candidate-c_text-first')
-  assert.throws(() => candidateFolderName('D'), /알 수 없는 후보/)
-})
-
-test('writeCandidateSources writes main.tex, page_style.sty, layout.json', () => {
+test('writeBestLayoutSources writes main.tex, page_style.sty, layout.json into best-layout/', () => {
   const outputsRoot = mkdtempSync(join(tmpdir(), 'imprint-it-outputs-'))
   const { runDir } = createRunFolder(outputsRoot, { date: new Date(2026, 6, 6, 10, 30), seq: 1 })
 
-  const dir = writeCandidateSources(runDir, 'A', {
+  const dir = writeBestLayoutSources(runDir, {
     mainTex: '\\documentclass{article}',
     styleTex: '\\ProvidesPackage{page_style}',
     layout: { patternId: 'a-1img-full-bleed', pageCount: 2 },
   })
 
-  assert.equal(dir, join(runDir, 'candidate-a_image-first'))
+  assert.equal(dir, join(runDir, 'best-layout'))
   assert.equal(readFileSync(join(dir, 'main.tex'), 'utf-8'), '\\documentclass{article}')
   assert.match(readFileSync(join(dir, 'page_style.sty'), 'utf-8'), /ProvidesPackage/)
   assert.deepEqual(JSON.parse(readFileSync(join(dir, 'layout.json'), 'utf-8')), { patternId: 'a-1img-full-bleed', pageCount: 2 })

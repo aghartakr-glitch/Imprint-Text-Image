@@ -1,21 +1,27 @@
 # Imprint(Image+Text)
 
-이미지 1~6장 + 본문 텍스트를 A5 편집디자인형 스프레드 3종(이미지 중심/균형/텍스트 중심)으로 만드는 독립 시스템.
+이미지 1~6장 + 본문 텍스트를 넣으면, 입력 조건(이미지 개수·비율, 본문 길이, 제목 유무)을 분석해
+**가장 적합한 편집디자인 A5 레이아웃 1개**를 만드는 독립 시스템. 이전에는 Candidate A/B/C 세 가지를
+동시에 만들었지만, 지금은 LLM(또는 API 키가 없을 때 규칙 기반 폴백)이 스타일·레이아웃 성격
+(image-first/balanced/text-first)·패턴 하나를 직접 판단해서 결과 1개만 낸다. 자세한 배경은
+`PRD.md` 0장 참고.
 `Imprint`(본문 텍스트 전용), `Imprint(Cover)`(표지)의 자매 시스템이며, 두 프로젝트의 코드는 이 저장소에서 읽기 전용으로만 참고했다.
 
 ## 실행 방법
 
 ```bash
 npm install
-cp .env.example .env.local   # ANTHROPIC_API_KEY를 넣으면 LLM 기반 스타일 추정, 없으면 규칙 기반 폴백
+cp .env.example .env.local   # ANTHROPIC_API_KEY를 넣으면 LLM이 실제로 레이아웃을 판단, 없으면 규칙 기반 폴백
 npm run dev:all              # Vite(5175) + 백엔드(8788) 동시 실행
 ```
 
-브라우저에서 http://localhost:5175 접속 후 이미지 1~6장과 본문 텍스트를 넣고 Generate를 누르면
-`outputs/<타임스탬프>/`에 후보 A/B/C별 `pages.pdf`, `spread-preview.pdf`, `main.tex`, `layout.json`과
-`generation-log.json`이 생성된다.
+브라우저에서 http://localhost:5175 접속 후 이미지 1~6장과 본문 텍스트(제목은 선택)를 넣고 Generate를
+누르면 `outputs/<타임스탬프>/best-layout/`에 `pages.pdf`, `spread-preview.pdf`, `main.tex`,
+`layout.json`과 최상위에 `generation-log.json`이 생성된다.
 
-`MOCK_MODE=true`로 실행하면 실제 Claude API를 호출하지 않고 규칙 기반 스타일 추정만 사용한다(검증/반복 테스트용).
+`ANTHROPIC_API_KEY`가 없거나 `MOCK_MODE=true`면 실제 Claude API를 호출하지 않고 규칙 기반으로
+레이아웃을 결정한다(검증/반복 테스트용). LLM이 실제로 스타일·레이아웃·패턴을 판단하게 하려면
+`.env.local`에 유효한 `ANTHROPIC_API_KEY`가 있어야 한다.
 
 ## 테스트
 

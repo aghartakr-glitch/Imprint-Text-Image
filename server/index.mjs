@@ -117,22 +117,17 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
       const result = await runGeneration({
         imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode },
       })
+      const folderName = result.dir.split(/[\\/]/).pop()
       respond(200, {
         ok: true,
         runId: result.runId,
-        style: result.styleResult.style,
-        candidates: Object.fromEntries(Object.entries(result.candidateResults).map(([key, value]) => {
-          if (value.error) {
-            return [key, { ok: false, error: value.error }]
-          }
-          return [key, {
-            ok: true,
-            pagesPdf: `/outputs/${result.runId}/${value.dir.split(/[\\/]/).pop()}/pages.pdf`,
-            spreadPdf: `/outputs/${result.runId}/${value.dir.split(/[\\/]/).pop()}/spread-preview.pdf`,
-            compileOk: value.compile.ok,
-            spreadOk: value.spread.ok,
-          }]
-        })),
+        style: result.selection.style,
+        layoutType: result.layoutType,
+        reason: result.selection.reason,
+        pagesPdf: `/outputs/${result.runId}/${folderName}/pages.pdf`,
+        spreadPdf: `/outputs/${result.runId}/${folderName}/spread-preview.pdf`,
+        compileOk: result.compile.ok,
+        spreadOk: result.spread.ok,
       })
     } catch (err) {
       respond(500, { ok: false, error: String(err.message || err) })

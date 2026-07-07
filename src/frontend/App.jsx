@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 
-const CANDIDATE_LABELS = { A: '이미지 중심', B: '균형', C: '텍스트 중심' }
+const LAYOUT_TYPE_LABELS = { 'image-first': '이미지 중심', balanced: '균형', 'text-first': '텍스트 중심' }
 
 const T = {
   bg: '#F4F4F4', surface: '#FFFFFF', border: '#E0E0E0', muted: '#8C8C8C',
@@ -71,12 +71,12 @@ export default function App() {
         <span style={{ fontSize: 16, fontWeight: 700 }}>Imprint</span>
         <span style={{ fontSize: 13, fontWeight: 500, color: T.muted }}>(Image+Text)</span>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: T.muted }}>이미지 + 본문 → 후보 A/B/C → .tex/.pdf</span>
+        <span style={{ fontSize: 11, color: T.muted }}>이미지 + 본문 → 최적 레이아웃 1개 → .tex/.pdf</span>
       </header>
 
       <div style={{ maxWidth: 720, margin: '32px auto', padding: '0 24px' }}>
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: 20 }}>
-          <p style={{ fontSize: 12, color: T.muted, marginTop: 0 }}>이미지 1~6장과 본문 텍스트를 넣으면 편집디자인형 스프레드 후보 3종을 만듭니다.</p>
+          <p style={{ fontSize: 12, color: T.muted, marginTop: 0 }}>이미지 1~6장과 본문 텍스트를 넣으면, 입력 조건을 분석해 가장 적합한 편집디자인 레이아웃 1개를 만듭니다.</p>
 
           <div style={fieldWrapper}>
             <div style={groupTitle}>이미지 (최대 6장)</div>
@@ -87,7 +87,7 @@ export default function App() {
           <div style={fieldWrapper}>
             <div style={groupTitle}>제목 (선택)</div>
             <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
-            <p style={{ fontSize: 12, color: T.muted }}>제목을 넣으면 각 후보 맨 앞에 섹션 오프너 페이지가 추가됩니다. 비워두면 기존처럼 본문 레이아웃만 생성됩니다.</p>
+            <p style={{ fontSize: 12, color: T.muted }}>제목을 넣으면 섹션 오프너 페이지가 추가됩니다. 비워두면 본문 레이아웃만 생성됩니다.</p>
           </div>
 
           <div style={fieldWrapper}>
@@ -104,23 +104,24 @@ export default function App() {
 
         {result && (
           <div style={{ marginTop: 20 }}>
-            <p style={{ fontSize: 11, fontFamily: T.mono, color: T.muted }}>추정 스타일: {result.style} · outputs/{result.runId}/</p>
-            {Object.entries(result.candidates).map(([key, cand]) => (
-              <div key={key} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: 16, marginBottom: 12 }}>
-                <div style={groupTitle}>Candidate {key} — {CANDIDATE_LABELS[key]}</div>
-                {cand.ok === false ? (
-                  <p style={{ fontSize: 12, color: '#B00020' }}>생성 실패: {cand.error}</p>
-                ) : cand.compileOk ? (
-                  <p style={{ fontSize: 13 }}>
-                    <a href={cand.pagesPdf} target="_blank" rel="noreferrer">낱장 PDF 열기</a>
-                    {' | '}
-                    <a href={cand.spreadPdf} target="_blank" rel="noreferrer">스프레드 미리보기 열기</a>
-                  </p>
-                ) : (
-                  <p style={{ fontSize: 12, color: '#B00020' }}>컴파일 실패 — 로그를 확인하세요.</p>
-                )}
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: 16 }}>
+              <div style={groupTitle}>
+                최적 레이아웃 — {LAYOUT_TYPE_LABELS[result.layoutType] || result.layoutType}
               </div>
-            ))}
+              <p style={{ fontSize: 11, fontFamily: T.mono, color: T.muted }}>
+                스타일: {result.style} · outputs/{result.runId}/
+              </p>
+              {result.reason && <p style={{ fontSize: 12, color: T.muted }}>선택 이유: {result.reason}</p>}
+              {result.compileOk ? (
+                <p style={{ fontSize: 13 }}>
+                  <a href={result.pagesPdf} target="_blank" rel="noreferrer">낱장 PDF 열기</a>
+                  {' | '}
+                  <a href={result.spreadPdf} target="_blank" rel="noreferrer">스프레드 미리보기 열기</a>
+                </p>
+              ) : (
+                <p style={{ fontSize: 12, color: '#B00020' }}>컴파일 실패 — 로그를 확인하세요.</p>
+              )}
+            </div>
           </div>
         )}
       </div>

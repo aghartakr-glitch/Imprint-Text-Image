@@ -18,10 +18,22 @@ export function resolveImageIndices(spec, imageCount) {
   throw new Error(`잘못된 imageIndices 지정: ${JSON.stringify(spec)}`)
 }
 
-export function getCandidatePattern(imageCount, candidate, presets = PRESETS) {
+function findBucket(imageCount, presets) {
   const preset = presets.find((p) => imageCount >= p.imageCountMin && imageCount <= p.imageCountMax)
   if (!preset) throw new Error(`이미지 개수(${imageCount})에 맞는 패턴을 찾을 수 없습니다`)
-  const pattern = preset.candidates[candidate]
-  if (!pattern) throw new Error(`후보(${candidate})에 대한 패턴이 없습니다`)
+  return preset
+}
+
+// The 3 pattern variants (image-first/balanced/text-first) for a given image count, presented
+// as options for the LLM (or the rule-based fallback) to choose exactly one from — never all 3.
+export function getAvailablePatterns(imageCount, presets = PRESETS) {
+  const preset = findBucket(imageCount, presets)
+  return Object.values(preset.candidates).map((c) => ({ patternId: c.patternId, layoutType: c.layoutType }))
+}
+
+export function getPatternById(imageCount, patternId, presets = PRESETS) {
+  const preset = findBucket(imageCount, presets)
+  const pattern = Object.values(preset.candidates).find((c) => c.patternId === patternId)
+  if (!pattern) throw new Error(`패턴을 찾을 수 없습니다: ${patternId}`)
   return { ...pattern, overflowPageType: preset.overflowPageType }
 }
