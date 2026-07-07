@@ -4,6 +4,7 @@ import {
   createReadStream, createWriteStream, existsSync, mkdirSync, statSync,
 } from 'node:fs'
 import { join, extname } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import Busboy from 'busboy'
 import { runGeneration } from './runGeneration.mjs'
 import { ROOT, OUTPUTS_DIR } from './env.mjs'
@@ -190,7 +191,7 @@ export function createApp({ uploadsDir = DEFAULT_UPLOADS_DIR, outputsDir = OUTPU
   })
 }
 
-const isMain = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}`
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
 if (isMain) {
   const app = createApp()
   const port = process.env.PORT ? Number(process.env.PORT) : 8788
