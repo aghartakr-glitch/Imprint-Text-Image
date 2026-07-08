@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { callLayoutLLM } from './callLayoutLLM.js'
 
-function textResponse(obj) {
-  return { content: [{ type: 'text', text: JSON.stringify(obj) }] }
+function textResponse(obj, usage = { input_tokens: 100, output_tokens: 50 }) {
+  return { content: [{ type: 'text', text: JSON.stringify(obj) }], usage }
 }
 
 function validPlan(id, overrides = {}) {
@@ -119,7 +119,7 @@ test('if every candidate fails on attempt 1 but the retry (lean, single-plan pro
 
 test('malformed JSON on attempt 1 recovers via the lean retry on attempt 2', async () => {
   const client = queueClient([
-    { response: { content: [{ type: 'text', text: 'not json' }] } },
+    { response: { content: [{ type: 'text', text: 'not json' }], usage: { input_tokens: 100, output_tokens: 50 } } },
     { response: textResponse(validPlan('candidate_1')) },
   ])
   const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
@@ -137,4 +137,19 @@ test('all 3 attempts failing (1 initial + 2 retries) falls back with no candidat
   assert.equal(result.candidates.length, 0)
   assert.equal(client.calls.length, 3)
   assert.ok(result.fallbackReason.length > 0)
+})
+
+
+test('cost budget stops another API call before spending over the 0.05 USD ceiling', async () => {
+  const broken = validPlan('candidate_1')
+  broken.style = 'Noir'
+  // Sized so the first call alone spends enough (10000 in + 1200 out ~= $0.048) that the ~$0.002
+  // left over can't cover even a retry's minimum output -- the retry must be blocked before ever
+  // reaching the API, not merely spend down toward the ceiling.
+  const client = queueClient([{ response: textResponse({ candidates: [broken] }, { input_tokens: 10000, output_tokens: 1200 }) }])
+  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
+  assert.equal(result.fallbackUsed, true)
+  assert.match(result.fallbackReason, /\$0\.05/)
+  assert.equal(client.calls.length, 1)
+  assert.ok(result.costBudget.spent_usd <= 0.05)
 })

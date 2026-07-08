@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateLayoutCandidates, retryLayoutCandidate } from './generateLayoutCandidates.js'
 
-function textResponse(obj) {
-  return { content: [{ type: 'text', text: JSON.stringify(obj) }] }
+function textResponse(obj, usage = { input_tokens: 100, output_tokens: 50 }) {
+  return { content: [{ type: 'text', text: JSON.stringify(obj) }], usage }
 }
 
 test('generateLayoutCandidates returns the parsed candidates array', async () => {

@@ -4,15 +4,17 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { exec } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { runGeneration } from './runGeneration.mjs'
 import { FONTS_DIR } from './env.mjs'
 
-const run = promisify(exec)
+
+const runFile = promisify(execFile)
+const PDFINFO_BIN = process.env.PDFINFO_BIN ?? 'C:\\texlive\\2026\\bin\\windows\\pdfinfo.exe'
 
 async function getPdfPageCount(pdfPath) {
-  const { stdout } = await run(`pdfinfo "${pdfPath}"`)
+  const { stdout } = await runFile(PDFINFO_BIN, [pdfPath])
   const match = stdout.match(/^Pages:\s+(\d+)/m)
   if (!match) throw new Error(`pdfinfo 출력에서 페이지 수를 찾을 수 없습니다: ${stdout}`)
   return Number(match[1])

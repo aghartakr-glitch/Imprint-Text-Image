@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { generateLayoutCandidates, retryLayoutCandidate } from './generateLayoutCandidates.js'
 import { validateLayoutPlan } from './validateLayoutPlan.js'
 import { repairLayoutPlan } from './repairLayoutPlan.js'
+import { createLayoutCostBudget, LayoutCostBudgetExceeded } from './layoutCostBudget.js'
 
 const MAX_RETRIES = 2 // total attempts = 1 initial + up to 2 retries, per spec section 10/17
 
@@ -48,6 +49,7 @@ export async function callLayoutLLM({ promptContext, imageCount }, options = {})
   }
 
   const client = options.client ?? new Anthropic({ apiKey })
+  const costBudget = options.costBudget ?? createLayoutCostBudget({ maxSpendUsd: options.maxSpendUsd })
   let lastIssues = ['알 수 없는 오류']
   let lastFailedPlan = null
 
@@ -55,20 +57,31 @@ export async function callLayoutLLM({ promptContext, imageCount }, options = {})
     let rawCandidates
     try {
       if (attempt === 0) {
-        rawCandidates = await generateLayoutCandidates(promptContext, { client })
+        rawCandidates = await generateLayoutCandidates(promptContext, { client, costBudget })
       } else {
         // Lean retry: one small prompt (input metadata + previous failure), not the full context.
         const retried = await retryLayoutCandidate(
           { inputMetadata: promptContext.inputMetadata, failedLayoutPlan: lastFailedPlan, validationErrors: lastIssues },
-          { client },
+          { client, costBudget },
         )
         rawCandidates = [retried]
       }
     } catch (err) {
       lastIssues = [`LLM 요청/JSON 파싱 실패: ${String(err?.message ?? err)}`]
+      if (err instanceof LayoutCostBudgetExceeded) {
+        return {
+          candidates: [],
+          rejectedCandidates: [],
+          source: 'fallback',
+          retryCount: attempt,
+          fallbackUsed: true,
+          fallbackReason: err.message,
+          costBudget: costBudget.summary(),
+        }
+      }
       if (attempt >= MAX_RETRIES) {
         return {
-          candidates: [], rejectedCandidates: [], source: 'fallback', retryCount: attempt, fallbackUsed: true, fallbackReason: lastIssues[0],
+          candidates: [], rejectedCandidates: [], source: 'fallback', retryCount: attempt, fallbackUsed: true, fallbackReason: lastIssues[0], costBudget: costBudget.summary(),
         }
       }
       continue // eslint-disable-line no-continue
@@ -85,6 +98,7 @@ export async function callLayoutLLM({ promptContext, imageCount }, options = {})
         source: attempt === 0 ? 'llm' : 'llm-retry',
         retryCount: attempt,
         fallbackUsed: false,
+        costBudget: costBudget.summary(),
       }
     }
 
@@ -98,6 +112,7 @@ export async function callLayoutLLM({ promptContext, imageCount }, options = {})
         retryCount: attempt,
         fallbackUsed: true,
         fallbackReason: `모든 후보 검증 실패 (재시도 ${attempt}회 후): ${lastIssues.slice(0, 5).join('; ')}`,
+        costBudget: costBudget.summary(),
       }
     }
   }

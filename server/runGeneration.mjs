@@ -251,6 +251,7 @@ export async function runGeneration({
       body_leading_pt: BODY_LEADING_PT,
       grid: { columns: GRID_COLUMNS, rows: GRID_ROWS },
     },
+    llm_cost_budget: llmResult.costBudget ?? null,
     validation: {
       passed: selected.validation.passed && compileResult.ok && spreadResult.ok,
       issues,
