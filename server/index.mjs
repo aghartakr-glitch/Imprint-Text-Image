@@ -41,6 +41,7 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
   let title = ''
   let apiKey = ''
   let userControlsRaw = ''
+  let userLayoutSettingsRaw = ''
   let fileCount = 0
   let rejected = null
   // busboy can fire 'error' and then still fire 'close' (behavior varies by version/error type),
@@ -58,6 +59,7 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
     if (name === 'title') title = value
     if (name === 'apiKey') apiKey = value
     if (name === 'userControls') userControlsRaw = value
+    if (name === 'userLayoutSettings') userLayoutSettingsRaw = value
   })
 
   bb.on('file', (name, stream, info) => {
@@ -125,9 +127,17 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
         return respond(400, { ok: false, error: '잘못된 userControls JSON입니다: ' + String(err.message || err) })
       }
     }
+    let userLayoutSettings = {}
+    if (userLayoutSettingsRaw) {
+      try {
+        userLayoutSettings = JSON.parse(userLayoutSettingsRaw)
+      } catch (err) {
+        return respond(400, { ok: false, error: '잘못된 userLayoutSettings JSON입니다: ' + String(err.message || err) })
+      }
+    }
     try {
       const result = await runGeneration({
-        imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode, ...(apiKey && { apiKey }) }, userControls,
+        imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode, ...(apiKey && { apiKey }) }, userControls, userLayoutSettings,
       })
       const folderName = result.dir.split(/[\\/]/).pop()
       respond(200, {

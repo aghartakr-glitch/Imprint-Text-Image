@@ -19,6 +19,10 @@ const primaryBtn = {
 const groupTitle = { fontSize: 11, fontWeight: 700, color: T.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }
 const fieldWrapper = { marginBottom: 16 }
 
+const selectStyle = {
+  border: `1px solid ${T.border}`, borderRadius: 6, padding: '7px 8px', fontSize: 13, color: T.ink, background: T.surface,
+}
+
 export default function App() {
   const [apiKey, setApiKey] = useState(localStorage.getItem('anthropic_api_key') || '')
   const [images, setImages] = useState([])
@@ -27,6 +31,10 @@ export default function App() {
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  const [pageSize, setPageSize] = useState('A5')
+  const [marginPreset, setMarginPreset] = useState('recommended')
+  const [columns, setColumns] = useState('4')
+  const [gridMode, setGridMode] = useState('strict')
 
   function handleApiKeyChange(e) {
     const newKey = e.target.value
@@ -60,6 +68,9 @@ export default function App() {
     form.append('title', title)
     form.append('text', text)
     if (apiKey) form.append('apiKey', apiKey)
+    form.append('userLayoutSettings', JSON.stringify({
+      page_size: pageSize, margin_preset: marginPreset, columns: Number(columns), grid_mode: gridMode,
+    }))
 
     try {
       const response = await fetch('/api/generate', { method: 'POST', body: form })
@@ -115,6 +126,34 @@ export default function App() {
           <div style={fieldWrapper}>
             <div style={groupTitle}>본문 텍스트</div>
             <textarea value={text} onChange={(e) => setText(e.target.value)} rows={10} style={inputStyle} />
+            <p style={{ fontSize: 12, color: T.muted }}>빈 줄로 구분하면 문단별로 나뉘어 배치됩니다.</p>
+          </div>
+
+          <div style={fieldWrapper}>
+            <div style={groupTitle}>판형 · 그리드 설정</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
+              <select value={pageSize} onChange={(e) => setPageSize(e.target.value)} style={selectStyle}>
+                <option value="A5">A5</option>
+                <option value="A4">A4</option>
+                <option value="B5">B5</option>
+              </select>
+              <select value={marginPreset} onChange={(e) => setMarginPreset(e.target.value)} style={selectStyle}>
+                <option value="recommended">여백: 권장</option>
+                <option value="narrow">여백: 좁게</option>
+                <option value="wide">여백: 넓게</option>
+              </select>
+              <select value={columns} onChange={(e) => setColumns(e.target.value)} style={selectStyle}>
+                <option value="2">2단</option>
+                <option value="3">3단</option>
+                <option value="4">4단</option>
+                <option value="6">6단</option>
+              </select>
+              <select value={gridMode} onChange={(e) => setGridMode(e.target.value)} style={selectStyle}>
+                <option value="strict">엄격한 그리드</option>
+                <option value="flexible">유연한 그리드</option>
+              </select>
+            </div>
+            <p style={{ fontSize: 12, color: T.muted }}>행 수·거터·텍스트 흐름 방식·이미지 배치는 이 설정을 바탕으로 자동 결정됩니다.</p>
           </div>
 
           <button type="button" onClick={handleGenerate} disabled={status === 'generating'} style={primaryBtn}>
