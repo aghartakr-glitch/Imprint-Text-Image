@@ -45,7 +45,10 @@ Design principles:
 2. If body text is long, reserve stable reading space first.
 3. If two images have equal importance, give them equal visual weight.
 4. If one image is stronger, make it a hero and treat others as support (and give it role: hero).
-5. If there are 3-6 images, choose grid/gallery when images are equal, or hero+support when one image is dominant.
+5. If there are 3-6 images, choose grid/gallery when images are equal, hero+support when one image
+   is dominant, or spread images one-per-page across multiple pages (composition_strategy:
+   images_spread_across_pages, image_hierarchy: page_gallery) for a magazine-story feel -- do not
+   default to always grouping every image onto a single crowded page.
 6. Separate reading and viewing areas clearly. Use whitespace to avoid crowding.
 7. Avoid many tiny images unless the goal is a gallery/archive impression.
 8. Preserve spread balance: if one page is image-heavy, use text or whitespace to balance the opposite page.

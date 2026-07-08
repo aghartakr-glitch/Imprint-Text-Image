@@ -223,6 +223,29 @@ function twoPageDistributedVariant(imageCount) {
   })
 }
 
+// One image per page (never grouped), followed by a dedicated text page -- a real editorial-
+// magazine pattern where photos breathe across a whole story instead of all clustering onto one
+// crowded page. Directly addresses "sparse, one-photo-per-page" as a real, selectable option.
+function sparsePerPageVariant(imageCount) {
+  const imagePages = Array.from({ length: imageCount }, (_, i) => imageElementsAt(i + 1, [{
+    col_start: 1, col_span: 6, row_start: 2, row_span: 9,
+  }], 'gallery'))
+  const textPage = [bodyText({
+    col_start: 1, col_span: 6, row_start: 1, row_span: 12,
+  })]
+  return multiPagePlan({
+    layoutFamily: 'image-first',
+    layoutPurpose: 'gallery',
+    imageHierarchy: 'page_gallery',
+    imageTextRelation: 'gallery_then_text',
+    compositionStrategy: 'images_spread_across_pages',
+    outputUnit: 'spread',
+    basePatternReference: 'one_page_gallery_one_page_text',
+    pagesElements: [...imagePages, textPage],
+    reason: `이미지 ${imageCount}장 + 짧거나 중간 길이 본문: 이미지 1장씩 별도 페이지에 듬성듬성 분산 배치하는 변형`,
+  })
+}
+
 // Deterministic, grid-based fallback used only when the LLM is unavailable or still fails
 // validation after retries. Rules from spec section 11's table; several buckets now offer
 // multiple real layout variants (chosen deterministically from the actual input, not always the
@@ -384,7 +407,7 @@ export function buildFallbackLayoutPlan({
   }
 
   if (imageCount >= 3 && imageCount <= 6) {
-    const variants = [galleryGridVariant, heroSupportVariant, twoPageDistributedVariant]
+    const variants = [galleryGridVariant, heroSupportVariant, twoPageDistributedVariant, sparsePerPageVariant]
     return variants[pickVariantIndex(variantSeed, variants.length)](imageCount)
   }
 

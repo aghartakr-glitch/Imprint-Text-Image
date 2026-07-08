@@ -44,6 +44,9 @@ export const DESIGN_SPACE = {
     'grid_gallery',
     'gallery_left_text_right',
     'gallery_page_text_page',
+    // Each image gets its own page (interspersed with text pages), instead of grouping every
+    // image onto one crowded page -- a real editorial-magazine pattern for storytelling spreads.
+    'images_spread_across_pages',
   ],
 
   objectPositions: ['center', 'top', 'bottom', 'left', 'right'],

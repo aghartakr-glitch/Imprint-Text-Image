@@ -46,3 +46,21 @@ test('throws for an unsupported image count', () => {
   assert.throws(() => buildFallbackLayoutPlan({ imageCount: 0, textDensity: 'short' }))
   assert.throws(() => buildFallbackLayoutPlan({ imageCount: 7, textDensity: 'short' }))
 })
+
+// Per user feedback: fallback variants for 3-6 images previously always clustered every image
+// onto one page. There must be a real "one image per page, spread across the story" option too.
+test('the 3-6-image bucket includes a sparse one-image-per-page variant reachable via the hash, and it validates', () => {
+  let found = null
+  for (let seedTweak = 0; seedTweak < 500 && !found; seedTweak += 1) {
+    const generatedPlan = buildFallbackLayoutPlan({
+      imageCount: 4, textDensity: 'short', imageAspectRatios: [1 + seedTweak * 0.001, 0.8, 1.2, 1.0], textLength: seedTweak,
+    })
+    if (generatedPlan.composition_strategy === 'images_spread_across_pages') found = generatedPlan
+  }
+  assert.ok(found, 'expected to find a seed that selects the sparse per-page variant within 500 tries')
+  assert.equal(found.pages.length, 5, '4 images + 1 dedicated text page')
+  assert.ok(found.pages.slice(0, 4).every((p) => p.elements.length === 1 && p.elements[0].type === 'image'), 'each image page holds exactly one image, nothing grouped')
+  assert.equal(found.pages[4].elements[0].type, 'text')
+  const result = validateLayoutPlan(found, { imageCount: 4 })
+  assert.equal(result.passed, true, `issues: ${JSON.stringify(result.issues)}`)
+})
