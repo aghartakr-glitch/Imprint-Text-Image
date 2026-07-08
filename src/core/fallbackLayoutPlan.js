@@ -1,5 +1,7 @@
-import { GRID_COLUMNS, GRID_ROWS } from './layoutConstants.js'
+import { GRID_COLUMNS, GRID_ROWS, TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM } from './layoutConstants.js'
 import { decideOutputUnit } from './outputUnit.js'
+import { parseTextBlocks } from './text/parseTextBlocks.js'
+import { flowTextAcrossColumns, makeContinuationFlowRegion } from './text/ColumnFlowEngine.js'
 
 // Same row-splitting idea the old fixed pattern library used for image grids, but expressed in
 // grid cells (columns/rows) instead of mm, so it slots straight into a layout_plan.
@@ -246,13 +248,173 @@ function sparsePerPageVariant(imageCount) {
   })
 }
 
+// Section 5.4/7 of the "Grid Preset + Column Flow" supplement: images become reserved_regions
+// that the body text must route around, expressed as a fraction of whatever grid the user
+// actually chose (columns/rows), not a fixed 6x12 shape.
+function imageRegionsFor(imageCount, columns, rows, imageBehavior) {
+  if (imageCount === 1) {
+    if (imageBehavior === 'anchored') {
+      const rightSpan = Math.max(1, Math.ceil(columns / 2))
+      return {
+        regions: [{
+          col_start: columns - rightSpan + 1, col_span: rightSpan, row_start: 1, row_span: Math.max(1, Math.round(rows * 0.42)),
+        }],
+        role: 'hero',
+      }
+    }
+    return {
+      regions: [{
+        col_start: 1, col_span: columns, row_start: 1, row_span: Math.max(1, Math.round(rows * 0.45)),
+      }],
+      role: 'hero',
+    }
+  }
+  if (imageCount === 2) {
+    const colSpanEach = Math.max(1, Math.floor(columns / 2))
+    const rowSpan = Math.max(1, Math.round(rows * 0.38))
+    return {
+      regions: [
+        {
+          col_start: 1, col_span: colSpanEach, row_start: 1, row_span: rowSpan,
+        },
+        {
+          col_start: 1 + colSpanEach, col_span: columns - colSpanEach, row_start: 1, row_span: rowSpan,
+        },
+      ],
+      role: 'equal',
+    }
+  }
+  return {
+    regions: splitGridCells(imageCount, {
+      col_start: 1, col_span: columns, row_start: 1, row_span: Math.max(2, Math.round(rows * 0.55)),
+    }),
+    role: 'gallery',
+  }
+}
+
+function textElementsFromSlots(slots, pageNum) {
+  return slots.map((slot, i) => ({
+    id: `body_p${pageNum}_c${i + 1}`,
+    type: 'text',
+    role: 'body',
+    col_start: slot.col_start,
+    col_span: slot.col_span,
+    row_start: slot.row_start,
+    row_span: slot.row_span,
+    text: slot.textSlice,
+  }))
+}
+
+// Real column-flow grid fallback (spec section 7/11): unlike the legacy fixed-6x12 variants
+// above, this respects the user's actual grid_spec (page_size/margin_preset/columns/grid_mode,
+// resolved via GridPresetManager) and flows body text across real column slots that route around
+// the image reserved_regions (via ColumnFlowEngine/ReservedRegionManager) instead of a single
+// fixed body-text box. Every body-role element it emits already carries its final pre-sliced
+// `text` -- reconstructLayout.js recognizes the plan's `grid_spec` field and skips the legacy
+// paginateGridPlan re-slicing step accordingly.
+export function buildGridFallbackPlan({
+  imageCount, textDensity, imageAspectRatios = [], textLength = 0, text = '', title = '', gridSettings,
+}) {
+  const { outputUnit } = decideOutputUnit({ imageCount, textDensity })
+  const { grid_spec: gridSpecRaw, resolved_grid_settings: resolved } = gridSettings
+  const columns = gridSpecRaw.columns
+  const rows = gridSpecRaw.rows
+  const gridSpec = {
+    columns, rows, gutterMm: gridSpecRaw.gutter_mm, boxWidthMm: TEXT_BOX_WIDTH_MM, boxHeightMm: TEXT_BOX_HEIGHT_MM,
+  }
+
+  const { regions: imageRegions, role: imageRole } = imageRegionsFor(imageCount, columns, rows, resolved.image_behavior)
+  const imageEls = imageElementsAt(1, imageRegions, imageRole)
+  const reservedRegions = imageRegions.map((cell) => ({ page: 1, ...cell }))
+
+  // parseTextBlocks may peel off an auto-detected title-like first paragraph when no explicit
+  // title was given; with no explicit title there is no separate title page to render it on, so
+  // fold it back into the body flow here rather than silently dropping that text.
+  const parsed = parseTextBlocks({ title, text })
+  const hasExplicitTitle = typeof title === 'string' && title.trim().length > 0
+  // ColumnFlowEngine only flows role: 'body' blocks; without an explicit title there is no
+  // separate title page, so relabel any auto-detected title block back to 'body' instead of
+  // dropping it (see the comment above buildGridFallbackPlan).
+  const bodyBlocks = hasExplicitTitle
+    ? parsed.text_blocks.filter((b) => b.role === 'body')
+    : parsed.text_blocks.map((b) => (b.role === 'title' ? { ...b, role: 'body' } : b))
+
+  const flowRegion1 = {
+    page: 1, col_start: 1, col_span: columns, row_start: 1, row_span: rows,
+  }
+  const { filledSlots: slots1, remainingText: rest1 } = flowTextAcrossColumns({
+    textBlocks: bodyBlocks, flowRegions: [flowRegion1], reservedRegionsByPage: { 1: reservedRegions }, gridSpec,
+  })
+
+  const pagesElements = [[...imageEls, ...textElementsFromSlots(slots1, 1)]]
+  let remaining = rest1
+  let pageNum = 2
+  const MAX_CONTINUATION_PAGES = 500 // safety cap against a pathological infinite loop
+  while (remaining.length > 0 && pageNum <= MAX_CONTINUATION_PAGES) {
+    const region = makeContinuationFlowRegion({ page: pageNum, gridSpec })
+    const { filledSlots, remainingText } = flowTextAcrossColumns({
+      textBlocks: [{ id: `overflow_${pageNum}`, role: 'body', text: remaining }],
+      flowRegions: [region],
+      gridSpec,
+    })
+    pagesElements.push(textElementsFromSlots(filledSlots, pageNum))
+    remaining = remainingText
+    pageNum += 1
+  }
+
+  const layoutFamily = imageCount === 1 ? 'balanced' : (imageCount >= 3 ? 'image-first' : 'balanced')
+  const layoutPurpose = imageCount >= 3 ? 'gallery' : 'case_analysis'
+  const imageHierarchy = imageCount === 1 ? 'single_hero' : (imageCount === 2 ? 'equal_pair' : 'grid_gallery')
+  const compositionStrategy = 'column_flow_grid'
+  const reason = `이미지 ${imageCount}장 + ${textDensity} 본문: 사용자 grid 설정(${columns}열/${rows}행) 기반 column-flow 폴백`
+
+  return {
+    style: 'Editorial',
+    output_unit: outputUnit,
+    layout_family: layoutFamily,
+    layout_purpose: layoutPurpose,
+    image_hierarchy: imageHierarchy,
+    image_text_relation: 'text_explains_image',
+    composition_strategy: compositionStrategy,
+    base_pattern_reference: 'user_grid_preset_column_flow',
+    layout_intent: reason,
+    design_sequence: [
+      ...designSequenceFor({
+        outputUnit, layoutPurpose, layoutFamily, imageHierarchy, imageTextRelation: 'text_explains_image', compositionStrategy, reason,
+      }).filter((step) => step.decision_type !== 'grid_layout'),
+      {
+        step: 7, decision_type: 'grid_layout', value: `${columns}_columns_${rows}_rows`, reason: '사용자 grid 설정',
+      },
+    ],
+    grid: { columns, rows },
+    grid_spec: gridSpecRaw,
+    resolved_grid_settings: resolved,
+    reserved_regions: reservedRegions,
+    text_flow: { mode: resolved.text_flow, flow_regions: [flowRegion1] },
+    layout_variation: `${resolved.image_behavior}_${resolved.text_flow}`,
+    pages: pagesElements.map((elements, i) => ({ page: i + 1, elements })),
+    overflow_policy: { body_overflow: 'continue_to_next_page' },
+    reason,
+  }
+}
+
 // Deterministic, grid-based fallback used only when the LLM is unavailable or still fails
 // validation after retries. Rules from spec section 11's table; several buckets now offer
 // multiple real layout variants (chosen deterministically from the actual input, not always the
 // same one) instead of a single fixed shape per image-count/text-density combination.
+//
+// When `gridSettings` is supplied (the user's 4 grid settings resolved via GridPresetManager),
+// this delegates entirely to buildGridFallbackPlan above -- the real column-flow engine wired
+// into runGeneration.mjs. Without it (e.g. a direct unit-test call), the legacy fixed-6x12
+// variants below still run unchanged.
 export function buildFallbackLayoutPlan({
-  imageCount, textDensity, imageAspectRatios = [], textLength = 0,
+  imageCount, textDensity, imageAspectRatios = [], textLength = 0, text, title, gridSettings,
 }) {
+  if (gridSettings) {
+    return buildGridFallbackPlan({
+      imageCount, textDensity, imageAspectRatios, textLength, text: text ?? '', title: title ?? '', gridSettings,
+    })
+  }
   const { outputUnit } = decideOutputUnit({ imageCount, textDensity })
   const variantSeed = [
     imageCount, textDensity, textLength,

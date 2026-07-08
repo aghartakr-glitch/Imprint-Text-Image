@@ -38,13 +38,20 @@ export function refineLayout(resolvedPages, { imagePaths = [], imageAspectRatios
       return fitImageWithinBox(img, ratio)
     })
 
-    if (images.length === 0 && !page.textSlice && page.type !== 'title-page') {
+    const textBlocksForPage = Array.isArray(page.textBlocks) && page.textBlocks.length > 0
+      ? page.textBlocks
+      : (page.textZone ? [{ zone: page.textZone, slice: page.textSlice }] : [])
+    const hasAnyText = textBlocksForPage.some((tb) => tb.slice)
+
+    if (images.length === 0 && !hasAnyText && page.type !== 'title-page') {
       notes.push(`page ${pageIndex + 1}: 콘텐츠가 비어 있습니다`)
     }
     const MIN_READABLE_TEXT_ZONE_MM2 = 20 * 20
-    if (page.textZone && page.textZone.wMm * page.textZone.hMm < MIN_READABLE_TEXT_ZONE_MM2) {
-      notes.push(`page ${pageIndex + 1}: 본문 텍스트 영역이 너무 좁습니다 (${page.textZone.wMm.toFixed(1)}x${page.textZone.hMm.toFixed(1)}mm)`)
-    }
+    textBlocksForPage.forEach((tb) => {
+      if (tb.zone && tb.zone.wMm * tb.zone.hMm < MIN_READABLE_TEXT_ZONE_MM2) {
+        notes.push(`page ${pageIndex + 1}: 본문 텍스트 영역이 너무 좁습니다 (${tb.zone.wMm.toFixed(1)}x${tb.zone.hMm.toFixed(1)}mm)`)
+      }
+    })
 
     return { ...page, images }
   })

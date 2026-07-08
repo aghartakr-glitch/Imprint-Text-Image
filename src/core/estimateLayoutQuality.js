@@ -21,8 +21,11 @@ function allElements(plan) {
 
 function pageCoverageRatio(page) {
   const areaOf = (box) => box.wMm * box.hMm
+  const textBlocksForPage = Array.isArray(page.textBlocks) && page.textBlocks.length > 0
+    ? page.textBlocks
+    : (page.textZone ? [{ zone: page.textZone }] : [])
   const usedArea = page.images.reduce((sum, img) => sum + areaOf(img), 0)
-    + (page.textZone ? areaOf(page.textZone) : 0)
+    + textBlocksForPage.reduce((sum, tb) => sum + areaOf(tb.zone), 0)
   const pageArea = 148 * 210 // physical A5 page, as a crowding upper bound
   return usedArea / pageArea
 }

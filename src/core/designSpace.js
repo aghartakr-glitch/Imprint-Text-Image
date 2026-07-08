@@ -47,6 +47,9 @@ export const DESIGN_SPACE = {
     // Each image gets its own page (interspersed with text pages), instead of grouping every
     // image onto one crowded page -- a real editorial-magazine pattern for storytelling spreads.
     'images_spread_across_pages',
+    // Body text flows across real column slots (via ColumnFlowEngine) that route around image
+    // reserved_regions, using the user's chosen grid_spec column count instead of a fixed 6x12.
+    'column_flow_grid',
   ],
 
   objectPositions: ['center', 'top', 'bottom', 'left', 'right'],

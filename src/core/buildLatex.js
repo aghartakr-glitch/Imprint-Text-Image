@@ -106,6 +106,12 @@ export function buildPagesLatex(resolvedPages) {
       parts.push(...page.images.map((img) => imageBlock(img, pageNumber)))
       if (page.type === 'title-page') {
         parts.push(titleBlock(page.textZone, pageNumber, page.title))
+      } else if (Array.isArray(page.textBlocks) && page.textBlocks.length > 0) {
+        // Column-flow grid pages carry one text block per column slot -- render every one that
+        // actually has text (a reserved-region-blocked column can produce a zero-length slot).
+        page.textBlocks.forEach((tb) => {
+          if (tb.slice) parts.push(textBlock(tb.zone, pageNumber, tb.slice))
+        })
       } else if (page.textZone && page.textSlice) {
         parts.push(textBlock(page.textZone, pageNumber, page.textSlice))
       }

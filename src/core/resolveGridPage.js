@@ -4,13 +4,16 @@ import { gridToMm } from './gridToMm.js'
 // assigned to its body box into the resolvedPage shape buildLatex.js already knows how to
 // render: { images: [...], textZone, textSlice }. If a page has more than one body-role text
 // element, only the first is rendered (every fallback/expected LLM plan uses exactly one).
-export function resolveGridPage(elements, imagePaths, textSlicesByElementId = {}) {
+// gridSpec (columns/rows/gutterMm/boxWidthMm/boxHeightMm) is optional and forwarded to gridToMm
+// as-is -- omitted, gridToMm falls back to its own defaults (the fixed 6x12 A5 grid), preserving
+// every existing caller. When given (grid-based fallback plans with a variable column count), it
+// makes each element's mm box reflect the user's actual chosen grid instead of the fixed one.
+export function resolveGridPage(elements, imagePaths, textSlicesByElementId = {}, gridSpec) {
   const images = []
-  let textZone = null
-  let textSlice = null
+  const textBlocks = []
 
   elements.forEach((el) => {
-    const box = gridToMm(el)
+    const box = gridToMm(el, gridSpec)
     if (el.type === 'image') {
       const match = /^image_(\d+)$/.exec(el.id || '')
       const idx = match ? Number(match[1]) - 1 : -1
@@ -21,13 +24,18 @@ export function resolveGridPage(elements, imagePaths, textSlicesByElementId = {}
       images.push({
         path, ...box, fullBleed: false, objectPosition: el.object_position || 'center',
       })
-    } else if (el.type === 'text' && el.role === 'body' && textZone == null) {
-      textZone = box
-      textSlice = textSlicesByElementId[el.id] ?? null
+    } else if (el.type === 'text' && el.role === 'body') {
+      // Every body-role element on the page is kept (not just the first) -- a column-flow grid
+      // plan places one text element per column slot, and all of them must actually render.
+      textBlocks.push({ zone: box, slice: textSlicesByElementId[el.id] ?? null })
     }
   })
 
   return {
-    type: 'layout-plan-page', images, textZone, textSlice,
+    type: 'layout-plan-page',
+    images,
+    textZone: textBlocks[0]?.zone ?? null,
+    textSlice: textBlocks[0]?.slice ?? null,
+    textBlocks,
   }
 }

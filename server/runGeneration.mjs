@@ -9,6 +9,8 @@ import { textDensityFromLength } from '../src/core/textDensity.js'
 import { retrieveLayoutReferences } from '../src/core/retrieveLayoutReferences.js'
 import { callLayoutLLM } from '../src/core/callLayoutLLM.js'
 import { buildFallbackLayoutPlan } from '../src/core/fallbackLayoutPlan.js'
+import { resolveGridSettings } from '../src/core/grid/GridPresetManager.js'
+import { parseTextBlocks } from '../src/core/text/parseTextBlocks.js'
 import { reconstructLayout } from '../src/core/reconstructLayout.js'
 import { refineLayout } from '../src/core/refineLayout.js'
 import { estimateLayoutQuality } from '../src/core/estimateLayoutQuality.js'
@@ -55,7 +57,7 @@ function loadPatternLibrarySummary() {
 // no editing UI yet to actually generate feedback.
 export async function runGeneration({
   imagePaths, text, title, outputsRoot = OUTPUTS_DIR, fontsDir = FONTS_DIR, date, seq, llmOptions = {},
-  userControls = {}, diversityHistoryPath = join(LOGS_DIR, 'recent-layouts.json'),
+  userControls = {}, userLayoutSettings = {}, diversityHistoryPath = join(LOGS_DIR, 'recent-layouts.json'),
   userFeedbackPath = join(LOGS_DIR, 'user-layout-preferences.json'),
 }) {
   // 1-2. Input Analyzer
@@ -65,6 +67,15 @@ export async function runGeneration({
   const textDensity = textDensityFromLength(analysis.textLength)
   const hasTitle = typeof title === 'string' && title.trim().length > 0
   const contentStructure = analyzeContentStructure({ title, text })
+
+  // Grid Preset + Column Flow supplement: resolve the user's 4 grid settings (page_size,
+  // margin_preset, columns, grid_mode) plus content signals into the full grid_spec/
+  // resolved_grid_settings this generation will use if the LLM path is unavailable and the
+  // deterministic column-flow fallback runs (see buildGridFallbackPlan in fallbackLayoutPlan.js).
+  const paragraphCount = parseTextBlocks({ title, text }).text_blocks.filter((b) => b.role === 'body').length
+  const gridSettings = resolveGridSettings(userLayoutSettings, {
+    textDensity, paragraphCount, imageCount: analysis.imageCount,
+  })
 
   const imageMetadataRaw = buildImageMetadata(analysis.images)
   const { imageMetadata, imageHierarchy: estimatedImageHierarchy } = estimateImageHierarchy(imageMetadataRaw)
@@ -122,7 +133,7 @@ export async function runGeneration({
     : [{
       candidateId: 'fallback_1',
       plan: buildFallbackLayoutPlan({
-        imageCount: analysis.imageCount, textDensity, imageAspectRatios: imageRatios, textLength: analysis.textLength,
+        imageCount: analysis.imageCount, textDensity, imageAspectRatios: imageRatios, textLength: analysis.textLength, text, title, gridSettings,
       }),
       validation: { passed: true, issues: [] },
       repaired: false,
@@ -210,6 +221,8 @@ export async function runGeneration({
     },
     retrieved_references: retrievedReferences,
     user_controls: userControls,
+    user_layout_settings: userLayoutSettings,
+    resolved_grid_settings: gridSettings.resolved_grid_settings,
     user_preference_context: userPreferenceContext,
     internal_candidates: scoredCandidates.map((c) => ({
       candidate_id: c.candidateId,
@@ -269,6 +282,15 @@ export async function runGeneration({
       notes: selected.refinements.notes,
     },
     diversity_control: diversityControlLog,
+    // Only present when the deterministic column-flow fallback (buildGridFallbackPlan) was
+    // actually selected -- LLM-generated candidates still use the fixed 6x12 grid (task 42).
+    grid_plan: selected.plan.grid_spec ? {
+      grid_spec: selected.plan.grid_spec,
+      layout_variation: selected.plan.layout_variation,
+      reserved_regions: selected.plan.reserved_regions,
+      text_flow: selected.plan.text_flow,
+      mm_layout: selected.resolvedPages,
+    } : null,
     overflow_policy: { auto_shrink: false, truncate_text: false, move_to_next_page: true },
     outputs: { best_layout: `${bestLayoutDir.split(/[\\/]/).pop()}/` },
   }

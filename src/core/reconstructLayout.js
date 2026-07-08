@@ -9,8 +9,27 @@ import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM } from './layoutConstants.js'
 export function reconstructLayout({
   layoutPlan, imagePaths, text, title,
 }) {
-  const paginated = paginateGridPlan(layoutPlan, text)
-  const gridResolvedPages = paginated.map((p) => resolveGridPage(p.elements, imagePaths, p.textSlicesByElementId))
+  // A grid_spec on the plan marks it as a column-flow grid plan (see fallbackLayoutPlan.js's
+  // buildGridFallbackPlan): its body-role elements already carry their final pre-sliced `text`
+  // (computed by ColumnFlowEngine against the user's chosen column count and image reserved
+  // regions), so re-running paginateGridPlan's own word-boundary slicing against the *original*
+  // full text here would re-slice text that was already consumed, duplicating it. Every other
+  // plan shape (LLM-generated, or the legacy fixed 6x12 fallback) has no grid_spec and keeps
+  // going through paginateGridPlan exactly as before.
+  const paginated = layoutPlan.grid_spec
+    ? layoutPlan.pages.map((p) => ({
+      elements: p.elements,
+      textSlicesByElementId: Object.fromEntries(
+        p.elements.filter((el) => el.type === 'text' && el.role === 'body').map((el) => [el.id, el.text ?? null]),
+      ),
+    }))
+    : paginateGridPlan(layoutPlan, text)
+  const gridSpec = layoutPlan.grid_spec
+    ? {
+      columns: layoutPlan.grid_spec.columns, rows: layoutPlan.grid_spec.rows, gutterMm: layoutPlan.grid_spec.gutter_mm,
+    }
+    : undefined
+  const gridResolvedPages = paginated.map((p) => resolveGridPage(p.elements, imagePaths, p.textSlicesByElementId, gridSpec))
 
   const hasTitle = typeof title === 'string' && title.trim().length > 0
   const titlePage = hasTitle
