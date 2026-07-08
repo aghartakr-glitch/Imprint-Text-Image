@@ -1,0 +1,83 @@
+{
+  "version": "0.2",
+  "note": "This is a design-grammar knowledge base for the LLM layout planner, not a set of selectable templates. The LLM references these to understand when each composition idea applies, then generates a new grid-based layout_plan tailored to the actual input.",
+  "patterns": [
+    {
+      "pattern_id": "single_full_page",
+      "layout_family": "image-first",
+      "when_to_use": "One strong image with short or no accompanying text. The image carries the full page (or spread half) with no competing text block, often used as a section/chapter opener.",
+      "typical_image_count": "1",
+      "typical_text_density": "short"
+    },
+    {
+      "pattern_id": "single_page_with_text_below",
+      "layout_family": "balanced",
+      "when_to_use": "One image with a moderate amount of explanatory text. The image sits in the upper portion of the page and text follows below it as an independent block, never overlapping.",
+      "typical_image_count": "1",
+      "typical_text_density": "short-medium"
+    },
+    {
+      "pattern_id": "single_left_image_right_text",
+      "layout_family": "balanced",
+      "when_to_use": "One image paired with text of roughly equal visual weight, read side by side. Works well when the page needs a stable, symmetric two-column feel.",
+      "typical_image_count": "1",
+      "typical_text_density": "short-medium"
+    },
+    {
+      "pattern_id": "single_left_text_right_image",
+      "layout_family": "balanced",
+      "when_to_use": "Same as single_left_image_right_text but with reading priority given to the text column on the left; the image supports/illustrates rather than leads.",
+      "typical_image_count": "1",
+      "typical_text_density": "short-medium"
+    },
+    {
+      "pattern_id": "two_equal_images",
+      "layout_family": "image-first",
+      "when_to_use": "Two images of equal importance (e.g. a comparison or a before/after), placed side by side with equal size, with little or no text competing for attention.",
+      "typical_image_count": "2",
+      "typical_text_density": "short"
+    },
+    {
+      "pattern_id": "two_images_top_text_bottom",
+      "layout_family": "balanced",
+      "when_to_use": "Two images shown together at equal size, with an explanatory text block placed below them as a separate, independent zone.",
+      "typical_image_count": "2",
+      "typical_text_density": "short-medium"
+    },
+    {
+      "pattern_id": "hero_image_plus_secondary",
+      "layout_family": "balanced",
+      "when_to_use": "One dominant (hero) image plus one or more smaller supporting images. Used when the images are not all equally important — one clearly leads the story.",
+      "typical_image_count": "2-4",
+      "typical_text_density": "short-medium"
+    },
+    {
+      "pattern_id": "grid_2x2_with_text",
+      "layout_family": "balanced",
+      "when_to_use": "Four images of similar visual weight and similar aspect ratios, arranged in a stable 2x2 grid, with a text block occupying the remaining space.",
+      "typical_image_count": "4",
+      "typical_text_density": "short-medium"
+    },
+    {
+      "pattern_id": "hero_plus_grid",
+      "layout_family": "image-first",
+      "when_to_use": "One large hero image combined with a small grid of secondary images, for 3-6 images where one clearly stands out and the rest form a supporting set.",
+      "typical_image_count": "3-6",
+      "typical_text_density": "short-medium"
+    },
+    {
+      "pattern_id": "gallery_with_text_block",
+      "layout_family": "balanced",
+      "when_to_use": "Several images of similar importance and similar ratios arranged as a gallery/archive grid on one page, with text as a separate independent block (same page or facing page).",
+      "typical_image_count": "3-6",
+      "typical_text_density": "short-long"
+    },
+    {
+      "pattern_id": "one_page_gallery_one_page_text",
+      "layout_family": "text-first",
+      "when_to_use": "Many images (typically 4-6) combined with long body text: dedicate one full page/spread-half to an image gallery, and a separate page/spread-half purely to reading text, so neither is compressed.",
+      "typical_image_count": "4-6",
+      "typical_text_density": "long"
+    }
+  ]
+}

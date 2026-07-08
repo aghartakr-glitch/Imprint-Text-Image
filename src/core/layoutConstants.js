@@ -18,6 +18,14 @@ export const LINE_HEIGHT_MM = BODY_LEADING_PT * PT_TO_MM
 
 export const IMAGE_TEXT_GAP_MM = 6
 
+// Grid-based layout_plan system (v0.3): the LLM places elements on this grid instead of
+// inventing mm coordinates directly. The grid spans the full physical page (not just the
+// margin-constrained text box) so that full-bleed compositions (e.g. single_full_page) stay
+// expressible; nothing in the fixed-constraint checklist requires text to avoid the margins.
+export const GRID_COLUMNS = 6
+export const GRID_ROWS = 12
+export const GRID_GUTTER_MM = 4
+
 // Section-opener title page (used only when the user supplies a title).
 export const TITLE_FONT_SIZE_PT = 28
 export const TITLE_LEADING_PT = 34

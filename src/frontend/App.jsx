@@ -128,7 +128,7 @@ export default function App() {
           <div style={{ marginTop: 20 }}>
             <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: 16 }}>
               <div style={groupTitle}>
-                최적 레이아웃 — {LAYOUT_TYPE_LABELS[result.layoutType] || result.layoutType}
+                최적 레이아웃 — {LAYOUT_TYPE_LABELS[result.layoutFamily] || result.layoutFamily}
               </div>
               <p style={{ fontSize: 11, fontFamily: T.mono, color: T.muted }}>
                 스타일: {result.style} · outputs/{result.runId}/

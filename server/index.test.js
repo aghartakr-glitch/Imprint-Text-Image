@@ -30,7 +30,7 @@ test('POST /api/generate accepts multipart images+text, returns ONE best-layout 
 
   assert.equal(response.status, 200)
   assert.equal(body.ok, true)
-  assert.ok(['image-first', 'balanced', 'text-first'].includes(body.layoutType))
+  assert.ok(['image-first', 'balanced', 'text-first'].includes(body.layoutFamily))
   assert.ok(body.pagesPdf.startsWith('/outputs/'))
   assert.ok(body.spreadPdf.endsWith('spread-preview.pdf'))
   assert.equal(body.compileOk, true)

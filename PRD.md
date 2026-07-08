@@ -20,9 +20,37 @@
 - **`generation-log.json` 스키마 변경**: 후보별 정보 대신 `selection_mode: "best_only"`,
   `selected_layout_type`, `selected_style`, `selected_pattern_id`, `selection_reason`,
   `input.image_ratios`, `input.text_density`, `validation.passed/issues` 등을 기록한다.
-- 실제 구현 위치: `src/core/selectLayout.js`(LLM 판단 + 검증), `src/core/layoutTypeRules.js`(규칙 기반
-  폴백), `src/core/textDensity.js`(short/medium/long 판정), `src/core/generateBestLayout.js`(선택된
-  패턴 1개로 실제 레이아웃 생성), `server/runGeneration.mjs`(전체 흐름).
+- 실제 구현 위치(v0.2, 아래 0.1에서 대체됨): ~~`src/core/selectLayout.js`, `src/core/layoutTypeRules.js`,
+  `src/core/patternLibrary.js`~~ (삭제됨), `src/core/textDensity.js`(유지).
+
+## 0.1 개정 사항 (v0.3, 2026-07-08) — 고정 패턴 선택 폐지, LLM grid 기반 layout_plan 생성으로 전환
+
+0장(v0.2)에서도 여전히 LLM은 "미리 정의된 3개 패턴(A/B/C 성격) 중 하나의 pattern_id"만 골랐다.
+실제 페이지 구성 자체(이미지·텍스트 배치)는 이미지 개수별로 고정된 패턴 JSON에서 그대로 가져왔다.
+v0.3에서는 이 마지막 고정 선택 단계마저 없앤다.
+
+- **LLM이 6 columns × 12 rows grid 안에서 직접 layout_plan을 생성한다.** 페이지 크기·여백·본문
+  크기/행간 등 고정 제약조건은 코드가 그대로 지키고, LLM은 각 요소(이미지/텍스트)의 grid 좌표
+  (`col_start`,`col_span`,`row_start`,`row_span`)와 style/layout_family/base_pattern_reference/reason만
+  결정한다. mm 좌표 변환은 100% 코드가 담당(`gridToMm.js`).
+- **`imprint_pattern_library_v0.2.json`은 이제 선택 가능한 템플릿이 아니라 참고용 지식베이스**다
+  (`single_full_page`, `two_equal_images`, `hero_plus_grid` 등 10개 구도의 "언제 적합한지" 설명만
+  담음). `imprint_layout_dataset_200x_v0.5.csv`(레퍼런스 태깅 데이터셋)에서 패턴별 대표 샘플을 뽑아
+  few-shot 예시로 프롬프트에 포함한다(`src/core/layoutDataset.js`).
+- **코드가 LLM의 layout_plan을 반드시 검증한다** (`src/core/validateLayoutPlan.js`, 15개 항목: style/
+  layout_family 허용값, grid 크기, 요소별 grid 범위, 겹침, fit=contain, 캡션 금지, 본문 텍스트 존재,
+  업로드 이미지 전부 배치, overflow_policy 값 등). 실패 시: 단순 누락은 자동 보정
+  (`repairLayoutPlan.js`: fit/role/overflow_policy 누락만) → 안 되면 검증 오류를 포함해 LLM에 최대
+  2회 재요청 → 그래도 실패하면 결정론적 grid 폴백(`fallbackLayoutPlan.js`, 이미지 개수×본문 길이
+  조합별 규칙) 사용. 재시도 횟수·보정 여부·폴백 여부는 `generation-log.json`에 기록.
+- **실제 구현 위치**: `src/core/gridToMm.js`(grid→mm 변환), `src/core/validateLayoutPlan.js`(검증),
+  `src/core/repairLayoutPlan.js`(자동 보정), `src/core/fallbackLayoutPlan.js`(결정론적 폴백),
+  `src/core/buildLayoutPrompt.js`(시스템/사용자 프롬프트), `src/core/callLayoutLLM.js`(호출+검증+
+  보정+재시도+폴백 오케스트레이션), `src/core/paginateGridPlan.js`(본문 텍스트를 body 박스에 배분 +
+  오버플로우 연속 페이지 생성), `src/core/resolveGridPage.js`(grid 요소 → mm 좌표의 실제 페이지 객체),
+  `src/core/generateBestLayout.js`(위 전체를 받아 LaTeX 생성), `server/runGeneration.mjs`(전체 흐름).
+- 자세한 배경은 `docs/superpowers/specs/2026-07-08-imprint-image-text-grid-layout-plan.md`
+  (예정) 및 `imprint_llm_layout_planner_prompt_v0.2.md` 참고.
 
 ---
 

@@ -3,7 +3,15 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { analyzeInput } from './analyzeInput.js'
+import { analyzeInput, orientationFromRatio } from './analyzeInput.js'
+
+test('orientationFromRatio applies the spec thresholds (>=1.2 landscape, >=0.85 square, else portrait)', () => {
+  assert.equal(orientationFromRatio(1.45), 'landscape')
+  assert.equal(orientationFromRatio(1.2), 'landscape')
+  assert.equal(orientationFromRatio(1.0), 'square')
+  assert.equal(orientationFromRatio(0.85), 'square')
+  assert.equal(orientationFromRatio(0.78), 'portrait')
+})
 
 function makeFakePng(width, height) {
   const buf = Buffer.alloc(33)

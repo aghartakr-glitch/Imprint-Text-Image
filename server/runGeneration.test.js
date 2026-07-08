@@ -21,7 +21,7 @@ async function getPdfPageCount(pdfPath) {
 // A real, fully valid 1x1 PNG (not just a header) so XeLaTeX's \includegraphics can embed it.
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
-test('runGeneration produces exactly ONE real, compiled best-layout result (no A/B/C) in mock mode', async () => {
+test('runGeneration produces exactly ONE real, compiled best-layout result via grid layout_plan (mock mode = deterministic fallback)', async () => {
   const srcDir = mkdtempSync(join(tmpdir(), 'imprint-it-src-'))
   const outputsRoot = mkdtempSync(join(tmpdir(), 'imprint-it-outputs-'))
   const imgPath = join(srcDir, 'photo.png')
@@ -37,15 +37,15 @@ test('runGeneration produces exactly ONE real, compiled best-layout result (no A
     llmOptions: { mockMode: true },
   })
 
-  assert.equal(result.selection.source, 'rule-based')
-  assert.ok(['image-first', 'balanced', 'text-first'].includes(result.selection.layoutType))
+  assert.equal(result.llmResult.fallbackUsed, true) // mock mode always uses the deterministic fallback
+  assert.ok(['image-first', 'balanced', 'text-first'].includes(result.layoutFamily))
   assert.equal(result.compile.ok, true, `compile failed: ${JSON.stringify(result.compile)}`)
   assert.equal(result.spread.ok, true, `spread failed: ${JSON.stringify(result.spread)}`)
   assert.ok(existsSync(join(result.dir, 'pages.pdf')))
   assert.ok(existsSync(join(result.dir, 'spread-preview.pdf')))
   assert.ok(existsSync(join(result.dir, 'main.tex')))
   assert.ok(existsSync(join(result.dir, 'layout.json')))
-  assert.ok(result.dir.endsWith('best-layout') || result.dir.includes('best-layout'))
+  assert.ok(result.dir.includes('best-layout'))
 
   // Regression guard: overlay textblocks (textpos [absolute,overlay]) contribute nothing to the
   // main vertical list, so \newpage alone can silently collapse multiple logical pages into one
@@ -56,10 +56,12 @@ test('runGeneration produces exactly ONE real, compiled best-layout result (no A
 
   assert.ok(existsSync(join(result.runDir, 'generation-log.json')))
   assert.ok(existsSync(join(result.runDir, 'input', 'input-text.txt')))
-  assert.equal(result.log.layout_settings.selection_mode, 'best_only')
-  assert.equal(result.log.layout_settings.selected_pattern_id, result.patternId)
+  assert.equal(result.log.layout_settings.selection_mode, 'llm_constrained_layout_plan')
+  assert.equal(result.log.layout_settings.base_pattern_reference, result.basePatternReference)
   assert.equal(result.log.outputs.best_layout, 'best-layout/')
   assert.equal(result.log.validation.passed, true)
+  assert.equal(result.log.validation.fallback_used, true)
+  assert.deepEqual(result.log.input.image_orientations, ['square', 'square'])
 
   rmSync(srcDir, { recursive: true, force: true })
   rmSync(outputsRoot, { recursive: true, force: true })

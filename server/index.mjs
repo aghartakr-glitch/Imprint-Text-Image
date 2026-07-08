@@ -123,9 +123,10 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
       respond(200, {
         ok: true,
         runId: result.runId,
-        style: result.selection.style,
-        layoutType: result.layoutType,
-        reason: result.selection.reason,
+        style: result.style,
+        layoutFamily: result.layoutFamily,
+        basePatternReference: result.basePatternReference,
+        reason: result.llmResult.plan.reason,
         pagesPdf: `/outputs/${result.runId}/${folderName}/pages.pdf`,
         spreadPdf: `/outputs/${result.runId}/${folderName}/spread-preview.pdf`,
         compileOk: result.compile.ok,
