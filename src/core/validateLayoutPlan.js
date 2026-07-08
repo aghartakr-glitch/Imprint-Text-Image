@@ -1,8 +1,7 @@
 import { GRID_COLUMNS, GRID_ROWS } from './layoutConstants.js'
+import { DESIGN_SPACE } from './designSpace.js'
 
 const VALID_STYLES = ['Editorial', 'Magazine', 'Exhibition Catalog']
-const VALID_LAYOUT_FAMILIES = ['image-first', 'balanced', 'text-first']
-const VALID_IMAGE_ROLES = ['hero', 'support', 'equal', 'gallery']
 
 function colRangeOverlap(a, b) {
   return a.col_start <= b.col_start + b.col_span - 1 && b.col_start <= a.col_start + a.col_span - 1
@@ -11,10 +10,15 @@ function rowRangeOverlap(a, b) {
   return a.row_start <= b.row_start + b.row_span - 1 && b.row_start <= a.row_start + a.row_span - 1
 }
 
-// Every one of the 15 checks from the spec's validation checklist, minus "JSON parses" (that's
-// the caller's job via JSON.parse before this ever runs). Grid-bounds checks (6/7/8) also cover
-// "no element leaves the page" (15): a valid grid position maps to a physical box fully inside
-// the page by construction, so there's nothing extra to check in mm-space.
+function checkEnum(value, allowed, fieldName, issues, required = true) {
+  if (value == null && !required) return
+  if (!allowed.includes(value)) issues.push(`알 수 없는 ${fieldName}: ${value}`)
+}
+
+// Every check from spec v0.3 section 9 plus the v0.4 supplement's extended schema fields
+// (output_unit, layout_purpose, image_hierarchy, image_text_relation, composition_strategy,
+// object_position, design_sequence) validated against designSpace.js's vocabulary. "JSON parses"
+// isn't checked here -- that's the caller's job via JSON.parse before this ever runs.
 export function validateLayoutPlan(plan, { imageCount } = {}) {
   const issues = []
 
@@ -22,12 +26,18 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
     return { passed: false, issues: ['layout_plan이 객체가 아닙니다'] }
   }
 
-  if (!VALID_STYLES.includes(plan.style)) {
-    issues.push(`알 수 없는 style: ${plan.style}`)
+  checkEnum(plan.style, VALID_STYLES, 'style', issues)
+  checkEnum(plan.layout_family, DESIGN_SPACE.layoutFamilies, 'layout_family', issues)
+  checkEnum(plan.output_unit, DESIGN_SPACE.outputUnits, 'output_unit', issues)
+  checkEnum(plan.layout_purpose, DESIGN_SPACE.layoutPurposes, 'layout_purpose', issues)
+  checkEnum(plan.image_hierarchy, DESIGN_SPACE.imageHierarchies, 'image_hierarchy', issues)
+  checkEnum(plan.image_text_relation, DESIGN_SPACE.imageTextRelations, 'image_text_relation', issues)
+  checkEnum(plan.composition_strategy, DESIGN_SPACE.compositionStrategies, 'composition_strategy', issues)
+
+  if (!Array.isArray(plan.design_sequence) || plan.design_sequence.length === 0) {
+    issues.push('design_sequence가 비어 있거나 배열이 아닙니다')
   }
-  if (!VALID_LAYOUT_FAMILIES.includes(plan.layout_family)) {
-    issues.push(`알 수 없는 layout_family: ${plan.layout_family}`)
-  }
+
   if (!plan.grid || plan.grid.columns !== GRID_COLUMNS) {
     issues.push(`grid.columns는 ${GRID_COLUMNS}이어야 합니다 (받은 값: ${plan.grid?.columns})`)
   }
@@ -62,17 +72,14 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
         if (el.fit !== 'contain') {
           issues.push(`요소 ${el.id}: 이미지의 fit은 항상 contain이어야 합니다 (받은 값: ${el.fit})`)
         }
-        if (el.role && !VALID_IMAGE_ROLES.includes(el.role)) {
-          issues.push(`요소 ${el.id}: 알 수 없는 이미지 role: ${el.role}`)
-        }
+        if (el.role) checkEnum(el.role, DESIGN_SPACE.imageRoles, `요소 ${el.id}의 role`, issues)
+        if (el.object_position) checkEnum(el.object_position, DESIGN_SPACE.objectPositions, `요소 ${el.id}의 object_position`, issues)
         const match = /^image_(\d+)$/.exec(el.id || '')
         if (match) seenImageIndices.add(Number(match[1]))
       }
 
       if (el.type === 'text') {
-        if (el.role === 'caption') {
-          issues.push(`요소 ${el.id}: 캡션 요소는 허용되지 않습니다`)
-        }
+        if (el.role != null) checkEnum(el.role, DESIGN_SPACE.textRoles, `요소 ${el.id}의 role`, issues)
         if (el.role === 'body') hasBodyText = true
       }
     })

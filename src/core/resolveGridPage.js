@@ -19,7 +19,7 @@ export function resolveGridPage(elements, imagePaths, textSlicesByElementId = {}
         throw new Error(`이미지 요소 ${el.id}에 대응하는 업로드 이미지가 없습니다`)
       }
       images.push({
-        path, ...box, fullBleed: false,
+        path, ...box, fullBleed: false, objectPosition: el.object_position || 'center',
       })
     } else if (el.type === 'text' && el.role === 'body' && textZone == null) {
       textZone = box

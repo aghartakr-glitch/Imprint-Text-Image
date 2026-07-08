@@ -1,5 +1,61 @@
 # Imprint(Image+Text)
 
+## 0.2 개정 사항 (v0.4, 2026-07-08) — generator-reconstructor-estimator 구조로 확장
+
+0.1장(v0.3)의 grid 기반 layout_plan 방향은 그대로 유지하되, 다음을 추가한다.
+**이 0.2장이 최신 사양이다.**
+
+- **파이프라인**: Input Analyzer → Design Space Mapper → Reference Retriever → LLM Layout
+  Candidate Generator(3개) → Layout Validator → Layout Reconstructor → Layout Refiner → Layout
+  Estimator → Best Layout Selector → LaTeX Renderer → User Feedback Logger.
+- **Design Space** (`src/core/designSpace.js`): output_unit, layout_family, layout_purpose,
+  image_hierarchy, image_text_relation, composition_strategy, text role, object_position 허용값을
+  한 곳에서 정의하고 `validateLayoutPlan.js`가 이를 근거로 검증한다.
+- **output_unit 판단** (`src/core/outputUnit.js`): single_page vs spread를 이미지 개수/본문
+  길이/사용자 선택으로 결정하는 규칙(스펙 4.2)을 구현. LLM 프롬프트에는 권고값으로만 전달되고,
+  최종 판단은 LLM의 grid 좌표에 실제로 반영된다.
+- **Content Structure / Image Metadata**: `contentStructure.js`(제목/본문 길이 분석, 부제/섹션
+  라벨/페이지 번호는 이 시스템에 해당 입력 자체가 없어 항상 false로 정직하게 보고),
+  `imageHierarchy.js`(이미지별 resolution_score 계산 + hero/equal/gallery 추정, 스펙 6.2 규칙).
+- **Dataset Retrieval** (`src/core/retrieveLayoutReferences.js`): 1000행 CSV 전체를 프롬프트에
+  넣지 않고, image_count/text_density/output_unit/orientation/quality_score로 점수를 매겨 상위
+  3~5개만 few-shot으로 전달. CSV 자체도 `scripts/rebalanceDatasetQuality.mjs`로 불가능한 조합을
+  제거하고 quality_score 분포를 5점 20%/4점 35%/3점 25%/2점 15%/1점 5%로 재조정했다(원래 순위는
+  유지, 임의 재배정이 아님).
+- **내부 후보 3개 → 평가 → 선택**: LLM 호출 1번으로 후보 3개를 동시에 요청
+  (`generateLayoutCandidates.js`), 각각 개별 검증/자동 보정(`repairLayoutPlan.js`)하고, 하나도
+  유효하지 않을 때만 배치 전체를 최대 2회 재요청(`buildRetryPrompt.js`, `callLayoutLLM.js`).
+  모든 후보가 실패하면 결정론적 폴백(`fallbackLayoutPlan.js`, v0.4 스키마로 갱신).
+- **Reconstructor/Refiner** (`reconstructLayout.js`, `refineLayout.js`): grid→mm 변환 후 실제
+  이미지 파일·본문 텍스트 배정, overflow 연속 페이지 생성은 v0.3과 동일. v0.4에서 실제로 새로
+  구현된 부분은 **object_position 기반 이미지 정렬**이다 — `fit: contain`만으로는 이미지가 항상
+  박스 좌상단에 붙는 LaTeX 기본 동작이 있었는데, 실제 이미지 비율을 읽어 center/top/bottom/
+  left/right에 맞게 재배치한다. 그 외(빈 페이지, 좁은 텍스트 박스)는 자동 보정 대신 로그로만
+  남긴다(겹침 재발 위험 때문에 이미 검증 통과한 박스를 다시 건드리지 않음).
+- **Estimator/Selector** (`estimateLayoutQuality.js`, `selectBestLayout.js`): 규칙 기반 5점
+  평가(가독성/시각균형/위계/여백/이미지-텍스트 관계) — 딥러닝 기반이 아님. 동점일 때는 "보정
+  없음 > 가독성 높음 > 시각균형 높음" 순으로 우선순위.
+- **Diversity Control** (`src/core/diversityControl.js`): `logs/recent-layouts.json`에 최근
+  생성 이력을 저장하고, 최근 5회 중 같은 composition_strategy가 3회 이상이면 감점.
+- **User Controls / Preference Feedback**: `userControls`를 HTTP 요청에 JSON으로 실어 보내면
+  LLM 프롬프트에 소프트 가이드로 전달된다(`server/index.mjs`). **단, `logUserFeedback.js`/
+  `applyUserPreferences.js`는 저장·반영 로직만 구현했다 — 이 프로젝트의 UI는 아직 결과 PDF
+  링크만 보여주는 읽기 전용이라, 실제로 레이아웃을 드래그/리사이즈해서 수정하는 기능 자체가
+  없다.** 그래서 지금은 이 저장소가 항상 비어 있고, 향후 편집 UI를 만들 때 `logUserFeedback()`
+  호출 한 줄만 추가하면 되도록 배관만 미리 깔아둔 상태다.
+- **generation-log.json 스키마**가 `generation_log_version: "0.4"`로 확장되어 retrieved_references,
+  user_controls, user_preference_context, internal_candidates(후보별 점수/기각 사유),
+  selected_candidate, design_sequence, refinement, diversity_control을 모두 기록한다.
+- **하지 않은 것(의도적 범위 제외)**: (1) 실제 사용자 편집 UI 자체 — `EVALUATION.md`에 향후
+  계획만 정리. (2) CSV 1000행 수작업 50개 spot-check — 대신 규칙 기반 필터링 스크립트로 대체.
+  (3) 정식 사용자 평가/전문가 인터뷰(Condition A~E 비교 실험) — 조건과 측정 항목만 `EVALUATION.md`에
+  설계해 두고 실제 실험은 실행하지 않았다(실 사용자가 필요한 작업).
+- 실제 구현 위치: `src/core/designSpace.js`, `outputUnit.js`, `contentStructure.js`,
+  `imageHierarchy.js`, `retrieveLayoutReferences.js`, `layoutDataset.js`, `buildLayoutPrompt.js`,
+  `buildRetryPrompt.js`, `generateLayoutCandidates.js`, `callLayoutLLM.js`, `reconstructLayout.js`,
+  `refineLayout.js`, `estimateTextCapacity.js`, `estimateLayoutQuality.js`, `selectBestLayout.js`,
+  `diversityControl.js`, `logUserFeedback.js`, `applyUserPreferences.js`, `server/runGeneration.mjs`.
+
 ## 0. 개정 사항 (2026-07-07) — Candidate A/B/C 폐지, 최적 레이아웃 1개로 변경
 
 아래 원본 PRD(1~12장)는 초기 버전이며, 실제 구현은 이후 사용자 지시로 다음과 같이 개정되었다.

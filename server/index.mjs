@@ -40,6 +40,7 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
   let text = ''
   let title = ''
   let apiKey = ''
+  let userControlsRaw = ''
   let fileCount = 0
   let rejected = null
   // busboy can fire 'error' and then still fire 'close' (behavior varies by version/error type),
@@ -56,6 +57,7 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
     if (name === 'text') text = value
     if (name === 'title') title = value
     if (name === 'apiKey') apiKey = value
+    if (name === 'userControls') userControlsRaw = value
   })
 
   bb.on('file', (name, stream, info) => {
@@ -115,18 +117,27 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
     }
     if (imagePaths.length < 1) return respond(400, { ok: false, error: '이미지를 1장 이상 업로드해야 합니다' })
     if (!text.trim()) return respond(400, { ok: false, error: '본문 텍스트를 입력해야 합니다' })
+    let userControls = {}
+    if (userControlsRaw) {
+      try {
+        userControls = JSON.parse(userControlsRaw)
+      } catch (err) {
+        return respond(400, { ok: false, error: '잘못된 userControls JSON입니다: ' + String(err.message || err) })
+      }
+    }
     try {
       const result = await runGeneration({
-        imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode, ...(apiKey && { apiKey }) },
+        imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode, ...(apiKey && { apiKey }) }, userControls,
       })
       const folderName = result.dir.split(/[\\/]/).pop()
       respond(200, {
         ok: true,
         runId: result.runId,
         style: result.style,
+        outputUnit: result.outputUnit,
         layoutFamily: result.layoutFamily,
         basePatternReference: result.basePatternReference,
-        reason: result.llmResult.plan.reason,
+        reason: result.selected.plan.reason,
         pagesPdf: `/outputs/${result.runId}/${folderName}/pages.pdf`,
         spreadPdf: `/outputs/${result.runId}/${folderName}/spread-preview.pdf`,
         compileOk: result.compile.ok,

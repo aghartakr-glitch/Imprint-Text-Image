@@ -1,11 +1,16 @@
 # Imprint(Image+Text)
 
 이미지 1~6장 + 본문 텍스트를 넣으면, 입력 조건(이미지 개수·비율·방향, 본문 길이, 제목 유무)을
-LLM이 직접 해석해 **6 columns × 12 rows grid 안에서 layout_plan을 생성**하고, 코드가 이를 검증·
-보정·필요시 재요청한 뒤 A5 레이아웃 1개(`best-layout/`)로 변환하는 독립 시스템이다. 페이지 크기·
-여백·본문 크기/행간 같은 고정 제약은 LLM이 바꿀 수 없고, mm 좌표 계산은 100% 코드가 담당한다.
-LLM은 고정 패턴을 고르는 게 아니라 grid 좌표 자체를 판단한다. 자세한 배경은 `PRD.md` 0.1장,
-`imprint_llm_layout_planner_prompt_v0.2.md` 참고.
+LLM이 직접 해석해 **6 columns × 12 rows grid 안에서 layout_plan 후보 3개를 생성**하고, 각각
+검증·자동 보정한 뒤 규칙 기반 estimator로 점수를 매겨 가장 좋은 1개만 최종 A5 레이아웃
+(`best-layout/`)으로 만드는 독립 시스템이다. 페이지 크기·여백·본문 크기/행간 같은 고정 제약은
+LLM이 바꿀 수 없고, mm 좌표 계산은 100% 코드가 담당한다.
+
+파이프라인: Input Analyzer → Design Space Mapper → Reference Retriever(CSV에서 유사 사례
+3~5개 검색) → LLM Layout Candidate Generator(후보 3개) → Layout Validator → Layout
+Reconstructor → Layout Refiner(object_position 등) → Layout Estimator → Best Layout Selector
+→ LaTeX Renderer. 자세한 배경은 `PRD.md` 0.2장, `imprint_llm_layout_planner_prompt_v0.2.md`
+참고. 평가 설계는 `EVALUATION.md` 참고.
 `Imprint`(본문 텍스트 전용), `Imprint(Cover)`(표지)의 자매 시스템이며, 두 프로젝트의 코드는 이 저장소에서 읽기 전용으로만 참고했다.
 
 ## 실행 방법
@@ -38,14 +43,17 @@ npm test
 
 ```
 Imprint(Image+Text)/
-├─ src/core/          입력 분석, grid layout_plan 프롬프트/호출/검증/보정/폴백, 페이지네이션, LaTeX 조립
+├─ src/core/          입력 분석 · design space · retrieval · LLM 후보 생성/검증/보정 ·
+│                     reconstruct/refine/estimate/select · 페이지네이션 · LaTeX 조립
 ├─ src/data/           패턴 지식베이스(imprint_pattern_library_v0.2.json), 레퍼런스 데이터셋(csv)
+├─ scripts/            데이터셋 정비 스크립트 (rebalanceDatasetQuality.mjs)
 ├─ server/             HTTP 서버, XeLaTeX 컴파일, 출력 폴더/로그 저장, 전체 오케스트레이션
 ├─ src/frontend/        React UI (업로드 폼, Generate 버튼, 결과 보기)
 ├─ templates/           .tex/.sty 템플릿
 ├─ assets/fonts/        Noto Sans KR (본문 + 제목/구조용)
 ├─ uploads/             업로드된 원본 이미지(임시)
 ├─ outputs/             생성 결과 (타임스탬프 폴더별)
+├─ logs/                최근 레이아웃 이력(diversity), 사용자 preference feedback(저장만, UI 미구현)
 └─ docs/superpowers/    설계 스펙 + 구현 계획 문서
 ```
 

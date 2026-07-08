@@ -2,27 +2,31 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { callLayoutLLM } from './callLayoutLLM.js'
 
-const INPUT_METADATA = { image_count: 2, image_ratios: [1.2, 0.9], text_length_chars: 500, estimated_text_density: 'short' }
-
 function textResponse(obj) {
   return { content: [{ type: 'text', text: JSON.stringify(obj) }] }
 }
 
-function validPlanFor2Images(overrides = {}) {
+function validPlan(id, overrides = {}) {
   return {
+    candidate_id: id,
     style: 'Editorial',
+    output_unit: 'single_page',
     layout_family: 'balanced',
+    layout_purpose: 'case_analysis',
+    image_hierarchy: 'equal_pair',
+    image_text_relation: 'text_explains_image',
+    composition_strategy: 'image_above_text',
     base_pattern_reference: 'two_equal_images',
     layout_intent: 'test',
+    design_sequence: [{
+      step: 1, decision_type: 'layout_family', value: 'balanced', reason: 'test',
+    }],
     grid: { columns: 6, rows: 12 },
     pages: [{
       page: 1,
       elements: [
         {
-          id: 'image_1', type: 'image', role: 'equal', page: 1, col_start: 1, col_span: 3, row_start: 1, row_span: 6, fit: 'contain',
-        },
-        {
-          id: 'image_2', type: 'image', role: 'equal', page: 1, col_start: 4, col_span: 3, row_start: 1, row_span: 6, fit: 'contain',
+          id: 'image_1', type: 'image', role: 'equal', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 6, fit: 'contain',
         },
         {
           id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 8, row_span: 5,
@@ -52,97 +56,83 @@ function queueClient(responses) {
   }
 }
 
-test('no API key and not mock mode returns a deterministic fallback (never throws)', async () => {
+test('no API key and not mock mode returns fallbackUsed=true with no candidates (never throws)', async () => {
   const result = await callLayoutLLM(
-    { inputMetadata: INPUT_METADATA, imageCount: 2, textDensity: 'short' },
+    { promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 },
     { apiKey: undefined, mockMode: false },
   )
   assert.equal(result.fallbackUsed, true)
+  assert.deepEqual(result.candidates, [])
   assert.equal(result.retryCount, 0)
-  assert.equal(result.validation.passed, true)
 })
 
-test('mockMode=true uses fallback even with an API key present', async () => {
-  const result = await callLayoutLLM(
-    { inputMetadata: INPUT_METADATA, imageCount: 2, textDensity: 'short' },
-    { apiKey: 'sk-fake', mockMode: true },
-  )
+test('mockMode=true skips the API even with a key present', async () => {
+  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: true })
   assert.equal(result.fallbackUsed, true)
 })
 
-test('a valid plan on the first try is used as-is, no retry, no repair', async () => {
-  const client = queueClient([{ response: textResponse(validPlanFor2Images()) }])
-  const result = await callLayoutLLM(
-    { inputMetadata: INPUT_METADATA, imageCount: 2, textDensity: 'short' },
-    { apiKey: 'sk-fake', mockMode: false, client },
-  )
+test('all 3 candidates valid on the first try are all returned, none rejected', async () => {
+  const client = queueClient([{
+    response: textResponse({ candidates: [validPlan('candidate_1'), validPlan('candidate_2'), validPlan('candidate_3')] }),
+  }])
+  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
+  assert.equal(result.candidates.length, 3)
+  assert.equal(result.rejectedCandidates.length, 0)
   assert.equal(result.source, 'llm')
   assert.equal(result.retryCount, 0)
   assert.equal(result.fallbackUsed, false)
-  assert.equal(result.repairAttempted, false)
   assert.equal(client.calls.length, 1)
 })
 
-test('a plan missing only fit/role is auto-repaired without a retry', async () => {
-  const plan = validPlanFor2Images()
-  delete plan.pages[0].elements[0].fit
-  const client = queueClient([{ response: textResponse(plan) }])
-  const result = await callLayoutLLM(
-    { inputMetadata: INPUT_METADATA, imageCount: 2, textDensity: 'short' },
-    { apiKey: 'sk-fake', mockMode: false, client },
-  )
-  assert.equal(result.repairAttempted, true)
-  assert.equal(result.fallbackUsed, false)
-  assert.equal(result.retryCount, 0)
-  assert.equal(result.plan.pages[0].elements[0].fit, 'contain')
-  assert.equal(client.calls.length, 1)
+test('a candidate missing only fit/role is repaired and kept; a genuinely broken one is rejected', async () => {
+  const missingFit = validPlan('candidate_1')
+  delete missingFit.pages[0].elements[0].fit
+
+  const overlapping = validPlan('candidate_2')
+  overlapping.pages[0].elements[1] = { ...overlapping.pages[0].elements[1], col_start: 1, col_span: 6, row_start: 1, row_span: 6 }
+
+  const client = queueClient([{ response: textResponse({ candidates: [missingFit, overlapping, validPlan('candidate_3')] }) }])
+  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
+
+  assert.equal(result.candidates.length, 2) // candidate_1 (repaired) + candidate_3
+  assert.equal(result.rejectedCandidates.length, 1) // candidate_2
+  const repairedOne = result.candidates.find((c) => c.candidateId === 'candidate_1')
+  assert.equal(repairedOne.repaired, true)
+  assert.equal(repairedOne.plan.pages[0].elements[0].fit, 'contain')
 })
 
-test('an unrepairable overlap on attempt 1, fixed on attempt 2, succeeds via retry', async () => {
-  const overlapping = validPlanFor2Images()
-  overlapping.pages[0].elements[1] = { ...overlapping.pages[0].elements[1], col_start: 1, col_span: 3 }
-  const fixed = validPlanFor2Images()
-
+test('if every candidate fails on attempt 1 but all pass on attempt 2, it recovers via retry', async () => {
+  const broken = validPlan('candidate_1')
+  broken.style = 'Noir'
   const client = queueClient([
-    { response: textResponse(overlapping) },
-    { response: textResponse(fixed) },
+    { response: textResponse({ candidates: [broken] }) },
+    { response: textResponse({ candidates: [validPlan('candidate_1'), validPlan('candidate_2')] }) },
   ])
-  const result = await callLayoutLLM(
-    { inputMetadata: INPUT_METADATA, imageCount: 2, textDensity: 'short' },
-    { apiKey: 'sk-fake', mockMode: false, client },
-  )
+  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
   assert.equal(result.source, 'llm-retry')
   assert.equal(result.retryCount, 1)
-  assert.equal(result.fallbackUsed, false)
-  assert.equal(client.calls.length, 2)
-  // the retry prompt should carry the previous validation errors forward
-  assert.match(client.calls[1].messages[0].content, /previous layout_plan failed validation/)
-})
-
-test('malformed JSON on the first attempt recovers via retry', async () => {
-  const client = queueClient([
-    { response: { content: [{ type: 'text', text: 'not json at all' }] } },
-    { response: textResponse(validPlanFor2Images()) },
-  ])
-  const result = await callLayoutLLM(
-    { inputMetadata: INPUT_METADATA, imageCount: 2, textDensity: 'short' },
-    { apiKey: 'sk-fake', mockMode: false, client },
-  )
-  assert.equal(result.source, 'llm-retry')
-  assert.equal(result.retryCount, 1)
+  assert.equal(result.candidates.length, 2)
   assert.equal(client.calls.length, 2)
 })
 
-test('all 3 attempts (1 initial + 2 retries) failing falls back to the deterministic plan', async () => {
-  const stillOverlapping = validPlanFor2Images()
-  stillOverlapping.pages[0].elements[1] = { ...stillOverlapping.pages[0].elements[1], col_start: 1, col_span: 3 }
-  const client = queueClient([{ response: textResponse(stillOverlapping) }])
-  const result = await callLayoutLLM(
-    { inputMetadata: INPUT_METADATA, imageCount: 2, textDensity: 'short' },
-    { apiKey: 'sk-fake', mockMode: false, client },
-  )
+test('malformed JSON on attempt 1 recovers via retry on attempt 2', async () => {
+  const client = queueClient([
+    { response: { content: [{ type: 'text', text: 'not json' }] } },
+    { response: textResponse({ candidates: [validPlan('candidate_1')] }) },
+  ])
+  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
+  assert.equal(result.source, 'llm-retry')
+  assert.equal(result.retryCount, 1)
+})
+
+test('all 3 attempts failing (1 initial + 2 retries) falls back with no candidates', async () => {
+  const broken = validPlan('candidate_1')
+  broken.style = 'Noir'
+  const client = queueClient([{ response: textResponse({ candidates: [broken] }) }])
+  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
   assert.equal(result.fallbackUsed, true)
   assert.equal(result.retryCount, 2)
+  assert.equal(result.candidates.length, 0)
   assert.equal(client.calls.length, 3)
-  assert.equal(result.validation.passed, true) // the fallback plan itself is always valid
+  assert.ok(result.fallbackReason.length > 0)
 })

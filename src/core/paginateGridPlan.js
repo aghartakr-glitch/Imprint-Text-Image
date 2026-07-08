@@ -1,11 +1,5 @@
-import { CHAR_WIDTH_MM, LINE_HEIGHT_MM } from './layoutConstants.js'
 import { gridToMm } from './gridToMm.js'
-
-function textCapacity(wMm, hMm) {
-  const charsPerLine = Math.floor(wMm / CHAR_WIDTH_MM)
-  const lines = Math.floor(hMm / LINE_HEIGHT_MM)
-  return Math.max(0, charsPerLine * lines)
-}
+import { estimateTextCapacityMm } from './estimateTextCapacity.js'
 
 // A full-page text-only box used for continuation pages once body text overflows every body box
 // the plan itself defined. Matches overflow_policy.body_overflow: continue_to_next_page.
@@ -25,7 +19,7 @@ export function paginateGridPlan(plan, text) {
     const textSlicesByElementId = {}
     if (bodyEl) {
       const box = gridToMm(bodyEl)
-      const capacity = textCapacity(box.wMm, box.hMm)
+      const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
       const slice = capacity > 0 && remainingText.length > 0 ? remainingText.slice(0, capacity) : null
       if (slice) remainingText = remainingText.slice(slice.length)
       textSlicesByElementId[bodyEl.id] = slice
@@ -36,7 +30,7 @@ export function paginateGridPlan(plan, text) {
   const overflowPages = []
   while (remainingText.length > 0) {
     const box = gridToMm(OVERFLOW_BODY_ELEMENT)
-    const capacity = textCapacity(box.wMm, box.hMm)
+    const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
     if (capacity <= 0) throw new Error('오버플로우 텍스트 페이지의 수용량이 0입니다')
     const slice = remainingText.slice(0, capacity)
     remainingText = remainingText.slice(capacity)

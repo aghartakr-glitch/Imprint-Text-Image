@@ -1,4 +1,5 @@
 import { GRID_COLUMNS, GRID_ROWS } from './layoutConstants.js'
+import { decideOutputUnit } from './outputUnit.js'
 
 // Same row-splitting idea the old fixed pattern library used for image grids, but expressed in
 // grid cells (columns/rows) instead of mm, so it slots straight into a layout_plan.
@@ -30,7 +31,7 @@ function splitGridCells(count, region) {
 
 function imageElements(imageCount, region, role) {
   return splitGridCells(imageCount, region).map((cell, i) => ({
-    id: `image_${i + 1}`, type: 'image', role, fit: 'contain', ...cell,
+    id: `image_${i + 1}`, type: 'image', role, fit: 'contain', object_position: 'center', ...cell,
   }))
 }
 
@@ -40,12 +41,51 @@ function bodyText(region) {
   }
 }
 
-function plan({ layoutFamily, basePatternReference, elements, reason }) {
+function designSequenceFor({
+  outputUnit, layoutPurpose, layoutFamily, imageHierarchy, imageTextRelation, compositionStrategy, reason,
+}) {
+  return [
+    {
+      step: 1, decision_type: 'output_unit', value: outputUnit, reason,
+    },
+    {
+      step: 2, decision_type: 'layout_purpose', value: layoutPurpose, reason,
+    },
+    {
+      step: 3, decision_type: 'layout_family', value: layoutFamily, reason,
+    },
+    {
+      step: 4, decision_type: 'image_hierarchy', value: imageHierarchy, reason,
+    },
+    {
+      step: 5, decision_type: 'image_text_relation', value: imageTextRelation, reason,
+    },
+    {
+      step: 6, decision_type: 'composition_strategy', value: compositionStrategy, reason,
+    },
+    {
+      step: 7, decision_type: 'grid_layout', value: `${GRID_COLUMNS}_columns_${GRID_ROWS}_rows`, reason: 'A5 고정 grid 사용',
+    },
+  ]
+}
+
+function plan({
+  layoutFamily, layoutPurpose, imageHierarchy, imageTextRelation, compositionStrategy, outputUnit,
+  basePatternReference, elements, reason,
+}) {
   return {
     style: 'Editorial',
+    output_unit: outputUnit,
     layout_family: layoutFamily,
+    layout_purpose: layoutPurpose,
+    image_hierarchy: imageHierarchy,
+    image_text_relation: imageTextRelation,
+    composition_strategy: compositionStrategy,
     base_pattern_reference: basePatternReference,
     layout_intent: reason,
+    design_sequence: designSequenceFor({
+      outputUnit, layoutPurpose, layoutFamily, imageHierarchy, imageTextRelation, compositionStrategy, reason,
+    }),
     grid: { columns: GRID_COLUMNS, rows: GRID_ROWS },
     pages: [{ page: 1, elements }],
     overflow_policy: { body_overflow: 'continue_to_next_page' },
@@ -53,12 +93,23 @@ function plan({ layoutFamily, basePatternReference, elements, reason }) {
   }
 }
 
-function multiPagePlan({ layoutFamily, basePatternReference, pagesElements, reason }) {
+function multiPagePlan({
+  layoutFamily, layoutPurpose, imageHierarchy, imageTextRelation, compositionStrategy, outputUnit,
+  basePatternReference, pagesElements, reason,
+}) {
   return {
     style: 'Editorial',
+    output_unit: outputUnit,
     layout_family: layoutFamily,
+    layout_purpose: layoutPurpose,
+    image_hierarchy: imageHierarchy,
+    image_text_relation: imageTextRelation,
+    composition_strategy: compositionStrategy,
     base_pattern_reference: basePatternReference,
     layout_intent: reason,
+    design_sequence: designSequenceFor({
+      outputUnit, layoutPurpose, layoutFamily, imageHierarchy, imageTextRelation, compositionStrategy, reason,
+    }),
     grid: { columns: GRID_COLUMNS, rows: GRID_ROWS },
     pages: pagesElements.map((elements, i) => ({ page: i + 1, elements })),
     overflow_policy: { body_overflow: 'continue_to_next_page' },
@@ -71,9 +122,16 @@ function multiPagePlan({ layoutFamily, basePatternReference, pagesElements, reas
 // text isn't explicitly listed there, so it's extended from the 3-4-image adaptive-grid rule
 // (same shape, just more cells).
 export function buildFallbackLayoutPlan({ imageCount, textDensity }) {
+  const { outputUnit } = decideOutputUnit({ imageCount, textDensity })
+
   if (imageCount === 1 && textDensity === 'long') {
     return plan({
       layoutFamily: 'text-first',
+      layoutPurpose: 'editorial_reading',
+      imageHierarchy: 'single_hero',
+      imageTextRelation: 'image_supports_text',
+      compositionStrategy: 'text_left_image_right',
+      outputUnit,
       basePatternReference: 'single_left_text_right_image',
       elements: [
         bodyText({
@@ -90,6 +148,11 @@ export function buildFallbackLayoutPlan({ imageCount, textDensity }) {
   if (imageCount === 1) {
     return plan({
       layoutFamily: 'image-first',
+      layoutPurpose: 'visual_showcase',
+      imageHierarchy: 'single_hero',
+      imageTextRelation: 'image_sets_mood',
+      compositionStrategy: 'image_above_text',
+      outputUnit,
       basePatternReference: 'single_page_with_text_below',
       elements: [
         ...imageElements(1, {
@@ -106,6 +169,11 @@ export function buildFallbackLayoutPlan({ imageCount, textDensity }) {
   if (imageCount === 2 && textDensity === 'short') {
     return plan({
       layoutFamily: 'image-first',
+      layoutPurpose: 'comparison',
+      imageHierarchy: 'equal_pair',
+      imageTextRelation: 'equal_visual_text',
+      compositionStrategy: 'equal_images',
+      outputUnit,
       basePatternReference: 'two_equal_images',
       elements: [
         ...imageElements(2, {
@@ -122,6 +190,11 @@ export function buildFallbackLayoutPlan({ imageCount, textDensity }) {
   if (imageCount === 2) {
     return plan({
       layoutFamily: 'balanced',
+      layoutPurpose: 'case_analysis',
+      imageHierarchy: 'equal_pair',
+      imageTextRelation: 'text_explains_image',
+      compositionStrategy: 'image_above_text',
+      outputUnit,
       basePatternReference: 'two_images_top_text_bottom',
       elements: [
         ...imageElements(2, {
@@ -138,6 +211,11 @@ export function buildFallbackLayoutPlan({ imageCount, textDensity }) {
   if (imageCount >= 3 && imageCount <= 6 && textDensity === 'long') {
     return multiPagePlan({
       layoutFamily: 'text-first',
+      layoutPurpose: 'gallery',
+      imageHierarchy: 'page_gallery',
+      imageTextRelation: 'gallery_then_text',
+      compositionStrategy: 'gallery_page_text_page',
+      outputUnit,
       basePatternReference: 'one_page_gallery_one_page_text',
       pagesElements: [
         imageElements(imageCount, {
@@ -154,6 +232,11 @@ export function buildFallbackLayoutPlan({ imageCount, textDensity }) {
   if (imageCount >= 3 && imageCount <= 6) {
     return plan({
       layoutFamily: 'balanced',
+      layoutPurpose: 'gallery',
+      imageHierarchy: 'grid_gallery',
+      imageTextRelation: 'equal_visual_text',
+      compositionStrategy: 'grid_gallery',
+      outputUnit,
       basePatternReference: imageCount === 4 ? 'grid_2x2_with_text' : 'gallery_with_text_block',
       elements: [
         ...imageElements(imageCount, {
