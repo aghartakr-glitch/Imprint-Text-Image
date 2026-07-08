@@ -57,6 +57,15 @@ You must generate exactly the requested number of internal candidate layout_plan
 array size in the Task section below), each individually valid. The user only ever sees one final
 result -- the system picks the best candidate itself.
 
+Output length limit (critical -- your response is cut off at a fixed token budget, and a response
+cut off mid-JSON is a hard failure with no partial credit):
+- Every "reason" and every design_sequence[].reason must be ONE short phrase, 8 words or fewer.
+  Do not write full sentences or repeat the same explanation in multiple places.
+- design_sequence needs only as many steps as there are real decisions (roughly 5-7), each just
+  { step, decision_type, value, reason } with that same 8-word-or-fewer reason.
+- Do not add any fields beyond what the schema below shows. Do not add commentary, markdown, or
+  code fences around the JSON.
+
 Return JSON only.`
 
 // One compact single-line example beats a pretty-printed one -- indentation/newlines are pure
@@ -75,9 +84,14 @@ const COMPACT_SCHEMA_EXAMPLE = JSON.stringify({
     composition_strategy: 'full_image | image_above_text | ... (see system prompt list)',
     base_pattern_reference: 'a known pattern_id',
     layout_intent: 'brief design intent',
-    design_sequence: [{
-      step: 1, decision_type: 'output_unit', value: '...', reason: '...',
-    }],
+    design_sequence: [
+      {
+        step: 1, decision_type: 'output_unit', value: '...', reason: 'short phrase, <=8 words',
+      },
+      {
+        step: 2, decision_type: 'composition_strategy', value: '...', reason: 'short phrase, <=8 words',
+      },
+    ],
     grid: { columns: 6, rows: 12 },
     pages: [{
       page: 1,
@@ -91,7 +105,7 @@ const COMPACT_SCHEMA_EXAMPLE = JSON.stringify({
       ],
     }],
     overflow_policy: { body_overflow: 'continue_to_next_page' },
-    reason: 'brief explanation',
+    reason: 'short phrase, <=8 words',
   }],
 })
 
@@ -103,6 +117,7 @@ function buildInternalRequirements(inputMetadata) {
 - fit must be contain for every image; object_position must be one of center/top/bottom/left/right.
 - Do not generate captions. Do not place text over images.
 - Each candidate must include a non-empty design_sequence explaining its decisions in order.
+- Keep every reason field to 8 words or fewer -- you will run out of output room otherwise.
 - Return JSON only, no prose before or after it.`
 }
 

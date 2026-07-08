@@ -10,11 +10,15 @@ function extractText(response) {
 }
 
 // Output tokens cost 5x input tokens (Claude Sonnet pricing), so this cap is the single biggest
-// cost lever. runGeneration.mjs now requests only 1 candidate (down from 3), so this only needs
-// to fit one candidate -- 1200 comfortably covers even a 2-page gallery+text plan with 6 images.
-// If a response is ever genuinely truncated, JSON.parse throws and the caller (callLayoutLLM.js)
-// retries/falls back -- there is no silent-corruption risk from capping this.
-const MAX_OUTPUT_TOKENS = 1200
+// cost lever -- but too tight a cap is worse than no cap at all: a real generation (2026-07-08,
+// image_count=3) hit exactly 1200/1200 output tokens and got cut off mid-JSON, so the ~$0.025
+// already spent was wasted on a JSON.parse failure that fell through to the free fallback anyway.
+// 1600 leaves real margin; buildLayoutPrompt.js's explicit "<=8 words per reason" instruction is
+// the actual fix (keeps a genuine response well under this), this is just a safety ceiling. The
+// cost budget (layoutCostBudget.js) still clips this down further if the 0.03 ceiling requires
+// it. If a response is ever genuinely truncated, JSON.parse throws and callLayoutLLM.js falls
+// back -- there is no silent-corruption risk from capping this.
+const MAX_OUTPUT_TOKENS = 1600
 const MIN_OUTPUT_TOKENS = 500
 
 async function callModel(client, userPromptContent, options = {}) {
