@@ -56,3 +56,27 @@ test('empty text produces no overflow pages and an empty/null slice', () => {
   assert.equal(result.length, 1)
   assert.equal(result[0].textSlicesByElementId.body_1, null)
 })
+
+// Regression guard: a real generation showed "Shorts" split across a page boundary into "Sho" +
+// "rts" because slices were cut at a raw character count with no word-boundary awareness.
+test('overflow never cuts a slice in the middle of a word (space-delimited text)', () => {
+  const words = Array.from({ length: 2000 }, (_, i) => `word${i}`)
+  const longText = words.join(' ')
+  const result = paginateGridPlan(onePagePlan(), longText)
+  assert.ok(result.length > 1, 'should produce continuation pages')
+
+  const slices = result.map((p) => Object.values(p.textSlicesByElementId)[0] || '')
+  slices.forEach((slice, i) => {
+    if (i < slices.length - 1) {
+      // every non-final slice must end at a real word boundary, not mid-word
+      assert.ok(/(^$|\S$)/.test(slice), `slice ${i} should not end with trailing whitespace: ${JSON.stringify(slice.slice(-20))}`)
+      const lastWord = slice.split(/\s+/).pop()
+      assert.ok(words.includes(lastWord) || lastWord === '', `slice ${i} ends mid-word: "${lastWord}"`)
+    }
+  })
+
+  // Rejoining with single spaces reproduces the original word sequence (whitespace at the cut
+  // points is intentionally consumed, not preserved, so this compares word content, not raw bytes).
+  const rebuiltWords = slices.join(' ').split(/\s+/).filter(Boolean)
+  assert.deepEqual(rebuiltWords, words)
+})

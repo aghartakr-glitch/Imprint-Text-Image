@@ -66,22 +66,30 @@ cut off mid-JSON is a hard failure with no partial credit):
 - Do not add any fields beyond what the schema below shows. Do not add commentary, markdown, or
   code fences around the JSON.
 
+Critical: the example below shows real, valid values (e.g. "style": "Editorial"). Where a field's
+comment lists options separated by "|" (e.g. Editorial | Magazine | Exhibition Catalog), that
+means "pick exactly one of these" -- never write the "|"-separated list itself as the value.
+
 Return JSON only.`
 
 // One compact single-line example beats a pretty-printed one -- indentation/newlines are pure
 // token cost the model doesn't need to parse JSON. Kept to exactly one page/one image/one text
 // element; the model already knows how to extend the pattern to more pages/elements from the
-// field descriptions above.
+// field descriptions above. IMPORTANT: every field below holds one concrete, real, valid value --
+// never a "|"-separated list of options (a prior version did this and the model literally copied
+// the option list itself as the value, e.g. style: "Editorial | Magazine | Exhibition Catalog",
+// which then failed validation). The full option lists already live in SYSTEM_PROMPT's "allowed
+// decisions" section, so this example only needs to demonstrate the shape, not repeat the enums.
 const COMPACT_SCHEMA_EXAMPLE = JSON.stringify({
   candidates: [{
     candidate_id: 'candidate_1',
-    style: 'Editorial | Magazine | Exhibition Catalog',
-    output_unit: 'single_page | spread',
-    layout_family: 'image-first | balanced | text-first',
-    layout_purpose: 'visual_showcase | comparison | editorial_reading | case_analysis | gallery | report',
-    image_hierarchy: 'single_hero | equal_pair | hero_support | grid_gallery | page_gallery',
-    image_text_relation: 'image_sets_mood | text_explains_image | image_supports_text | equal_visual_text | gallery_then_text',
-    composition_strategy: 'full_image | image_above_text | ... (see system prompt list)',
+    style: 'Editorial',
+    output_unit: 'single_page',
+    layout_family: 'balanced',
+    layout_purpose: 'case_analysis',
+    image_hierarchy: 'equal_pair',
+    image_text_relation: 'text_explains_image',
+    composition_strategy: 'image_above_text',
     base_pattern_reference: 'a known pattern_id',
     layout_intent: 'brief design intent',
     design_sequence: [

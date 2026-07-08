@@ -56,3 +56,20 @@ test('requests exactly the given number of internal candidates', () => {
   assert.match(prompt, /exactly 3 distinct candidate layout_plans/)
   assert.match(prompt, /array of exactly 3 items/)
 })
+
+// Regression guard: an earlier version of the schema example used "|"-separated option lists as
+// the example VALUE for enum fields (e.g. style: "Editorial | Magazine | Exhibition Catalog").
+// A real generation copied that placeholder text verbatim into its response and failed validation
+// ("알 수 없는 style: Editorial | Magazine | Exhibition Catalog"), wasting a paid API call. The
+// example must only ever show one concrete, valid value per field.
+test('the schema example never shows a "|"-separated option list as a field value (the bug that got copied verbatim)', () => {
+  const prompt = buildUserPrompt({ inputMetadata: { image_count: 1 } })
+  assert.doesNotMatch(prompt, /"style":"[^"]*\|[^"]*"/)
+  assert.doesNotMatch(prompt, /"output_unit":"[^"]*\|[^"]*"/)
+  assert.doesNotMatch(prompt, /"layout_family":"[^"]*\|[^"]*"/)
+  assert.doesNotMatch(prompt, /"layout_purpose":"[^"]*\|[^"]*"/)
+  assert.doesNotMatch(prompt, /"image_hierarchy":"[^"]*\|[^"]*"/)
+  assert.doesNotMatch(prompt, /"image_text_relation":"[^"]*\|[^"]*"/)
+  assert.doesNotMatch(prompt, /"composition_strategy":"[^"]*\|[^"]*"/)
+  assert.match(prompt, /"style":"Editorial"/)
+})
