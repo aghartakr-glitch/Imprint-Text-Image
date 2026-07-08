@@ -9,10 +9,11 @@ function extractText(response) {
 }
 
 // Output tokens cost 5x input tokens (Claude Sonnet pricing), so this cap is the single biggest
-// cost lever. 2200 fits 3 compact single/two-page candidates comfortably; if a response is ever
-// genuinely truncated, JSON.parse throws and the caller (callLayoutLLM.js) retries/falls back --
-// there is no silent-corruption risk from capping this.
-const MAX_OUTPUT_TOKENS = 2200
+// cost lever. runGeneration.mjs now requests only 1 candidate (down from 3), so this only needs
+// to fit one candidate -- 1200 comfortably covers even a 2-page gallery+text plan with 6 images.
+// If a response is ever genuinely truncated, JSON.parse throws and the caller (callLayoutLLM.js)
+// retries/falls back -- there is no silent-corruption risk from capping this.
+const MAX_OUTPUT_TOKENS = 1200
 
 async function callModel(client, userPromptContent) {
   const response = await client.messages.create({
@@ -24,9 +25,10 @@ async function callModel(client, userPromptContent) {
   return JSON.parse(extractText(response).trim())
 }
 
-// Spec section 8: one LLM call asking for N (default 3) distinct candidate layout_plans in a
-// single JSON response -- not N separate calls. Returns the raw `candidates` array (unvalidated;
-// callLayoutLLM.js is responsible for validating/repairing/scoring each one).
+// Spec section 8: one LLM call asking for N distinct candidate layout_plans in a single JSON
+// response (N is set by the caller via promptContext.internalCandidateCount; runGeneration.mjs
+// currently uses 1 to minimize API cost -- see its own comment for the trade-off). Returns the
+// raw `candidates` array (unvalidated; callLayoutLLM.js validates/repairs/scores each one).
 export async function generateLayoutCandidates(promptContext, options = {}) {
   const client = options.client ?? new Anthropic({ apiKey: options.apiKey })
   const userPrompt = buildUserPrompt(promptContext)

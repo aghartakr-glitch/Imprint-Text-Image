@@ -104,7 +104,12 @@ export async function runGeneration({
     retrievedReferences,
     userControls,
     userPreferenceContext,
-    internalCandidateCount: 3,
+    // Cost lever: 1 candidate per call instead of 3 (spec's original ask) -- cuts output tokens
+    // to roughly a third. The reconstruct/refine/estimate/select pipeline still runs on whatever
+    // candidates come back, so this is a pure cost/quality-diversity trade-off, not an
+    // architecture change; bump this back up if candidate diversity turns out to matter more
+    // than the extra API cost.
+    internalCandidateCount: 1,
   }
 
   // 7-10. LLM Layout Candidate Generator + Layout Validator (validate/repair/retry inside)

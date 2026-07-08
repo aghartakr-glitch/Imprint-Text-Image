@@ -9,7 +9,7 @@ test('SYSTEM_PROMPT states the grid contract, extended v0.4 decisions, and forbi
   assert.match(SYSTEM_PROMPT, /layout_purpose/)
   assert.match(SYSTEM_PROMPT, /image_hierarchy/)
   assert.match(SYSTEM_PROMPT, /composition_strategy/)
-  assert.match(SYSTEM_PROMPT, /exactly 3 different internal candidate layout_plans/)
+  assert.match(SYSTEM_PROMPT, /exactly the requested number of internal candidate layout_plans/)
   assert.match(SYSTEM_PROMPT, /Return JSON only/)
 })
 

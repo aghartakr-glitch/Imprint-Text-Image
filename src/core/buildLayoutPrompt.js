@@ -53,10 +53,9 @@ Design principles:
 10. Prefer output_unit=spread when image_count>=3 or text_density is medium/long, unless the
     input explicitly requests single_page.
 
-You must generate exactly 3 different internal candidate layout_plans (varying composition_strategy
-and/or image_hierarchy meaningfully, not superficial numeric tweaks) so the system can pick the best
-one. The user only ever sees one final result -- you are not choosing which to show, just proposing
-distinct, individually valid options.
+You must generate exactly the requested number of internal candidate layout_plans (see the "candidates"
+array size in the Task section below), each individually valid. The user only ever sees one final
+result -- the system picks the best candidate itself.
 
 Return JSON only.`
 
