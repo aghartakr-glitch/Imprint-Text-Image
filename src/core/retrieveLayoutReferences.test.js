@@ -8,7 +8,7 @@ test('returns at most topN results, capped and non-empty for a common input shap
   }, { topN: 5 })
   assert.ok(results.length > 0 && results.length <= 5)
   results.forEach((r) => {
-    assert.ok('sample_id' in r && 'pattern_id' in r && 'why_this_layout_works' in r)
+    assert.ok('pattern_id' in r && 'layout_family' in r && 'quality_score' in r)
   })
 })
 

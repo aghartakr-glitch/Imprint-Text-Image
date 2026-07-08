@@ -9,8 +9,8 @@ test('embeds original input metadata, the failed plan, and the validation errors
     validationErrors: ['이미지 2개가 겹칩니다'],
   })
   assert.match(prompt, /Your previous layout_plan failed validation/)
-  assert.match(prompt, /"image_count": 2/)
-  assert.match(prompt, /"style": "Editorial"/)
+  assert.match(prompt, /"image_count":2/)
+  assert.match(prompt, /"style":"Editorial"/)
   assert.match(prompt, /이미지 2개가 겹칩니다/)
   assert.match(prompt, /Return corrected JSON only/)
 })

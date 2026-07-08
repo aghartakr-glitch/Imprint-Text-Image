@@ -22,13 +22,13 @@ export function buildRetryPrompt({ inputMetadata, failedLayoutPlan, validationEr
   return `Your previous layout_plan failed validation.
 
 Original input metadata:
-${JSON.stringify(inputMetadata, null, 2)}
+${JSON.stringify(inputMetadata)}
 
 Previous layout_plan:
-${JSON.stringify(failedLayoutPlan, null, 2)}
+${JSON.stringify(failedLayoutPlan)}
 
 Validation errors:
-${JSON.stringify(validationErrors, null, 2)}
+${JSON.stringify(validationErrors)}
 
 You must regenerate the layout_plan while keeping all fixed constraints:
 ${FIXED_CONSTRAINTS_TEXT}

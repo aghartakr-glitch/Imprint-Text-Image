@@ -30,11 +30,20 @@ import {
   BODY_FONT_SIZE_PT, BODY_LEADING_PT, GRID_COLUMNS, GRID_ROWS,
 } from '../src/core/layoutConstants.js'
 
+// Compact form sent to the LLM on every call -- the full imprint_pattern_library_v0.2.json (with
+// long "when_to_use" prose per pattern) stays as human-readable documentation on disk, but every
+// extra character here is tokens billed on every single generation.
 let cachedPatternLibrary = null
 function loadPatternLibrarySummary() {
   if (!cachedPatternLibrary) {
     const path = join(ROOT, 'src', 'data', 'imprint_pattern_library_v0.2.json')
-    cachedPatternLibrary = JSON.parse(readFileSync(path, 'utf-8')).patterns
+    const patterns = JSON.parse(readFileSync(path, 'utf-8')).patterns
+    cachedPatternLibrary = patterns.map((p) => ({
+      pattern_id: p.pattern_id,
+      layout_family: p.layout_family,
+      image_count: p.typical_image_count,
+      text_density: p.typical_text_density,
+    }))
   }
   return cachedPatternLibrary
 }

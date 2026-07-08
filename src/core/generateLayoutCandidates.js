@@ -8,10 +8,16 @@ function extractText(response) {
   return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
 }
 
+// Output tokens cost 5x input tokens (Claude Sonnet pricing), so this cap is the single biggest
+// cost lever. 2200 fits 3 compact single/two-page candidates comfortably; if a response is ever
+// genuinely truncated, JSON.parse throws and the caller (callLayoutLLM.js) retries/falls back --
+// there is no silent-corruption risk from capping this.
+const MAX_OUTPUT_TOKENS = 2200
+
 async function callModel(client, userPromptContent) {
   const response = await client.messages.create({
     model: MODEL,
-    max_tokens: 4000,
+    max_tokens: MAX_OUTPUT_TOKENS,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPromptContent }],
   })

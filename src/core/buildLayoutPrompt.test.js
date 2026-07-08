@@ -21,12 +21,12 @@ test('buildUserPrompt embeds input metadata, content structure, image metadata, 
     patternLibrarySummary: [{ pattern_id: 'two_equal_images' }],
     retrievedReferences: [{ pattern_id: 'two_equal_images', why_this_layout_works: 'test reason' }],
   })
-  assert.match(prompt, /"image_count": 2/)
-  assert.match(prompt, /"has_title": true/)
-  assert.match(prompt, /"estimated_role": "hero"/)
+  assert.match(prompt, /"image_count":2/)
+  assert.match(prompt, /"has_title":true/)
+  assert.match(prompt, /"estimated_role":"hero"/)
   assert.match(prompt, /two_equal_images/)
   assert.match(prompt, /test reason/)
-  assert.match(prompt, /"candidates": \[/)
+  assert.match(prompt, /"candidates":\[/)
 })
 
 test('buildUserPrompt includes user_controls and user_preference_context only when meaningfully set', () => {

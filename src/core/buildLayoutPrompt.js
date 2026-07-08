@@ -60,6 +60,42 @@ distinct, individually valid options.
 
 Return JSON only.`
 
+// One compact single-line example beats a pretty-printed one -- indentation/newlines are pure
+// token cost the model doesn't need to parse JSON. Kept to exactly one page/one image/one text
+// element; the model already knows how to extend the pattern to more pages/elements from the
+// field descriptions above.
+const COMPACT_SCHEMA_EXAMPLE = JSON.stringify({
+  candidates: [{
+    candidate_id: 'candidate_1',
+    style: 'Editorial | Magazine | Exhibition Catalog',
+    output_unit: 'single_page | spread',
+    layout_family: 'image-first | balanced | text-first',
+    layout_purpose: 'visual_showcase | comparison | editorial_reading | case_analysis | gallery | report',
+    image_hierarchy: 'single_hero | equal_pair | hero_support | grid_gallery | page_gallery',
+    image_text_relation: 'image_sets_mood | text_explains_image | image_supports_text | equal_visual_text | gallery_then_text',
+    composition_strategy: 'full_image | image_above_text | ... (see system prompt list)',
+    base_pattern_reference: 'a known pattern_id',
+    layout_intent: 'brief design intent',
+    design_sequence: [{
+      step: 1, decision_type: 'output_unit', value: '...', reason: '...',
+    }],
+    grid: { columns: 6, rows: 12 },
+    pages: [{
+      page: 1,
+      elements: [
+        {
+          id: 'image_1', type: 'image', role: 'hero', page: 1, col_start: 1, col_span: 3, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center',
+        },
+        {
+          id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 4, row_start: 7, row_span: 4,
+        },
+      ],
+    }],
+    overflow_policy: { body_overflow: 'continue_to_next_page' },
+    reason: 'brief explanation',
+  }],
+})
+
 function buildInternalRequirements(inputMetadata) {
   return `Validation reminders:
 - Every uploaded image (image_1 through image_${inputMetadata.image_count}) must be placed exactly once in every candidate.
@@ -82,18 +118,18 @@ export function buildUserPrompt({
   internalCandidateCount = 3,
 }) {
   const sections = [
-    `Input metadata:\n\n${JSON.stringify(inputMetadata, null, 2)}`,
-    `Content structure:\n\n${JSON.stringify(contentStructure ?? {}, null, 2)}`,
-    `Image metadata (per-image facts; estimated_role is a starting hint, you may override it):\n\n${JSON.stringify(imageMetadata ?? [], null, 2)}`,
-    `Layout knowledge base summary (design grammar reference, not fixed templates):\n\n${JSON.stringify(patternLibrarySummary ?? [], null, 2)}`,
-    `Retrieved reference examples (real tagged pages most similar to this input -- guidance only, do not copy any single example verbatim):\n\n${JSON.stringify(retrievedReferences ?? [], null, 2)}`,
+    `Input metadata:\n${JSON.stringify(inputMetadata)}`,
+    `Content structure:\n${JSON.stringify(contentStructure ?? {})}`,
+    `Image metadata (per-image facts; estimated_role is a starting hint, you may override it):\n${JSON.stringify(imageMetadata ?? [])}`,
+    `Layout knowledge base (design grammar reference, not fixed templates):\n${JSON.stringify(patternLibrarySummary ?? [])}`,
+    `Retrieved reference examples (real tagged pages most similar to this input -- guidance only, do not copy any single example verbatim):\n${JSON.stringify(retrievedReferences ?? [])}`,
   ]
 
   if (userControls && Object.values(userControls).some((v) => v && v !== 'auto')) {
-    sections.push(`User controls (soft preferences -- follow them unless they violate a fixed constraint or validation rule; if you cannot follow one, explain why in reason):\n\n${JSON.stringify(userControls, null, 2)}`)
+    sections.push(`User controls (soft preferences -- follow them unless they violate a fixed constraint or validation rule; if you cannot follow one, explain why in reason):\n${JSON.stringify(userControls)}`)
   }
   if (userPreferenceContext && Object.keys(userPreferenceContext).length > 0) {
-    sections.push(`User preference context (learned from past edits -- soft guidance, never overrides fixed constraints or validation):\n\n${JSON.stringify(userPreferenceContext, null, 2)}`)
+    sections.push(`User preference context (learned from past edits -- soft guidance, never overrides fixed constraints or validation):\n${JSON.stringify(userPreferenceContext)}`)
   }
 
   sections.push(`Task:
@@ -101,47 +137,9 @@ Create exactly ${internalCandidateCount} distinct candidate layout_plans for the
 Use the pattern library and retrieved references as design grammar guidance, not fixed templates.
 Think about image count, image orientation, text density, reading priority, and visual priority.
 
-Required output format (top-level object with a "candidates" array of exactly ${internalCandidateCount} items):
+Required output format (top-level object with a "candidates" array of exactly ${internalCandidateCount} items), one-page example shown -- extend to more pages/elements as needed:
 
-{
-  "candidates": [
-    {
-      "candidate_id": "candidate_1",
-      "style": "Editorial | Magazine | Exhibition Catalog",
-      "output_unit": "single_page | spread",
-      "layout_family": "image-first | balanced | text-first",
-      "layout_purpose": "visual_showcase | comparison | editorial_reading | case_analysis | gallery | report",
-      "image_hierarchy": "single_hero | equal_pair | hero_support | grid_gallery | page_gallery",
-      "image_text_relation": "image_sets_mood | text_explains_image | image_supports_text | equal_visual_text | gallery_then_text",
-      "composition_strategy": "full_image | image_above_text | text_above_image | image_left_text_right | text_left_image_right | equal_images | hero_support | grid_gallery | gallery_left_text_right | gallery_page_text_page",
-      "base_pattern_reference": "one of the known pattern_id values",
-      "layout_intent": "brief design intent",
-      "design_sequence": [
-        { "step": 1, "decision_type": "output_unit", "value": "...", "reason": "..." },
-        { "step": 2, "decision_type": "layout_purpose", "value": "...", "reason": "..." }
-      ],
-      "grid": { "columns": 6, "rows": 12 },
-      "pages": [
-        {
-          "page": 1,
-          "elements": [
-            {
-              "id": "image_1", "type": "image", "role": "hero", "page": 1,
-              "col_start": 1, "col_span": 3, "row_start": 1, "row_span": 5,
-              "fit": "contain", "object_position": "center"
-            },
-            {
-              "id": "body_1", "type": "text", "role": "body", "page": 1,
-              "col_start": 1, "col_span": 4, "row_start": 7, "row_span": 4
-            }
-          ]
-        }
-      ],
-      "overflow_policy": { "body_overflow": "continue_to_next_page" },
-      "reason": "brief explanation of why this layout is appropriate"
-    }
-  ]
-}
+${COMPACT_SCHEMA_EXAMPLE}
 
 ${buildInternalRequirements(inputMetadata)}`)
 

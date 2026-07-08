@@ -26,9 +26,12 @@ function scoreRecord(record, {
   return score
 }
 
+// topN defaults to 3 (the low end of the spec's "3~5") and the per-row fields are trimmed to
+// what the LLM actually needs to make a decision -- every extra field/reference is tokens paid
+// on every single generation, so this stays as lean as the spec's own intent allows.
 export function retrieveLayoutReferences({
   imageCount, textDensity, outputUnit, layoutFamily, imageOrientations = [],
-}, { topN = 5 } = {}) {
+}, { topN = 3 } = {}) {
   const records = loadDatasetSamples()
 
   return records
@@ -39,15 +42,10 @@ export function retrieveLayoutReferences({
     .sort((a, b) => b.score - a.score)
     .slice(0, topN)
     .map(({ record }) => ({
-      sample_id: record.sample_id,
+      pattern_id: record.pattern_id,
+      layout_family: record.layout_family,
       image_count: Number(record.image_count),
       text_length_level: record.text_length_level,
-      layout_family: record.layout_family,
-      pattern_id: record.pattern_id,
-      image_arrangement: record.image_arrangement,
-      text_position: record.text_position,
-      image_text_relation: record.image_text_relation,
-      why_this_layout_works: record.why_this_layout_works,
       quality_score: Number(record.quality_score) || null,
     }))
 }
