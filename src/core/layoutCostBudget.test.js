@@ -8,8 +8,12 @@ function fakeClientWithoutCountTokens() {
   return { messages: {} } // no countTokens -> forces the conservative character-based estimate
 }
 
-test('MAX_LAYOUT_LLM_SPEND_USD is 0.05 (raised from the original 0.03 to let a retry actually happen)', () => {
-  assert.equal(MAX_LAYOUT_LLM_SPEND_USD, 0.05)
+function fakeClientWithCountTokens(inputTokens) {
+  return { messages: { countTokens: async () => ({ input_tokens: inputTokens }) } }
+}
+
+test('MAX_LAYOUT_LLM_SPEND_USD is 0.03 (callLayoutLLM.js makes at most one real API call per generation, no retries)', () => {
+  assert.equal(MAX_LAYOUT_LLM_SPEND_USD, 0.03)
 })
 
 test('a caller-requested maxSpendUsd above the ceiling is clamped down to it, never exceeded', async () => {
@@ -22,7 +26,7 @@ test('a caller-requested maxSpendUsd below the ceiling is honored as-is', () => 
   assert.equal(budget.maxSpendUsd, 0.01)
 })
 
-test('planRequest allows a normal-sized request comfortably within the 0.05 ceiling', async () => {
+test('planRequest allows a normal-sized request comfortably within the 0.03 ceiling', async () => {
   const budget = createLayoutCostBudget()
   // The no-countTokens fallback path is deliberately pessimistic (roughly 1 char ~= 1 "token",
   // not the real ~4 chars/token) -- "spending less is better than surprise spend" per its own
@@ -54,30 +58,48 @@ test('planRequest throws LayoutCostBudgetExceeded when even the minimum output w
   )
 })
 
-test('an initial call followed by one retry both fit inside the 0.05 ceiling for a typical 2-image prompt', async () => {
+test('a single typical generation call (real prompt size, real token count) fits comfortably inside the 0.03 ceiling', async () => {
+  // callLayoutLLM.js makes exactly one real API call per generation now (no retries), so this is
+  // the actual, only call that ever happens in production. Uses the real countTokens path (not
+  // the pessimistic character-count fallback) since that's what a real Anthropic client provides.
   const budget = createLayoutCostBudget()
-  const initial = await budget.planRequest({
-    client: fakeClientWithoutCountTokens(),
-    model: 'claude-sonnet-4-6',
-    system: 'x'.repeat(3800), // ~950 tokens, matches SYSTEM_PROMPT's real size
-    userPromptContent: 'y'.repeat(8000), // ~2000 tokens, matches a typical full user prompt
-    desiredOutputTokens: 1200,
-    minOutputTokens: 500,
-  })
-  budget.recordUsage(initial, { input_tokens: 2950, output_tokens: 1200 })
-
-  const retry = await budget.planRequest({
-    client: fakeClientWithoutCountTokens(),
+  const planned = await budget.planRequest({
+    client: fakeClientWithCountTokens(2950), // matches SYSTEM_PROMPT + a typical full user prompt
     model: 'claude-sonnet-4-6',
     system: 'x'.repeat(3800),
-    userPromptContent: 'z'.repeat(1200), // ~300 tokens, matches the lean retry prompt's real size
+    userPromptContent: 'y'.repeat(8000),
     desiredOutputTokens: 1200,
     minOutputTokens: 500,
   })
-  assert.ok(retry.maxOutputTokens >= 500, 'the retry should still get at least the minimum viable output budget')
-  budget.recordUsage(retry, { input_tokens: 1250, output_tokens: retry.maxOutputTokens })
-
+  assert.equal(planned.maxOutputTokens, 1200, 'a typical prompt should get the full desired output budget, not a reduced one')
+  budget.recordUsage(planned, { input_tokens: 2950, output_tokens: 1200 })
   assert.ok(budget.spentUsd <= MAX_LAYOUT_LLM_SPEND_USD, `total spend ${budget.spentUsd} must never exceed the ${MAX_LAYOUT_LLM_SPEND_USD} ceiling`)
+})
+
+test('the budget module still enforces its ceiling across multiple sequential calls in general (a generic capability, even though callLayoutLLM.js only ever makes one call)', async () => {
+  const budget = createLayoutCostBudget({ maxSpendUsd: 0.01 })
+  const first = await budget.planRequest({
+    client: fakeClientWithoutCountTokens(),
+    model: 'claude-sonnet-4-6',
+    system: 'x'.repeat(400),
+    userPromptContent: 'y'.repeat(400),
+    desiredOutputTokens: 300,
+    minOutputTokens: 100,
+  })
+  budget.recordUsage(first, { input_tokens: 800, output_tokens: 300 })
+
+  await assert.rejects(
+    () => budget.planRequest({
+      client: fakeClientWithoutCountTokens(),
+      model: 'claude-sonnet-4-6',
+      system: 'x'.repeat(400),
+      userPromptContent: 'y'.repeat(400),
+      desiredOutputTokens: 300,
+      minOutputTokens: 100,
+    }),
+    LayoutCostBudgetExceeded,
+    'a second call should be refused once the first has used up most of a tight budget',
+  )
 })
 
 test('recordUsage throws if actual usage would push total spend past the ceiling', async () => {

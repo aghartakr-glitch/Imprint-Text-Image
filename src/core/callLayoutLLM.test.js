@@ -101,55 +101,31 @@ test('a candidate missing only fit/role is repaired and kept; a genuinely broken
   assert.equal(repairedOne.plan.pages[0].elements[0].fit, 'contain')
 })
 
-test('if every candidate fails on attempt 1 but the retry (lean, single-plan prompt) passes, it recovers', async () => {
-  const broken = validPlan('candidate_1')
-  broken.style = 'Noir'
-  const client = queueClient([
-    { response: textResponse({ candidates: [broken] }) },
-    { response: textResponse(validPlan('candidate_1')) }, // retryLayoutCandidate expects one plan, not { candidates: [...] }
-  ])
-  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
-  assert.equal(result.source, 'llm-retry')
-  assert.equal(result.retryCount, 1)
-  assert.equal(result.candidates.length, 1)
-  assert.equal(client.calls.length, 2)
-  // the retry call must be the lean single-plan prompt, not the full candidates-array prompt
-  assert.match(client.calls[1].messages[0].content, /Your previous layout_plan failed validation/)
-})
-
-test('malformed JSON on attempt 1 recovers via the lean retry on attempt 2', async () => {
-  const client = queueClient([
-    { response: { content: [{ type: 'text', text: 'not json' }], usage: { input_tokens: 100, output_tokens: 50 } } },
-    { response: textResponse(validPlan('candidate_1')) },
-  ])
-  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
-  assert.equal(result.source, 'llm-retry')
-  assert.equal(result.retryCount, 1)
-})
-
-test('all 3 attempts failing (1 initial + 2 retries) falls back with no candidates', async () => {
+test('a validation failure on the one and only attempt falls back immediately -- no retry API call is ever made', async () => {
   const broken = validPlan('candidate_1')
   broken.style = 'Noir'
   const client = queueClient([{ response: textResponse({ candidates: [broken] }) }])
   const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
   assert.equal(result.fallbackUsed, true)
-  assert.equal(result.retryCount, 2)
+  assert.equal(result.retryCount, 0)
   assert.equal(result.candidates.length, 0)
-  assert.equal(client.calls.length, 3)
+  assert.equal(client.calls.length, 1, 'must not make a second (retry) API call')
   assert.ok(result.fallbackReason.length > 0)
 })
 
-
-test('cost budget stops another API call before spending over the 0.05 USD ceiling', async () => {
-  const broken = validPlan('candidate_1')
-  broken.style = 'Noir'
-  // Sized so the first call alone spends enough (10000 in + 1200 out ~= $0.048) that the ~$0.002
-  // left over can't cover even a retry's minimum output -- the retry must be blocked before ever
-  // reaching the API, not merely spend down toward the ceiling.
-  const client = queueClient([{ response: textResponse({ candidates: [broken] }, { input_tokens: 10000, output_tokens: 1200 }) }])
+test('malformed JSON on the one attempt falls back immediately, no retry call', async () => {
+  const client = queueClient([{ response: { content: [{ type: 'text', text: 'not json' }], usage: { input_tokens: 100, output_tokens: 50 } } }])
   const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
   assert.equal(result.fallbackUsed, true)
-  assert.match(result.fallbackReason, /\$0\.05/)
+  assert.equal(result.retryCount, 0)
   assert.equal(client.calls.length, 1)
-  assert.ok(result.costBudget.spent_usd <= 0.05)
+})
+
+test('cost budget refuses the single call outright if even its minimum output would exceed the 0.03 USD ceiling', async () => {
+  const budget = { planRequest: async () => { throw new (await import('./layoutCostBudget.js')).LayoutCostBudgetExceeded('LLM 비용 예산 $0.03 초과 방지를 위해 API 호출을 중단했습니다.') }, summary: () => ({ max_spend_usd: 0.03, spent_usd: 0, remaining_usd: 0.03, calls: [] }) }
+  const client = queueClient([{ response: textResponse({ candidates: [validPlan('candidate_1')] }) }])
+  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client, costBudget: budget })
+  assert.equal(result.fallbackUsed, true)
+  assert.match(result.fallbackReason, /\$0\.03/)
+  assert.equal(client.calls.length, 0, 'the call must never reach the API once the budget check refuses it')
 })

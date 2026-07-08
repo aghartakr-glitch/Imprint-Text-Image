@@ -1,9 +1,10 @@
-// Raised from 0.03 -> 0.05 so a genuine validation-failure retry (initial call ~$0.025 + one
-// retry ~$0.019) has room to actually happen instead of being blocked by the budget and forced
-// into fallback every time. clampMaxSpendUsd() below still hard-caps any caller-supplied value at
-// this ceiling, and createLayoutCostBudget()/recordUsage() throw before/if spend would exceed it
-// -- 0.05 is a real, enforced maximum, not just a default.
-export const MAX_LAYOUT_LLM_SPEND_USD = 0.05
+// Back down to the original 0.03: callLayoutLLM.js no longer retries on validation failure (a
+// retry costs a full second API call and often fails again anyway, wasting money on top of the
+// free fallback that gets used regardless), so there's only ever one real attempt per generation
+// and no need for retry headroom. clampMaxSpendUsd() below still hard-caps any caller-supplied
+// value at this ceiling, and createLayoutCostBudget()/recordUsage() throw before/if spend would
+// exceed it -- 0.03 is a real, enforced maximum, not just a default.
+export const MAX_LAYOUT_LLM_SPEND_USD = 0.03
 
 const PRICING_USD_PER_MTOK = {
   input: 3,
