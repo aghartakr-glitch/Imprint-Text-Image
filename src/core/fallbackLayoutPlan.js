@@ -29,16 +29,44 @@ function splitGridCells(count, region) {
   return cells
 }
 
-function imageElements(imageCount, region, role) {
-  return splitGridCells(imageCount, region).map((cell, i) => ({
-    id: `image_${i + 1}`, type: 'image', role, fit: 'contain', object_position: 'center', ...cell,
+function stackVertically(count, region) {
+  const rowSpanEach = Math.max(1, Math.floor(region.row_span / count))
+  return Array.from({ length: count }, (_, i) => ({
+    col_start: region.col_start,
+    col_span: region.col_span,
+    row_start: region.row_start + i * rowSpanEach,
+    row_span: rowSpanEach,
   }))
 }
 
-function bodyText(region) {
+// startIndex lets a variant place a *subset* of the images (e.g. images 3-6 on page 2) while
+// keeping element ids matching their real image_N upload index.
+function imageElementsAt(startIndex, cells, role) {
+  return cells.map((cell, i) => ({
+    id: `image_${startIndex + i}`, type: 'image', role, fit: 'contain', object_position: 'center', ...cell,
+  }))
+}
+
+function imageElements(imageCount, region, role) {
+  return imageElementsAt(1, splitGridCells(imageCount, region), role)
+}
+
+function bodyText(region, id = 'body_1') {
   return {
-    id: 'body_1', type: 'text', role: 'body', ...region,
+    id, type: 'text', role: 'body', ...region,
   }
+}
+
+// Deterministic (same input -> same variant, so results stay reproducible/testable) but varies
+// across different real inputs -- fixes the "every 3-image generation looks identical" bug where
+// the fallback had exactly one shape per image-count bucket regardless of the actual photos/text.
+function pickVariantIndex(seedParts, variantCount) {
+  const seedString = seedParts.join('|')
+  let hash = 0
+  for (let i = 0; i < seedString.length; i += 1) {
+    hash = (Math.imul(hash, 31) + seedString.charCodeAt(i)) >>> 0
+  }
+  return hash % variantCount
 }
 
 function designSequenceFor({
@@ -117,53 +145,179 @@ function multiPagePlan({
   }
 }
 
-// Deterministic, grid-based fallback used only when the LLM is unavailable or still fails
-// validation after retries. Rules from the spec section 11 table; 5-6 images + short/medium
-// text isn't explicitly listed there, so it's extended from the 3-4-image adaptive-grid rule
-// (same shape, just more cells).
-export function buildFallbackLayoutPlan({ imageCount, textDensity }) {
-  const { outputUnit } = decideOutputUnit({ imageCount, textDensity })
+// --- 3-6 images, short/medium text: three real variants (spec 11 only demanded "adaptive grid +
+// text block", but a single fixed shape is exactly the "images always crammed in one row" bug) ---
 
-  if (imageCount === 1 && textDensity === 'long') {
-    return plan({
-      layoutFamily: 'text-first',
-      layoutPurpose: 'editorial_reading',
-      imageHierarchy: 'single_hero',
-      imageTextRelation: 'image_supports_text',
-      compositionStrategy: 'text_left_image_right',
-      outputUnit,
-      basePatternReference: 'single_left_text_right_image',
-      elements: [
-        bodyText({
-          col_start: 1, col_span: 3, row_start: 1, row_span: 12,
-        }),
-        ...imageElements(1, {
-          col_start: 4, col_span: 3, row_start: 1, row_span: 12,
-        }, 'hero'),
-      ],
-      reason: '이미지 1장 + 긴 본문: 글이 왼쪽, 이미지가 오른쪽에 배치되는 결정론적 폴백',
-    })
+function galleryGridVariant(imageCount) {
+  return plan({
+    layoutFamily: 'balanced',
+    layoutPurpose: 'gallery',
+    imageHierarchy: 'grid_gallery',
+    imageTextRelation: 'equal_visual_text',
+    compositionStrategy: 'grid_gallery',
+    outputUnit: 'single_page',
+    basePatternReference: imageCount === 4 ? 'grid_2x2_with_text' : 'gallery_with_text_block',
+    elements: [
+      ...imageElements(imageCount, {
+        col_start: 1, col_span: 6, row_start: 1, row_span: 6,
+      }, 'gallery'),
+      bodyText({
+        col_start: 1, col_span: 6, row_start: 8, row_span: 5,
+      }),
+    ],
+    reason: `이미지 ${imageCount}장 + 짧거나 중간 길이 본문: grid gallery 변형 (모든 이미지를 균등한 격자로)`,
+  })
+}
+
+function heroSupportVariant(imageCount) {
+  const heroCell = {
+    col_start: 1, col_span: 3, row_start: 1, row_span: 7,
   }
+  const supportCells = stackVertically(imageCount - 1, {
+    col_start: 4, col_span: 3, row_start: 1, row_span: 7,
+  })
+  return plan({
+    layoutFamily: 'balanced',
+    layoutPurpose: 'case_analysis',
+    imageHierarchy: 'hero_support',
+    imageTextRelation: 'text_explains_image',
+    compositionStrategy: 'hero_support',
+    outputUnit: 'single_page',
+    basePatternReference: 'hero_image_plus_secondary',
+    elements: [
+      ...imageElementsAt(1, [heroCell], 'hero'),
+      ...imageElementsAt(2, supportCells, 'support'),
+      bodyText({
+        col_start: 1, col_span: 6, row_start: 9, row_span: 4,
+      }),
+    ],
+    reason: `이미지 ${imageCount}장 + 짧거나 중간 길이 본문: hero+support 변형 (대표 이미지 1장 크게, 나머지는 보조)`,
+  })
+}
 
-  if (imageCount === 1) {
-    return plan({
-      layoutFamily: 'image-first',
-      layoutPurpose: 'visual_showcase',
-      imageHierarchy: 'single_hero',
-      imageTextRelation: 'image_sets_mood',
-      compositionStrategy: 'image_above_text',
-      outputUnit,
-      basePatternReference: 'single_page_with_text_below',
-      elements: [
-        ...imageElements(1, {
+function twoPageDistributedVariant(imageCount) {
+  const page1Count = Math.ceil(imageCount / 2)
+  const page2Count = imageCount - page1Count
+  return multiPagePlan({
+    layoutFamily: 'balanced',
+    layoutPurpose: 'gallery',
+    imageHierarchy: 'grid_gallery',
+    imageTextRelation: 'text_explains_image',
+    compositionStrategy: 'gallery_left_text_right',
+    outputUnit: 'spread',
+    basePatternReference: 'gallery_with_text_block',
+    pagesElements: [
+      imageElementsAt(1, splitGridCells(page1Count, {
+        col_start: 1, col_span: 6, row_start: 1, row_span: 12,
+      }), 'gallery'),
+      [
+        ...imageElementsAt(page1Count + 1, splitGridCells(page2Count, {
           col_start: 1, col_span: 6, row_start: 1, row_span: 6,
-        }, 'hero'),
+        }), 'gallery'),
         bodyText({
           col_start: 1, col_span: 6, row_start: 8, row_span: 5,
         }),
       ],
-      reason: '이미지 1장 + 짧거나 중간 길이 본문: 이미지가 위, 본문이 아래인 결정론적 폴백',
-    })
+    ],
+    reason: `이미지 ${imageCount}장 + 짧거나 중간 길이 본문: 2페이지 분산 변형 (이미지를 두 페이지로 나눠 배치)`,
+  })
+}
+
+// Deterministic, grid-based fallback used only when the LLM is unavailable or still fails
+// validation after retries. Rules from spec section 11's table; several buckets now offer
+// multiple real layout variants (chosen deterministically from the actual input, not always the
+// same one) instead of a single fixed shape per image-count/text-density combination.
+export function buildFallbackLayoutPlan({
+  imageCount, textDensity, imageAspectRatios = [], textLength = 0,
+}) {
+  const { outputUnit } = decideOutputUnit({ imageCount, textDensity })
+  const variantSeed = [
+    imageCount, textDensity, textLength,
+    ...imageAspectRatios.map((r) => Math.round(r * 100)),
+  ]
+
+  if (imageCount === 1 && textDensity === 'long') {
+    const variants = [
+      () => plan({
+        layoutFamily: 'text-first',
+        layoutPurpose: 'editorial_reading',
+        imageHierarchy: 'single_hero',
+        imageTextRelation: 'image_supports_text',
+        compositionStrategy: 'text_left_image_right',
+        outputUnit,
+        basePatternReference: 'single_left_text_right_image',
+        elements: [
+          bodyText({
+            col_start: 1, col_span: 3, row_start: 1, row_span: 12,
+          }),
+          ...imageElements(1, {
+            col_start: 4, col_span: 3, row_start: 1, row_span: 12,
+          }, 'hero'),
+        ],
+        reason: '이미지 1장 + 긴 본문: 글이 왼쪽, 이미지가 오른쪽에 배치되는 결정론적 폴백',
+      }),
+      () => plan({
+        layoutFamily: 'text-first',
+        layoutPurpose: 'editorial_reading',
+        imageHierarchy: 'single_hero',
+        imageTextRelation: 'image_supports_text',
+        compositionStrategy: 'image_left_text_right',
+        outputUnit,
+        basePatternReference: 'single_left_image_right_text',
+        elements: [
+          ...imageElements(1, {
+            col_start: 1, col_span: 3, row_start: 1, row_span: 12,
+          }, 'hero'),
+          bodyText({
+            col_start: 4, col_span: 3, row_start: 1, row_span: 12,
+          }),
+        ],
+        reason: '이미지 1장 + 긴 본문: 이미지가 왼쪽, 글이 오른쪽에 배치되는 결정론적 폴백 (변형)',
+      }),
+    ]
+    return variants[pickVariantIndex(variantSeed, variants.length)]()
+  }
+
+  if (imageCount === 1) {
+    const variants = [
+      () => plan({
+        layoutFamily: 'image-first',
+        layoutPurpose: 'visual_showcase',
+        imageHierarchy: 'single_hero',
+        imageTextRelation: 'image_sets_mood',
+        compositionStrategy: 'image_above_text',
+        outputUnit,
+        basePatternReference: 'single_page_with_text_below',
+        elements: [
+          ...imageElements(1, {
+            col_start: 1, col_span: 6, row_start: 1, row_span: 6,
+          }, 'hero'),
+          bodyText({
+            col_start: 1, col_span: 6, row_start: 8, row_span: 5,
+          }),
+        ],
+        reason: '이미지 1장 + 짧거나 중간 길이 본문: 이미지가 위, 본문이 아래인 결정론적 폴백',
+      }),
+      () => plan({
+        layoutFamily: 'balanced',
+        layoutPurpose: 'visual_showcase',
+        imageHierarchy: 'single_hero',
+        imageTextRelation: 'image_supports_text',
+        compositionStrategy: 'image_left_text_right',
+        outputUnit,
+        basePatternReference: 'single_left_image_right_text',
+        elements: [
+          ...imageElements(1, {
+            col_start: 1, col_span: 3, row_start: 1, row_span: 12,
+          }, 'hero'),
+          bodyText({
+            col_start: 4, col_span: 3, row_start: 1, row_span: 12,
+          }),
+        ],
+        reason: '이미지 1장 + 짧거나 중간 길이 본문: 이미지 왼쪽, 본문 오른쪽 배치의 결정론적 폴백 (변형)',
+      }),
+    ]
+    return variants[pickVariantIndex(variantSeed, variants.length)]()
   }
 
   if (imageCount === 2 && textDensity === 'short') {
@@ -230,24 +384,8 @@ export function buildFallbackLayoutPlan({ imageCount, textDensity }) {
   }
 
   if (imageCount >= 3 && imageCount <= 6) {
-    return plan({
-      layoutFamily: 'balanced',
-      layoutPurpose: 'gallery',
-      imageHierarchy: 'grid_gallery',
-      imageTextRelation: 'equal_visual_text',
-      compositionStrategy: 'grid_gallery',
-      outputUnit,
-      basePatternReference: imageCount === 4 ? 'grid_2x2_with_text' : 'gallery_with_text_block',
-      elements: [
-        ...imageElements(imageCount, {
-          col_start: 1, col_span: 6, row_start: 1, row_span: 6,
-        }, 'gallery'),
-        bodyText({
-          col_start: 1, col_span: 6, row_start: 8, row_span: 5,
-        }),
-      ],
-      reason: `이미지 ${imageCount}장 + 짧거나 중간 길이 본문: 이미지 grid와 하단 본문의 결정론적 폴백`,
-    })
+    const variants = [galleryGridVariant, heroSupportVariant, twoPageDistributedVariant]
+    return variants[pickVariantIndex(variantSeed, variants.length)](imageCount)
   }
 
   throw new Error(`지원하지 않는 이미지 개수: ${imageCount}`)

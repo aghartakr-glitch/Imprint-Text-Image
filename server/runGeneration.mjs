@@ -121,7 +121,9 @@ export async function runGeneration({
     ? llmResult.candidates
     : [{
       candidateId: 'fallback_1',
-      plan: buildFallbackLayoutPlan({ imageCount: analysis.imageCount, textDensity }),
+      plan: buildFallbackLayoutPlan({
+        imageCount: analysis.imageCount, textDensity, imageAspectRatios: imageRatios, textLength: analysis.textLength,
+      }),
       validation: { passed: true, issues: [] },
       repaired: false,
     }]
