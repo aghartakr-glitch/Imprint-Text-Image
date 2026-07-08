@@ -82,14 +82,10 @@ export default function App() {
       <header style={{ height: 48, display: 'flex', alignItems: 'center', gap: 12, padding: '0 24px', borderBottom: `1px solid ${T.border}`, background: T.surface }}>
         <span style={{ fontSize: 16, fontWeight: 700 }}>Imprint</span>
         <span style={{ fontSize: 13, fontWeight: 500, color: T.muted }}>(Image+Text)</span>
-        <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: T.muted }}>이미지 + 본문 → 최적 레이아웃 1개 → .tex/.pdf</span>
       </header>
 
       <div style={{ maxWidth: 720, margin: '32px auto', padding: '0 24px' }}>
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: 20 }}>
-          <p style={{ fontSize: 12, color: T.muted, marginTop: 0 }}>이미지 1~6장과 본문 텍스트를 넣으면, 입력 조건을 분석해 가장 적합한 편집디자인 레이아웃 1개를 만듭니다.</p>
-
           <div style={fieldWrapper}>
             <div style={groupTitle}>Anthropic API 키 (선택)</div>
             <input
@@ -103,6 +99,8 @@ export default function App() {
               API 키를 넣으면 Claude LLM으로 레이아웃을 판단합니다. 비워두면 규칙 기반으로 자동 선택합니다. (브라우저에만 저장됨, 서버 로그에 기록 안됨)
             </p>
           </div>
+
+          <p style={{ fontSize: 12, color: T.muted, marginTop: 0 }}>이미지 1~6장과 본문 텍스트를 넣으면, 입력 조건을 분석해 가장 적합한 편집디자인 레이아웃 1개를 만듭니다.</p>
 
           <div style={fieldWrapper}>
             <div style={groupTitle}>이미지 (최대 6장)</div>
