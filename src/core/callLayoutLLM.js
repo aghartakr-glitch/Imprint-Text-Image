@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { generateLayoutCandidates } from './generateLayoutCandidates.js'
+import { generateLayoutCandidates, retryLayoutCandidate } from './generateLayoutCandidates.js'
 import { validateLayoutPlan } from './validateLayoutPlan.js'
 import { repairLayoutPlan } from './repairLayoutPlan.js'
 
@@ -28,13 +28,15 @@ function processCandidate(rawPlan, index, imageCount) {
   }
 }
 
-// Spec section 8.3: ask the LLM for N candidates in one call, validate/repair each individually
-// (never a per-candidate API retry -- repair is local and free), and only re-ask the LLM (as a
-// full batch regeneration, up to MAX_RETRIES times) if *none* of the candidates end up valid.
-// Never throws: returns fallbackUsed=true with an empty candidates array when nothing works,
-// leaving the deterministic fallback plan to the caller (runGeneration.mjs), which is also
-// responsible for reconstructing/refining/scoring -- this module's job stops at "valid plans or
-// not."
+// Spec section 8.3: ask the LLM for N candidates in one (expensive, full-context) call, validate/
+// repair each individually (repair is local and free, never an API call). If none end up valid,
+// retry -- but a retry uses buildRetryPrompt's *lean* single-candidate prompt (just the input
+// metadata + the one failed plan + its errors), NOT another full re-ask with the entire pattern
+// library/retrieved references/schema example resent. That distinction is the whole point of
+// having a separate retry template (spec section 17): re-sending the full prompt on every retry
+// was silently tripling the per-generation cost on any validation failure. Never throws: returns
+// fallbackUsed=true with an empty candidates array when nothing works, leaving the deterministic
+// fallback plan to the caller (runGeneration.mjs).
 export async function callLayoutLLM({ promptContext, imageCount }, options = {}) {
   const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY
   const mockMode = options.mockMode ?? process.env.MOCK_MODE === 'true'
@@ -47,11 +49,21 @@ export async function callLayoutLLM({ promptContext, imageCount }, options = {})
 
   const client = options.client ?? new Anthropic({ apiKey })
   let lastIssues = ['알 수 없는 오류']
+  let lastFailedPlan = null
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     let rawCandidates
     try {
-      rawCandidates = await generateLayoutCandidates(promptContext, { client })
+      if (attempt === 0) {
+        rawCandidates = await generateLayoutCandidates(promptContext, { client })
+      } else {
+        // Lean retry: one small prompt (input metadata + previous failure), not the full context.
+        const retried = await retryLayoutCandidate(
+          { inputMetadata: promptContext.inputMetadata, failedLayoutPlan: lastFailedPlan, validationErrors: lastIssues },
+          { client },
+        )
+        rawCandidates = [retried]
+      }
     } catch (err) {
       lastIssues = [`LLM 요청/JSON 파싱 실패: ${String(err?.message ?? err)}`]
       if (attempt >= MAX_RETRIES) {
@@ -77,6 +89,7 @@ export async function callLayoutLLM({ promptContext, imageCount }, options = {})
     }
 
     lastIssues = processed.flatMap((c) => c.validation.issues)
+    lastFailedPlan = processed[0]?.plan ?? rawCandidates[0] ?? null
     if (attempt >= MAX_RETRIES) {
       return {
         candidates: [],

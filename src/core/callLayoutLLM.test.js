@@ -101,24 +101,26 @@ test('a candidate missing only fit/role is repaired and kept; a genuinely broken
   assert.equal(repairedOne.plan.pages[0].elements[0].fit, 'contain')
 })
 
-test('if every candidate fails on attempt 1 but all pass on attempt 2, it recovers via retry', async () => {
+test('if every candidate fails on attempt 1 but the retry (lean, single-plan prompt) passes, it recovers', async () => {
   const broken = validPlan('candidate_1')
   broken.style = 'Noir'
   const client = queueClient([
     { response: textResponse({ candidates: [broken] }) },
-    { response: textResponse({ candidates: [validPlan('candidate_1'), validPlan('candidate_2')] }) },
+    { response: textResponse(validPlan('candidate_1')) }, // retryLayoutCandidate expects one plan, not { candidates: [...] }
   ])
   const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
   assert.equal(result.source, 'llm-retry')
   assert.equal(result.retryCount, 1)
-  assert.equal(result.candidates.length, 2)
+  assert.equal(result.candidates.length, 1)
   assert.equal(client.calls.length, 2)
+  // the retry call must be the lean single-plan prompt, not the full candidates-array prompt
+  assert.match(client.calls[1].messages[0].content, /Your previous layout_plan failed validation/)
 })
 
-test('malformed JSON on attempt 1 recovers via retry on attempt 2', async () => {
+test('malformed JSON on attempt 1 recovers via the lean retry on attempt 2', async () => {
   const client = queueClient([
     { response: { content: [{ type: 'text', text: 'not json' }] } },
-    { response: textResponse({ candidates: [validPlan('candidate_1')] }) },
+    { response: textResponse(validPlan('candidate_1')) },
   ])
   const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
   assert.equal(result.source, 'llm-retry')
