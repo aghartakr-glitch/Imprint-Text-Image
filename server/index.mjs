@@ -39,6 +39,7 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
   const writePromises = []
   let text = ''
   let title = ''
+  let apiKey = ''
   let fileCount = 0
   let rejected = null
   // busboy can fire 'error' and then still fire 'close' (behavior varies by version/error type),
@@ -54,6 +55,7 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
   bb.on('field', (name, value) => {
     if (name === 'text') text = value
     if (name === 'title') title = value
+    if (name === 'apiKey') apiKey = value
   })
 
   bb.on('file', (name, stream, info) => {
@@ -115,7 +117,7 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
     if (!text.trim()) return respond(400, { ok: false, error: '본문 텍스트를 입력해야 합니다' })
     try {
       const result = await runGeneration({
-        imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode },
+        imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode, ...(apiKey && { apiKey }) },
       })
       const folderName = result.dir.split(/[\\/]/).pop()
       respond(200, {
