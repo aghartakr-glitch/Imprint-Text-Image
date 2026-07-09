@@ -14,7 +14,7 @@ function detectCaseStudyPattern(lines) {
       continue
     }
 
-    const isKorean = /[\u ac00-힯]/.test(line)
+    const isKorean = /[가-힣]/.test(line)
     const nextLine = lines[i + 1]?.trim() || ''
     const isEnglishTitle = /^[A-Z\s]+$/.test(nextLine) && nextLine.length > 0 && nextLine.length < 50
 

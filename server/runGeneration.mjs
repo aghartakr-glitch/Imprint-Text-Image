@@ -263,6 +263,8 @@ export async function runGeneration({
       text_length: analysis.textLength,
       text_density: textDensity,
       content_structure: contentStructure,
+      image_text_relation: imageTextRelation.relation,
+      suggested_layout_family: suggestedLayoutFamily.family,
       image_metadata: imageMetadata,
       estimated_image_hierarchy: estimatedImageHierarchy,
     },
@@ -288,6 +290,7 @@ export async function runGeneration({
     }))),
     selected_candidate: {
       candidate_id: selected.candidateId,
+      source: selected.candidateId.startsWith('builtin_') ? 'specialized_layout_builder' : 'llm',
       style: selected.plan.style,
       output_unit: selected.plan.output_unit,
       layout_family: selected.plan.layout_family,
