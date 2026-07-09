@@ -13,8 +13,11 @@ import { validateLayoutPlan } from '../src/core/validateLayoutPlan.js'
 import { resolveGridSettings } from '../src/core/grid/GridPresetManager.js'
 import { parseTextBlocks } from '../src/core/text/parseTextBlocks.js'
 import { parseContentStructure } from '../src/core/content/parseContentStructure.js'
+import { parseTextBlocksAdvanced } from '../src/core/content/parseTextBlocksAdvanced.js'
+import { matchImageToTextBlocks } from '../src/core/content/matchImageToTextBlocks.js'
 import { mapImageTextRelations } from '../src/core/content/mapImageTextRelations.js'
 import { selectLayoutFamily } from '../src/core/layout/selectLayoutFamily.js'
+import { selectTextFlowMode } from '../src/core/layout/selectTextFlowMode.js'
 import { tryBuildSpecializedLayout } from '../src/core/layout/builders/index.js'
 import { reconstructLayout } from '../src/core/reconstructLayout.js'
 import { refineLayout } from '../src/core/refineLayout.js'
@@ -72,6 +75,25 @@ export async function runGeneration({
   const textDensity = textDensityFromLength(analysis.textLength)
   const hasTitle = typeof title === 'string' && title.trim().length > 0
   const contentStructure = parseContentStructure({ title, text })
+
+  // Advanced text block parsing: modular paragraph-level structure
+  const textBlocksAnalysis = parseTextBlocksAdvanced({ title, text })
+
+  // Match images to text blocks based on semantic roles
+  const imageTextMatching = matchImageToTextBlocks({
+    imageCount: analysis.imageCount,
+    textBlocks: textBlocksAnalysis.text_blocks,
+  })
+
+  // Determine text flow mode (continuous, modular, or hybrid)
+  const textFlowModeSelection = selectTextFlowMode({
+    textBlockCount: textBlocksAnalysis.paragraph_count,
+    imageCount: analysis.imageCount,
+    hasCaseLikeBlocks: textBlocksAnalysis.has_case_like_paragraphs,
+    hasHeroImage: !!imageTextMatching.hero_image,
+    gridMode: userLayoutSettings.grid_mode || 'strict',
+    textDensity,
+  })
 
   // Map image-text relationships (used by both LLM and fallback)
   const imageTextRelation = mapImageTextRelations({
@@ -262,6 +284,12 @@ export async function runGeneration({
       image_orientations: imageOrientations,
       text_length: analysis.textLength,
       text_density: textDensity,
+      paragraph_count: textBlocksAnalysis.paragraph_count,
+      has_modular_blocks: textBlocksAnalysis.has_modular_blocks,
+      has_case_like_paragraphs: textBlocksAnalysis.has_case_like_paragraphs,
+      text_blocks: textBlocksAnalysis.text_blocks,
+      image_text_matching: imageTextMatching,
+      text_flow_mode: textFlowModeSelection.mode,
       content_structure: contentStructure,
       image_text_relation: imageTextRelation.relation,
       suggested_layout_family: suggestedLayoutFamily.family,
