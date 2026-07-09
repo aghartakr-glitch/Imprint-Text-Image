@@ -476,8 +476,41 @@ export function buildGridFallbackPlan({
   const layoutFamily = imageCount === 1 ? 'balanced' : (imageCount >= 3 ? 'image-first' : 'balanced')
   const layoutPurpose = imageCount >= 3 ? 'gallery' : 'case_analysis'
   const imageHierarchy = imageCount === 1 ? 'single_hero' : (imageCount === 2 ? 'equal_pair' : 'grid_gallery')
-  const compositionStrategy = 'column_flow_grid'
-  const reason = `이미지 ${imageCount}장 + ${textDensity} 본문: 사용자 grid 설정(${columns}열/${rows}행) 기반 column-flow 폴백`
+
+  // Phase 5-2: Determine composition strategy based on image count (not always column_flow_grid)
+  // This enables flexible_modular_grid as primary, only using column_flow_grid as fallback
+  let compositionStrategy = 'column_flow_grid'  // default fallback
+  let strategyReason = 'column-flow 폴백'
+
+  if (imageCount === 1) {
+    compositionStrategy = 'flexible_modular_grid'
+    strategyReason = 'flexible modular grid (hero + text)'
+  } else if (imageCount === 2) {
+    // For 2 images: alternates between layouts
+    const variant = pickVariantIndex([imageCount, textDensity], 2)
+    if (variant === 0) {
+      compositionStrategy = 'flexible_modular_grid'
+      strategyReason = 'flexible modular grid (2-column image-text pairs)'
+    } else {
+      compositionStrategy = 'image_text_case_blocks'
+      strategyReason = 'case blocks (grouped image-text)'
+    }
+  } else if (imageCount >= 3) {
+    // For 3+ images: more diverse strategies
+    const variant = pickVariantIndex([imageCount, textDensity], 3)
+    if (variant === 0) {
+      compositionStrategy = 'flexible_modular_grid'
+      strategyReason = 'flexible modular grid (variable span images)'
+    } else if (variant === 1) {
+      compositionStrategy = 'image_text_case_blocks'
+      strategyReason = 'case blocks (grouped pairs)'
+    } else {
+      compositionStrategy = 'distributed_images_across_pages'
+      strategyReason = 'distributed spread (images per page)'
+    }
+  }
+
+  const reason = `이미지 ${imageCount}장 + ${textDensity} 본문: 사용자 grid 설정(${columns}열/${rows}행) 기반 ${strategyReason}`
 
   return {
     style: 'Editorial',
