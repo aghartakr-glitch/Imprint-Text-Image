@@ -5,6 +5,105 @@ import { analyzeSpanVariation } from './layout/spanVariation.js'
 
 const VALID_STYLES = ['Editorial', 'Magazine', 'Exhibition Catalog']
 
+// Phase 5-2: Layout signature for diversity validation
+// Captures essential layout characteristics to detect if multiple candidates are actually different
+function getLayoutSignature(plan) {
+  const pages = Array.isArray(plan.pages) ? plan.pages : []
+
+  // Extract image positions as simple key
+  const imagePositions = pages.flatMap((p) =>
+    (p.elements ?? [])
+      .filter((e) => e.type === 'image')
+      .map((e) => `p${p.page}:c${e.col_start}s${e.col_span}r${e.row_start}s${e.row_span}`)
+  )
+
+  // Extract text span pattern
+  const textSpans = pages.flatMap((p) =>
+    (p.elements ?? [])
+      .filter((e) => e.type === 'text')
+      .map((e) => e.col_span)
+  )
+  const textSpanSet = new Set(textSpans)
+
+  // Extract image span pattern
+  const imageSpans = pages.flatMap((p) =>
+    (p.elements ?? [])
+      .filter((e) => e.type === 'image')
+      .map((e) => e.col_span)
+  )
+  const imageSpanSet = new Set(imageSpans)
+
+  return {
+    compositionStrategy: plan.composition_strategy,
+    pageCount: pages.length,
+    imagePositions: imagePositions.sort(),
+    imageSpans: Array.from(imageSpanSet).sort((a, b) => a - b),
+    textSpans: Array.from(textSpanSet).sort((a, b) => a - b),
+    imageCount: pages.flatMap((p) => (p.elements ?? []).filter((e) => e.type === 'image')).length,
+    textCount: pages.flatMap((p) => (p.elements ?? []).filter((e) => e.type === 'text')).length,
+  }
+}
+
+// Detect if layout uses rigid zigzag alternating pattern (image-left/text-right, then opposite)
+function isZigzagPattern(plan) {
+  const pages = Array.isArray(plan.pages) ? plan.pages : []
+  if (pages.length < 2) return false
+
+  let prevImageOnLeft = null
+  let zigzagCount = 0
+
+  for (const page of pages) {
+    const elements = page.elements ?? []
+    const images = elements.filter((e) => e.type === 'image' && e.col_span < 6) // Not full-width
+    const texts = elements.filter((e) => e.type === 'text')
+
+    for (const img of images) {
+      const imgOnLeft = img.col_start <= 3
+      if (prevImageOnLeft !== null && imgOnLeft !== prevImageOnLeft) {
+        zigzagCount += 1
+      }
+      prevImageOnLeft = imgOnLeft
+    }
+  }
+
+  // If images alternate left/right 2+ times, it's zigzag
+  return zigzagCount >= 2
+}
+
+// Calculate similarity between two signatures (0-1, higher = more similar)
+function getSignatureSimilarity(sig1, sig2) {
+  let matches = 0
+  let total = 0
+
+  // Check composition strategy
+  total += 1
+  if (sig1.compositionStrategy === sig2.compositionStrategy) matches += 1
+
+  // Check page count
+  total += 1
+  if (sig1.pageCount === sig2.pageCount) matches += 1
+
+  // Check image count
+  total += 1
+  if (sig1.imageCount === sig2.imageCount) matches += 1
+
+  // Check if image positions are identical (most important)
+  total += 2
+  if (JSON.stringify(sig1.imagePositions) === JSON.stringify(sig2.imagePositions)) {
+    matches += 2
+  }
+
+  // Check if image span patterns are different (good sign of diversity)
+  total += 1
+  if (JSON.stringify(sig1.imageSpans) !== JSON.stringify(sig2.imageSpans)) {
+    matches += 0 // Different spans = good (don't penalize)
+  } else {
+    matches += 1 // Same spans = less diverse
+  }
+
+  return matches / total
+}
+
 function colRangeOverlap(a, b) {
   return a.col_start <= b.col_start + b.col_span - 1 && b.col_start <= a.col_start + a.col_span - 1
 }
@@ -229,12 +328,23 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
     }
   }
 
+  // Phase 5-2: Detect rigid zigzag alternating pattern
+  if (plan.composition_strategy !== 'column_flow_grid' && isZigzagPattern(plan)) {
+    issues.push(`❌ Phase 5-2: 고정된 지그재그 패턴 감지: 이미지가 왼쪽-오른쪽으로 반복 교대로 배치됨. 더 유연한 배치를 사용하세요.`)
+  }
+
+  // Phase 5-2: Strong warning for column_flow_grid (should be rare/fallback only)
+  if (plan.composition_strategy === 'column_flow_grid' && imageCount >= 1) {
+    issues.push(`⚠️  Phase 5-2: column_flow_grid는 fallback입니다. flexible_modular_grid, image_text_case_blocks 등을 우선 사용하세요.`)
+  }
+
   // Collision validation: text-image overlap, gap checks. validateCollisions returns structured
   // objects ({ type, severity, reason, ... }); every other check here pushes a plain string. Only
   // blocking errors are surfaced (as strings, to keep `issues` a flat string list the callers/tests
   // expect); severity:'warning' gap notices are advisory and intentionally non-blocking.
   const collisionResult = validateCollisions(plan, {
     gridMode: plan.grid_spec?.grid_mode || 'strict',
+    useExpandedBbox: true,  // Phase 5: Use expanded bounding box for strict collision check
   })
   collisionResult.issues
     .filter((i) => i.severity === 'error')
@@ -244,5 +354,5 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
   // but every check above pushes a *string* (no .severity), so that filter silently passed EVERY
   // plan — disabling the entire validation layer (bad enums, unplaced images, missing paragraphs,
   // forbidden composition strategies all sailed through as passed:true). Now string issues block.
-  return { passed: issues.length === 0, issues }
+  return { passed: issues.length === 0, issues, layoutSignature: getLayoutSignature(plan) }
 }
