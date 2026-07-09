@@ -210,16 +210,44 @@ export async function runGeneration({
     userGridSettings: gridSettings.resolved_grid_settings,
   })
 
-  const candidatePool = llmResult.candidates.length > 0
-    ? llmResult.candidates
-    : [{
-      candidateId: 'fallback_1',
-      plan: buildFallbackLayoutPlan({
-        imageCount: analysis.imageCount, textDensity, imageAspectRatios: imageRatios, textLength: analysis.textLength, text, title, gridSettings,
-      }),
-      validation: { passed: true, issues: [] },
-      repaired: false,
-    }]
+  // Phase 5: Build candidate pool from LLM or fallback
+  let fallbackError = null
+  let fallbackPlan = null
+  let candidatePool = []
+
+  if (llmResult.candidates.length > 0) {
+    candidatePool = llmResult.candidates
+  } else {
+    // Attempt fallback, but validate it properly (don't auto-pass)
+    try {
+      fallbackPlan = buildFallbackLayoutPlan({
+        imageCount: analysis.imageCount,
+        textDensity,
+        imageAspectRatios: imageRatios,
+        textLength: analysis.textLength,
+        text,
+        title,
+        gridSettings,
+      })
+      // If fallback succeeds, validate it (don't hard-code passed:true)
+      const fallbackValidation = validateLayoutPlan(fallbackPlan, { imageCount: analysis.imageCount })
+      candidatePool = [{
+        candidateId: 'fallback_1',
+        plan: fallbackPlan,
+        validation: fallbackValidation,
+        repaired: false,
+      }]
+    } catch (err) {
+      // Fallback threw (e.g., column_flow_grid forbidden)
+      fallbackError = {
+        code: err.code || 'FALLBACK_ERROR',
+        message: err.message,
+        imageCount: err.imageCount,
+        textLength: err.textLength,
+      }
+      // Log but don't crash -- we'll handle this downstream
+    }
+  }
 
   // Add specialized layout as a candidate if it was successfully built
   if (specializedLayoutPlan) {
@@ -234,8 +262,39 @@ export async function runGeneration({
     }
   }
 
-  // 11-13. Layout Reconstructor -> Layout Refiner -> Layout Estimator, for every candidate
-  const scoredCandidates = candidatePool.map((c) => {
+  // Phase 5: If no candidates are available, generation fails
+  if (candidatePool.length === 0) {
+    const errorMsg = fallbackError
+      ? `Fallback layout generation failed: ${fallbackError.code} - ${fallbackError.message}`
+      : 'No layout candidates available (LLM failed, fallback unavailable, specialized layout unavailable)'
+    console.error(`[GENERATION FAILED] ${errorMsg}`)
+    return {
+      ok: false,
+      error: errorMsg,
+      fallbackError,
+      llmError: llmResult.fallbackReason || 'LLM did not produce valid candidates',
+    }
+  }
+
+  // Phase 5: Filter to only validation-passed candidates before scoring
+  const validatedCandidates = candidatePool.filter((c) => c.validation.passed)
+  if (validatedCandidates.length === 0) {
+    const validationFailures = candidatePool.map((c) => ({
+      candidate: c.candidateId,
+      issues: c.validation.issues.slice(0, 3).join('; '),
+    }))
+    const errorMsg = `All layout candidates failed validation: ${JSON.stringify(validationFailures)}`
+    console.error(`[GENERATION FAILED] ${errorMsg}`)
+    return {
+      ok: false,
+      error: errorMsg,
+      validationFailures,
+      fallbackError,
+    }
+  }
+
+  // 11-13. Layout Reconstructor -> Layout Refiner -> Layout Estimator, for every validated candidate
+  const scoredCandidates = validatedCandidates.map((c) => {
     const reconstructed = reconstructLayout({
       layoutPlan: c.plan, imagePaths, text, title, textBlocks: textBlocksAdvanced,
     })
@@ -384,12 +443,21 @@ export async function runGeneration({
       grid: { columns: GRID_COLUMNS, rows: GRID_ROWS },
     },
     llm_cost_budget: llmResult.costBudget ?? null,
+    generation_path: {
+      llm_called: llmResult.fallbackUsed !== undefined,
+      llm_succeeded: llmResult.candidates && llmResult.candidates.length > 0,
+      fallback_used: llmResult.fallbackUsed,
+      fallback_reason: llmResult.fallbackReason || null,
+      fallback_error: fallbackError || null,
+      selected_from: selected.candidateId.startsWith('fallback_') ? 'fallback_grid' : (selected.candidateId.startsWith('builtin_') ? 'specialized_layout' : 'llm'),
+    },
     validation: {
       passed: selected.validation.passed && compileResult.ok && spreadResult.ok,
       issues,
       repair_attempted: selected.repaired,
       llm_retry_count: llmResult.retryCount,
       fallback_used: llmResult.fallbackUsed,
+      fallback_error_code: fallbackError?.code || null,
     },
     refinement: {
       text_capacity_checked: true,

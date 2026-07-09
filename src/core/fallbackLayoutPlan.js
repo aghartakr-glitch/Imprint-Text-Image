@@ -402,9 +402,25 @@ function textElementsFromSlots(slots, pageNum) {
 // fixed body-text box. Every body-role element it emits already carries its final pre-sliced
 // `text` -- reconstructLayout.js recognizes the plan's `grid_spec` field and skips the legacy
 // paginateGridPlan re-slicing step accordingly.
+//
+// CRITICAL Phase 5: column_flow_grid fallback is FORBIDDEN for image+text layouts.
+// If this function is called with both images and text, throw immediately.
+// This prevents the fallback from becoming the de-facto output format instead of a last resort.
 export function buildGridFallbackPlan({
   imageCount, textDensity, imageAspectRatios = [], textLength = 0, text = '', title = '', gridSettings,
 }) {
+  // Phase 5: Forbid column_flow_grid for image+text (images + text present)
+  if (imageCount >= 1 && textLength > 0) {
+    const err = new Error(
+      `[FORBIDDEN] column_flow_grid fallback disabled for image+text layout. `
+      + `Input: ${imageCount} image(s), ${textLength} char text. `
+      + 'Must use flexible_modular_grid, image_text_case_blocks, or distributed_images_across_pages.',
+    )
+    err.code = 'COLUMN_FLOW_GRID_FORBIDDEN_IMAGE_TEXT'
+    err.imageCount = imageCount
+    err.textLength = textLength
+    throw err
+  }
   const { outputUnit } = decideOutputUnit({ imageCount, textDensity })
   const { grid_spec: gridSpecRaw, resolved_grid_settings: resolved } = gridSettings
   const columns = gridSpecRaw.columns
