@@ -222,14 +222,18 @@ Create exactly ${internalCandidateCount} distinct candidate layout_plans for the
 Use the pattern library and retrieved references as design grammar guidance, not fixed templates.
 
 CRITICAL CANDIDATE DIVERSITY (each of the ${internalCandidateCount} candidates MUST differ):
-1. Candidate 1: layout_family = "macro_opener_split" or "title_body_image_same_page"
-   → Use overview text at top, hero image below or beside, modular case/brand text blocks
-2. Candidate 2: layout_family = "image_text_case_blocks" or "hybrid_report_layout"
-   → Group related images with their semantic text blocks (Dove + Dove text, SweetyBetty + SweetyBetty text)
-   → Use case_title_ko/en as section separators
-3. Candidate 3: layout_family = "case_study_cards_grid" or "cmf_stories_masonry"
-   → If image_count >= 3: arrange images in grid/masonry, each with adjacent case/brand text
-   → Separate "DESIGN CASE STUDIES" as section_title, not body text
+🔴 FORBIDDEN: gallery_page_text_page (separates all images from all text -- defeats modular layout goal)
+   → Use column_flow_grid or images_spread_across_pages instead (interleave images and text)
+
+1. Candidate 1: layout_family = "balanced" | "text_first", composition_strategy = "column_flow_grid"
+   → Use column_flow for text to wrap around images
+   → Modular case/brand text blocks each with text_source: paragraph_N
+2. Candidate 2: layout_family = "balanced" | "image_text_case_blocks", composition_strategy = "image_left_text_right" or "text_left_image_right"
+   → Alternate image-text pairs on left/right (Dove + Dove text, SweetyBetty + SweetyBetty text)
+   → Use case_title_ko/en as section separators with text_source field
+3. Candidate 3: layout_family = "balanced" | "gallery", composition_strategy = "images_spread_across_pages"
+   → One-two images per page with adjacent case/brand text on SAME page
+   → Separate "DESIGN CASE STUDIES" as section_title element, not merged into body text
 
 INFERRED RELATIONSHIPS TO PRESERVE:
 - For every high-confidence image-text pair (confidence >= 0.7):
