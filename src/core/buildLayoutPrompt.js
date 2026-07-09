@@ -13,8 +13,9 @@ Your allowed decisions:
 - Decide the layout_purpose (visual_showcase, comparison, editorial_reading, case_analysis, gallery, report).
 - Decide the image_hierarchy (single_hero, equal_pair, hero_support, grid_gallery, page_gallery).
 - Decide the image_text_relation (image_sets_mood, text_explains_image, image_supports_text, equal_visual_text, gallery_then_text).
-- Decide the composition_strategy (full_image, image_above_text, text_above_image, image_left_text_right, text_left_image_right, equal_images, hero_support, grid_gallery, gallery_left_text_right, gallery_page_text_page).
+- Decide the composition_strategy (full_image, image_above_text, text_above_image, image_left_text_right, text_left_image_right, equal_images, hero_support, grid_gallery, gallery_left_text_right, gallery_page_text_page, column_flow_grid, images_spread_across_pages).
 - Decide which base pattern reference from the knowledge base best explains your composition.
+- Decide the grid_spec: if user has provided preferred grid settings (columns, page_size, grid_mode, margin_preset), your grid_spec MUST reflect them. Never ignore user's explicit column count or grid_mode choice. If no user setting is provided, use 6 columns/A5 as default.
 - Place elements using the grid system only, and record each decision as a step in design_sequence.
 
 Your forbidden actions:
@@ -28,13 +29,19 @@ Your forbidden actions:
 
 Fixed constraints:
 - A5 portrait page: 148mm x 210mm. Spread preview: 296mm x 210mm.
-- Margins: top 16mm, bottom 18mm, inner 18mm, outer 14mm.
+- Margins: top 16mm, bottom 18mm, inner 18mm, outer 14mm (or user's margin_preset if provided).
 - Body font size: 9pt. Body leading: 14pt.
 - Image count: 1 to 6. Captions disabled. Image fit: contain. Preserve image aspect ratio.
 - Text overlay is forbidden. Body overflow continues to next page without shrinking.
-- Grid: each page uses 6 columns and 12 rows. Output col_start, col_span, row_start, row_span only
-  (plus object_position for images: center | top | bottom | left | right, default center).
-  The implementation converts grid units to mm.
+- Grid: use the column count specified in user's grid settings if provided (default 6 columns, 12 rows).
+  Output col_start, col_span, row_start, row_span only (plus object_position for images:
+  center | top | bottom | left | right, default center). The implementation converts grid units to mm.
+- MUST include grid_spec in every candidate: { page_size, columns, rows, margin_preset, gutter_mm, grid_mode }
+  reflecting user's preferences if they were provided, otherwise sensible defaults.
+- MUST include reserved_regions array: every image element becomes a reserved_region so body text
+  flows around it instead of overlapping. Format: [{ page, col_start, col_span, row_start, row_span }, ...]
+- MUST include text_flow: { mode: 'block_flow' | 'column_flow', flow_regions, overflow_policy }
+  When layout has multiple images or user selected columns > 3, use 'column_flow' for sophisticated text routing.
 - Allowed text roles: title, subtitle, body, section_label, page_number, continuation_body.
   You do not need to place a title/subtitle element yourself -- if has_title is true, it is
   rendered on its own separate opener page automatically. Only place body (and optionally
@@ -156,6 +163,8 @@ export function buildUserPrompt({
   patternLibrarySummary,
   retrievedReferences,
   userControls,
+  userLayoutSettings,
+  userGridHint,
   userPreferenceContext,
   internalCandidateCount = 3,
 }) {
@@ -167,6 +176,9 @@ export function buildUserPrompt({
     `Retrieved reference examples (real tagged pages most similar to this input -- guidance only, do not copy any single example verbatim):\n${JSON.stringify(retrievedReferences ?? [])}`,
   ]
 
+  if (userLayoutSettings && Object.values(userLayoutSettings).some((v) => v && v !== 'auto')) {
+    sections.push(`User's preferred grid layout (should be reflected in your grid_spec output):\n${JSON.stringify(userLayoutSettings)}\n\nResolved grid settings for this layout:\n${JSON.stringify(userGridHint)}`)
+  }
   if (userControls && Object.values(userControls).some((v) => v && v !== 'auto')) {
     sections.push(`User controls (soft preferences -- follow them unless they violate a fixed constraint or validation rule; if you cannot follow one, explain why in reason):\n${JSON.stringify(userControls)}`)
   }

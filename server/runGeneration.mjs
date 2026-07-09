@@ -114,6 +114,8 @@ export async function runGeneration({
     patternLibrarySummary,
     retrievedReferences,
     userControls,
+    userLayoutSettings,
+    userGridHint: gridSettings.resolved_grid_settings,
     userPreferenceContext,
     // Cost lever: 1 candidate per call instead of 3 (spec's original ask) -- cuts output tokens
     // to roughly a third. The reconstruct/refine/estimate/select pipeline still runs on whatever
