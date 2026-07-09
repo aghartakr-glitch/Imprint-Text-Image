@@ -159,17 +159,20 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
   const MIN_GAP_STRICT = 1 // at least 1 gutter
   const MIN_GAP_FLEXIBLE = 0.75
 
-  pages.forEach((page) => {
-    const elements = Array.isArray(page.elements) ? page.elements : []
+  pages.forEach((page, pageIdx) => {
+    // Elements are grouped under page.elements[] and don't need their own .page field in the
+    // schema; a.page was routinely undefined, which surfaced as "(page undefined)" in every
+    // collision message. Stamp the real page number onto each element copy here so messages and
+    // any downstream page-scoped logic always have it (confirmed 2026-07-09).
+    const pageNumber = page.page ?? pageIdx + 1
+    const elements = (Array.isArray(page.elements) ? page.elements : []).map((el) => ({ ...el, page: pageNumber }))
 
-    // Check all pairs for overlap/gap
+    // Check all pairs for overlap/gap (already scoped to a single page by the outer forEach,
+    // so no a.page !== b.page check is needed here).
     for (let i = 0; i < elements.length; i += 1) {
       for (let j = i + 1; j < elements.length; j += 1) {
         const a = elements[i]
         const b = elements[j]
-
-        // Skip if different pages
-        if (a.page !== b.page) continue
 
         // Check forbidden overlaps
         const aIsImage = a.type === 'image'

@@ -51,7 +51,12 @@ export function analyzeSpanVariation(plan) {
   // Image span patterns for generation-log
   const imageSpanPatterns = Array.from(distinctImageSpans).sort((a, b) => a - b).map((s) => `${s}-column`)
 
-  const forcedRigidColumns = allTextForcedToSingleColumns || (noSpanVariation && Number.isInteger(columns) && columns >= 3)
+  // Only an all-1-column text wall is a real typesetting failure (splits sentences into narrow
+  // slivers). Uniform-but-wider spans (e.g. every body block at 2-column) is a legitimate,
+  // common editorial reading layout -- it must not be rejected outright, only flagged as a
+  // quality/diversity penalty. See validateLayoutPlan.js: forcedRigidColumns blocks the
+  // candidate, noSpanVariation is a warning only.
+  const forcedRigidColumns = allTextForcedToSingleColumns
 
   return {
     grid_interpretation: 'alignment_structure_not_forced_columns',
@@ -66,6 +71,7 @@ export function analyzeSpanVariation(plan) {
     intentional_whitespace_regions: [],
     rejected_because_forced_four_column_text: forcedRigidColumns,
     forcedRigidColumns,
+    noTextSpanVariationWarning: noSpanVariation && !allTextForcedToSingleColumns,
     imagesNeverSpanMultiple,
     noImageSpanVariation,
   }

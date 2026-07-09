@@ -198,19 +198,33 @@ export async function runGeneration({
   // 7-10. LLM Layout Candidate Generator + Layout Validator (validate/repair/retry inside)
   const llmResult = await callLayoutLLM({ promptContext, imageCount: analysis.imageCount }, llmOptions)
 
-  // Phase 5-3: If LLM fails (fallback_used=true), do NOT generate PDF with fallback template
-  // LLM understanding (content_understanding, image_text_relations, reference_principles) is REQUIRED
-  // for editorial layout generation. Without LLM reasoning, output is not editorial layout, just template.
+  // If LLM/packing fails (fallback_used=true), do NOT generate a PDF from a fixed template --
+  // this system has no rule-based fallback for image+text editorial layouts by design. But the
+  // failure reason matters: errorType distinguishes "LLM never produced usable editorial
+  // reasoning" (LLM_NO_API_KEY / LLM_JSON_PARSE_FAILED / LLM_REASONING_MISSING /
+  // LLM_COST_BUDGET_EXCEEDED / LLM_SCHEMA_FAILED) from "LLM reasoning succeeded, but the local
+  // deterministic packer couldn't fit the resulting groups within collision/gap/capacity
+  // constraints" (GEOMETRY_PACKING_FAILED) -- the latter is never the LLM's fault and should
+  // never be reported to the user as "LLM reasoning failed".
   if (llmResult.fallbackUsed) {
-    const errorMsg = `LLM-based layout reasoning failed: ${llmResult.fallbackReason || 'unknown error'}. Layout generation requires LLM content understanding and cannot fall back to fixed templates.`
+    const errorType = llmResult.errorType || 'LLM_REASONING_MISSING'
+    const llmReasoningAvailable = errorType === 'GEOMETRY_PACKING_FAILED'
+    const errorMsg = llmReasoningAvailable
+      ? `Geometry packing failed: ${llmResult.fallbackReason || 'unknown error'}. LLM reasoning succeeded, but local layout packing could not satisfy collision/text-capacity constraints.`
+      : `LLM-based layout reasoning failed (${errorType}): ${llmResult.fallbackReason || 'unknown error'}. Layout generation requires LLM content understanding and cannot fall back to fixed templates.`
     console.error(`[GENERATION FAILED] ${errorMsg}`)
     return {
       ok: false,
+      error_type: errorType,
       error: errorMsg,
       fallback_used: true,
       fallback_reason: llmResult.fallbackReason,
-      llm_reasoning_available: false,
-      suggested_action: 'Check LLM API, cost budget, or schema parsing. Rule-based fallback is not available for image+text editorial layouts.',
+      llm_reasoning_available: llmReasoningAvailable,
+      candidate_groups_available: llmReasoningAvailable,
+      validation_issues: (llmResult.rejectedCandidates || []).flatMap((c) => c.validation?.issues || []),
+      suggested_action: llmReasoningAvailable
+        ? 'Check packEditorialLayout.js / repairGeometryPlan.js -- the LLM output was fine, the geometry engine could not fit it.'
+        : 'Check LLM API, cost budget, or schema parsing. Rule-based fallback is not available for image+text editorial layouts.',
     }
   }
 

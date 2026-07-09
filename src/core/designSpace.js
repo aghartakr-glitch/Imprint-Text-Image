@@ -5,7 +5,10 @@ export const DESIGN_SPACE = {
 
   pageKinds: ['single_page', 'spread', 'continuation_page'],
 
-  layoutFamilies: ['image-first', 'balanced', 'text-first'],
+  layoutFamilies: [
+    'image-first', 'balanced', 'text-first',
+    'modular-editorial', 'case-study', 'magazine', 'asymmetrical', 'reference-aware',
+  ],
 
   layoutPurposes: [
     'visual_showcase',
@@ -34,6 +37,18 @@ export const DESIGN_SPACE = {
   ],
 
   compositionStrategies: [
+    // Primary group-based editorial strategies (packEditorialLayout.js target vocabulary).
+    'flexible_modular_grid',
+    'image_text_case_blocks',
+    'hybrid_report_layout',
+    'asymmetrical_masonry',
+    'magazine_spread',
+    'case_card_grid',
+    'distributed_image_text',
+    'text_led_editorial_flow',
+    'reference_aware_editorial',
+
+    // legacy / fallback only -- not the default for image+text editorial layouts.
     'full_image',
     'image_above_text',
     'text_above_image',
@@ -49,6 +64,7 @@ export const DESIGN_SPACE = {
     'images_spread_across_pages',
     // Body text flows across real column slots (via ColumnFlowEngine) that route around image
     // reserved_regions, using the user's chosen grid_spec column count instead of a fixed 6x12.
+    // FALLBACK ONLY -- never the default choice for image+text editorial layouts.
     'column_flow_grid',
   ],
 

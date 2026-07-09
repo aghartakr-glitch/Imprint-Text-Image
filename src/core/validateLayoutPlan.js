@@ -119,9 +119,10 @@ function checkEnum(value, allowed, fieldName, issues, required = true) {
 // vocabulary. "JSON parses" isn't checked here -- that's the caller's job via JSON.parse.
 export function validateLayoutPlan(plan, { imageCount } = {}) {
   const issues = []
+  const warnings = []
 
   if (!plan || typeof plan !== 'object') {
-    return { passed: false, issues: ['layout_plan이 객체가 아닙니다'] }
+    return { passed: false, issues: ['layout_plan이 객체가 아닙니다'], warnings: [] }
   }
 
   // Compute active grid dimensions: if plan has grid_spec, use it; otherwise fall back to defaults
@@ -300,38 +301,36 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
     }
   }
 
-  // Phase 5: Grid specification and span variation checks (after pages are analyzed)
+  // Grid specification and span variation checks (after pages are analyzed).
+  // Design-taste issues (uniform-but-wider spans, e.g. every body block at 2-column) are
+  // warnings/scoring penalties, not rejections. Only a genuine typesetting failure -- every
+  // text block forced to 1-column, splitting sentences into narrow slivers -- blocks the
+  // candidate. See spanVariation.js for the forcedRigidColumns vs noTextSpanVariationWarning split.
   if (plan.grid_spec) {
     spanAnalysis = analyzeSpanVariation(plan)
     if (spanAnalysis.forcedRigidColumns) {
-      issues.push(`❌ 모든 텍스트가 동일한(또는 1-column) 폭으로 강제 배치됨 (columns=${plan.grid_spec.columns}): grid는 이미지/텍스트의 span(1~${plan.grid_spec.columns}열)을 정하는 정렬 기준일 뿐, 모든 요소를 1열 폭으로 채우라는 뜻이 아닙니다. 문단마다 다른 col_span(2열, 3열 등)을 사용하세요.`)
+      issues.push(`❌ 모든 텍스트가 1-column 폭으로 강제 배치됨 (columns=${plan.grid_spec.columns}): grid는 이미지/텍스트의 span(1~${plan.grid_spec.columns}열)을 정하는 정렬 기준일 뿐, 모든 요소를 1열 폭으로 채우라는 뜻이 아닙니다. 문단마다 다른 col_span(2열, 3열 등)을 사용하세요.`)
     }
 
-    // Phase 5: Reject plans with insufficient text span variation (for 3+ column grids)
-    if (activeColumns >= 3 && !spanAnalysis.text_span_variation_used) {
-      issues.push(`❌ Phase 5: 텍스트 span 다양화 부족: 모든 텍스트가 동일한 폭(${spanAnalysis.text_span_patterns[0] || '1-column'})으로만 배치됨. 2-column, 3-column 등을 혼합하세요.`)
+    if (activeColumns >= 3 && !spanAnalysis.text_span_variation_used && !spanAnalysis.forcedRigidColumns) {
+      warnings.push(`⚠️ 텍스트 span 다양화 부족: 모든 텍스트가 동일한 폭(${spanAnalysis.text_span_patterns[0] || '2-column'})으로만 배치됨. 취향 문제로 감점만 적용됩니다.`)
     }
 
-    // Phase 5: Reject plans with no image span variation (when multiple images exist)
     const imageCount = seenImageIndices.size
     if (imageCount >= 2 && !spanAnalysis.image_span_variation_used) {
-      issues.push(`❌ Phase 5: 이미지 span 다양화 부족: ${imageCount}장의 이미지가 모두 같은 크기로 배치됨. 1-column, 2-column, 3-column 등을 혼합하세요.`)
+      warnings.push(`⚠️ 이미지 span 다양화 부족: ${imageCount}장의 이미지가 모두 같은 크기로 배치됨. equal_pair 등 의도적인 경우가 아니면 혼합을 권장합니다.`)
     }
 
-    // Phase 5: Warn if column_flow_grid is used (fallback only)
     if (plan.composition_strategy === 'column_flow_grid') {
-      issues.push(`⚠️  Phase 5: column_flow_grid는 fallback입니다. flexible_modular_grid, image_text_case_blocks, asymmetrical 등을 우선 사용하세요.`)
+      warnings.push('⚠️ column_flow_grid는 fallback입니다. flexible_modular_grid, image_text_case_blocks 등을 우선 사용하세요.')
     }
   }
 
-  // Phase 5-2: Detect rigid zigzag alternating pattern
+  // Detect rigid zigzag alternating pattern -- a real repeated-pattern failure, kept as a hard
+  // reject since it's the exact "same image-left/text-right on every page" complaint this system
+  // exists to avoid, not a matter of taste.
   if (plan.composition_strategy !== 'column_flow_grid' && isZigzagPattern(plan)) {
-    issues.push(`❌ Phase 5-2: 고정된 지그재그 패턴 감지: 이미지가 왼쪽-오른쪽으로 반복 교대로 배치됨. 더 유연한 배치를 사용하세요.`)
-  }
-
-  // Phase 5-2: Strong warning for column_flow_grid (should be rare/fallback only)
-  if (plan.composition_strategy === 'column_flow_grid' && imageCount >= 1) {
-    issues.push(`⚠️  Phase 5-2: column_flow_grid는 fallback입니다. flexible_modular_grid, image_text_case_blocks 등을 우선 사용하세요.`)
+    issues.push('❌ 고정된 지그재그 패턴 감지: 이미지가 왼쪽-오른쪽으로 반복 교대로 배치됨. 더 유연한 배치를 사용하세요.')
   }
 
   // Phase 5-2: Text capacity validation (detect overflow)
@@ -356,5 +355,7 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
   // but every check above pushes a *string* (no .severity), so that filter silently passed EVERY
   // plan — disabling the entire validation layer (bad enums, unplaced images, missing paragraphs,
   // forbidden composition strategies all sailed through as passed:true). Now string issues block.
-  return { passed: issues.length === 0, issues, layoutSignature: getLayoutSignature(plan) }
+  return {
+    passed: issues.length === 0, issues, warnings, layoutSignature: getLayoutSignature(plan),
+  }
 }
