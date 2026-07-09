@@ -42,14 +42,33 @@ Fixed constraints:
   flows around it instead of overlapping. Format: [{ page, col_start, col_span, row_start, row_span }, ...]
 - MUST include text_flow: { mode: 'block_flow' | 'column_flow', flow_regions, overflow_policy }
   When layout has multiple images or user selected columns > 3, use 'column_flow' for sophisticated text routing.
-- Allowed text roles: title, subtitle, intro, body, case_body, section_label, page_number.
+- Allowed text roles: title, subtitle, overview, context, audience_value, body, case_body, section_title, case_title_ko, case_title_en, credit.
   🚨 **ABSOLUTELY CRITICAL - VALIDATION WILL FAIL IF VIOLATED**:
   - EVERY text element MUST include "text_source" field
   - text_source MUST be "title" OR "paragraph_N" (e.g., "paragraph_1", "paragraph_5")
   - 🔴 FORBIDDEN: text_source: "body_all" (will fail validation and reject entire layout)
   - 🔴 FORBIDDEN: omitting text_source (will fail validation)
-  - WHY: User separated paragraphs by blank lines on purpose. Each paragraph is a distinct visual/semantic unit.
-  - CONSEQUENCE: If you ignore this, the layout will be rejected and fallback deterministic layout used instead.
+  - WHY: User separated paragraphs by blank lines on purpose. Each paragraph has a detected role (overview, brand_case, section_title, etc.).
+
+  Role Assignment Rules (paragraph roles are pre-detected and provided):
+  * "overview" paragraphs (メガトレンド, 意味) → place at page top or intro area for context
+  * "context" paragraphs (初期化, 전 세계, 움직임) → near hero image or after overview
+  * "brand_case_dove" paragraphs → place near Dove image OR on same page/adjacent page
+  * "brand_case_sweaty_betty" paragraphs → place near Sweaty Betty image OR same page
+  * "case_title_ko" or "case_title_en" (커뮤니티 액티비즘, COMMUNITY ACTIVISM) → use as section header, prominent placement
+  * "protest_case" paragraphs (카네기, 시위, LGBTQ+) → place near crowd/protest image
+  * "section_title" (DESIGN CASE STUDIES) → separate visual element, NOT merged with body text
+  * "credit" (Sweaty Betty, Deepti Khatri) → small text, typically below case study
+
+  Image-Text Proximity (CRITICAL for editorial quality):
+  * IF inferred_image_text_relations has high-confidence match (confidence >= 0.7):
+    - MUST place text block and related image on same page OR within 1 page distance
+    - MUST NOT place them 3+ pages apart (reader loses context)
+    - BONUS: same page or adjacent spread is preferred
+  * Dove text + Dove image = high confidence → same page or spread
+  * Protest text + crowd image = high confidence → same page or spread
+
+  CONSEQUENCE: If you ignore this, the layout will be rejected and fallback deterministic layout used instead.
 
   If has_title is true, you MUST decide where to place the title element (title_behavior):
   * same_page_with_image_body: title + image + body on one page
@@ -187,6 +206,8 @@ export function buildUserPrompt({
   documentStructure,
   textBlocks,
   textLayoutMode,
+  imageAnalysis,
+  inferredImageTextRelations,
   imageTextMatching,
   textFlowMode,
   imageMetadata,
@@ -213,6 +234,19 @@ export function buildUserPrompt({
       char_count: b.char_count,
       brand: b.brand || null,
     })), null, 2)}` : undefined,
+    imageAnalysis && imageAnalysis.length > 0 ? `IMAGE VISUAL ANALYSIS (pre-analyzed for you):\n${JSON.stringify(imageAnalysis.map((img) => ({
+      id: img.id,
+      orientation: img.orientation,
+      aspect_ratio: img.aspect_ratio,
+      visual_type: img.visual_type,
+      possible_role: img.possible_role,
+    })), null, 2)}\n\nUse this to make informed placement decisions (e.g., place crowd_or_protest image near protest_case text).` : undefined,
+    inferredImageTextRelations && inferredImageTextRelations.length > 0 ? `INFERRED IMAGE-TEXT SEMANTIC RELATIONSHIPS (high-confidence matches):\n${JSON.stringify(inferredImageTextRelations.map((rel) => ({
+      text_block_id: rel.text_block_id,
+      image_id: rel.image_id,
+      relation: rel.relation,
+      confidence: rel.confidence,
+    })), null, 2)}\n\n⚠️ MUST KEEP HIGH-CONFIDENCE PAIRS (confidence >= 0.7) ON SAME PAGE OR ADJACENT PAGES. Splitting them 3+ pages apart will fail editorial review.` : undefined,
     imageTextMatching ? `Image-text relationships (suggested pairings):\n${JSON.stringify(imageTextMatching)}` : undefined,
     suggestedLayoutFamily ? `Suggested layout family (based on image count and content structure):\n${JSON.stringify(suggestedLayoutFamily)}` : undefined,
     `Image metadata (per-image facts; estimated_role is a starting hint, you may override it):\n${JSON.stringify(imageMetadata ?? [])}`,
@@ -233,6 +267,30 @@ export function buildUserPrompt({
   sections.push(`Task:
 Create exactly ${internalCandidateCount} distinct candidate layout_plans for the given input.
 Use the pattern library and retrieved references as design grammar guidance, not fixed templates.
+
+CRITICAL CANDIDATE DIVERSITY (each of the ${internalCandidateCount} candidates MUST differ):
+1. Candidate 1: layout_family = "macro_opener_split" or "title_body_image_same_page"
+   → Use overview text at top, hero image below or beside, modular case/brand text blocks
+2. Candidate 2: layout_family = "image_text_case_blocks" or "hybrid_report_layout"
+   → Group related images with their semantic text blocks (Dove + Dove text, SweetyBetty + SweetyBetty text)
+   → Use case_title_ko/en as section separators
+3. Candidate 3: layout_family = "case_study_cards_grid" or "cmf_stories_masonry"
+   → If image_count >= 3: arrange images in grid/masonry, each with adjacent case/brand text
+   → Separate "DESIGN CASE STUDIES" as section_title, not body text
+
+INFERRED RELATIONSHIPS TO PRESERVE:
+- For every high-confidence image-text pair (confidence >= 0.7):
+  → Place text and image on SAME PAGE or ADJACENT PAGES only
+  → Use the detected roles (brand_case_dove, protest_case, etc.) to inform grouping
+  → Never split Dove text from Dove image by 3+ pages
+
+PARAGRAPH ROLE-BASED PLACEMENT:
+- "section_title" (DESIGN CASE STUDIES): prominent, separate visual element
+- "case_title_ko" / "case_title_en": section headers or case headers
+- "brand_case_*" / "protest_case": near related image, same grid region if possible
+- "overview" / "context": early pages, near hero image or standalone
+- "credit": small text near bottom of case study
+
 Think about image count, image orientation, text density, reading priority, and visual priority.
 
 Required output format (top-level object with a "candidates" array of exactly ${internalCandidateCount} items), one-page example shown -- extend to more pages/elements as needed:
