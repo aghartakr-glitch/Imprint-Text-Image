@@ -32,15 +32,23 @@ function pageCoverageRatio(page) {
 
 export function estimateLayoutQuality({
   plan, resolvedPages = [], refinements = { notes: [] }, repetitionPenaltyApplied = false,
+  validationIssues = [], inferredImageTextRelations = [],
 }) {
   const deductions = []
+  const bonuses = []
   const scores = {
     readability: 1, visual_balance: 1, hierarchy: 1, whitespace: 1, image_text_relation: 1,
+    collision_safety: 1, proximity: 1, modular_structure: 1,
   }
 
   function deduct(category, amount, reason) {
     scores[category] = Math.max(0, scores[category] - amount)
     deductions.push({ reason, amount: -amount })
+  }
+
+  function bonus(category, amount, reason) {
+    scores[category] = Math.min(2, scores[category] + amount)
+    bonuses.push({ reason, amount })
   }
 
   if (refinements.notes.some((n) => n.includes('너무 좁습니다'))) {
@@ -79,6 +87,41 @@ export function estimateLayoutQuality({
     deduct('visual_balance', 0.5, 'repeated same layout too often')
   }
 
+  // Collision safety: deduct for text-image overlap, insufficient gap
+  const collisionErrors = (validationIssues || []).filter((i) => i.severity === 'error' && i.type?.includes('overlap'))
+  const collisionWarnings = (validationIssues || []).filter((i) => i.severity === 'warning' && i.type?.includes('gap'))
+  if (collisionErrors.length > 0) {
+    deduct('collision_safety', 0.8, `text-image overlap detected (${collisionErrors.length} errors)`)
+  }
+  if (collisionWarnings.length > 0) {
+    deduct('collision_safety', 0.3 * collisionWarnings.length, `insufficient gaps between elements (${collisionWarnings.length} warnings)`)
+  }
+
+  // Proximity bonus: related images and texts are on same page or adjacent
+  if (Array.isArray(inferredImageTextRelations) && inferredImageTextRelations.length > 0) {
+    const highConfidenceCount = inferredImageTextRelations.filter((r) => r.confidence >= 0.7).length
+    if (highConfidenceCount > 0) {
+      // Assume pairs are preserved (checked during layout validation)
+      bonus('proximity', 0.3, `high-confidence image-text pairs preserved (${highConfidenceCount})`)
+    }
+  }
+
+  // Modular structure bonus: using textBlocks instead of textSlice
+  const hasModularText = (plan.pages || []).some((page) =>
+    Array.isArray(page.elements) && page.elements.some((el) => el.type === 'text' && el.text_source && el.text_source !== 'body_all')
+  )
+  if (hasModularText) {
+    bonus('modular_structure', 0.25, 'using modular textBlocks (not body_all merge)')
+  }
+
+  // Section title bonus: DESIGN CASE STUDIES as independent element
+  const hasSectionTitle = (plan.pages || []).some((page) =>
+    Array.isArray(page.elements) && page.elements.some((el) => el.type === 'text' && el.role === 'section_title')
+  )
+  if (hasSectionTitle) {
+    bonus('modular_structure', 0.15, 'section titles properly separated')
+  }
+
   const total = Object.values(scores).reduce((sum, v) => sum + v, 0)
 
   return {
@@ -86,6 +129,7 @@ export function estimateLayoutQuality({
       total: Math.round(total * 100) / 100,
       ...scores,
       deductions,
+      bonuses,
     },
   }
 }

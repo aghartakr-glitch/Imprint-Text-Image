@@ -242,6 +242,8 @@ export async function runGeneration({
     const repetitionPenaltyApplied = shouldApplyRepetitionPenalty(recentLayouts, c.plan.composition_strategy)
     const { layout_quality_score: qualityScore } = estimateLayoutQuality({
       plan: c.plan, resolvedPages, refinements, repetitionPenaltyApplied,
+      validationIssues: c.validation.issues,
+      inferredImageTextRelations: inferred_image_text_relations,
     })
     return {
       candidateId: c.candidateId,
