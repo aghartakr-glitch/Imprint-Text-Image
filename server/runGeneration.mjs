@@ -224,7 +224,7 @@ export async function runGeneration({
   // 11-13. Layout Reconstructor -> Layout Refiner -> Layout Estimator, for every candidate
   const scoredCandidates = candidatePool.map((c) => {
     const reconstructed = reconstructLayout({
-      layoutPlan: c.plan, imagePaths, text, title,
+      layoutPlan: c.plan, imagePaths, text, title, textBlocks: textBlocksAdvanced,
     })
     const { resolvedPages, refinements } = refineLayout(reconstructed, { imagePaths, imageAspectRatios: imageRatios })
     const repetitionPenaltyApplied = shouldApplyRepetitionPenalty(recentLayouts, c.plan.composition_strategy)

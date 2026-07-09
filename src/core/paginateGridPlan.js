@@ -24,41 +24,81 @@ function sliceAtWordBoundary(text, capacity) {
   return { slice, consumed }
 }
 
+// Build a map from text_source ID to full text for LLM-generated layouts.
+// If textBlocks is provided and has multiple blocks (indicating modular layout),
+// use text_source to reference specific paragraphs. Otherwise fall back to merging all text.
+function buildTextSourceMap(textBlocks) {
+  if (!Array.isArray(textBlocks) || textBlocks.length === 0) {
+    return {}
+  }
+  const map = {}
+  textBlocks.forEach((block) => {
+    if (block.id && block.text) {
+      map[block.id] = block.text
+    }
+  })
+  return map
+}
+
 // Distributes the full body text across the plan's own body-role text boxes (one per page, in
 // page order), then appends as many full-page continuation pages as needed for whatever text
 // doesn't fit -- deterministic pagination, never shrinking font size or leading. Returns an array
 // of { elements, textSlicesByElementId } ready for resolveGridPage.
-export function paginateGridPlan(plan, text) {
+// If textBlocks is provided and has multiple blocks, uses text_source to assign specific paragraphs.
+export function paginateGridPlan(plan, text, textBlocks) {
+  const textSourceMap = buildTextSourceMap(textBlocks)
+  const hasMultipleBlocks = Object.keys(textSourceMap).length > 1
   let remainingText = text
 
   const planPages = plan.pages.map((page) => {
-    const bodyEl = page.elements.find((el) => el.type === 'text' && el.role === 'body')
     const textSlicesByElementId = {}
-    if (bodyEl) {
-      const box = gridToMm(bodyEl)
-      const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
+
+    // Process ALL text elements on the page (not just the first body element)
+    // to support column-flow layouts with multiple text slots per page.
+    page.elements.forEach((el) => {
+      if (el.type !== 'text' || el.role !== 'body') return
+
       let slice = null
-      if (capacity > 0 && remainingText.length > 0) {
-        const result = sliceAtWordBoundary(remainingText, capacity)
-        slice = result.slice
-        remainingText = remainingText.slice(result.consumed)
+
+      // If LLM set text_source and we have corresponding textBlock, use it
+      if (hasMultipleBlocks && el.text_source && textSourceMap[el.text_source]) {
+        slice = textSourceMap[el.text_source]
+      } else if (hasMultipleBlocks && el.text_source) {
+        // text_source was set but block not found — LLM may have referenced non-existent paragraph
+        // Fall through to empty slice (validation should catch this)
+        slice = null
+      } else {
+        // No text_source or single-block layout — use sequential pagination from remainingText
+        const box = gridToMm(el)
+        const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
+        if (capacity > 0 && remainingText.length > 0) {
+          const result = sliceAtWordBoundary(remainingText, capacity)
+          slice = result.slice
+          remainingText = remainingText.slice(result.consumed)
+        }
       }
-      textSlicesByElementId[bodyEl.id] = slice
-    }
+
+      textSlicesByElementId[el.id] = slice
+    })
+
     return { elements: page.elements, textSlicesByElementId }
   })
 
+  // Append overflow pages only for sequential mode (when no text_source was used)
+  // In modular mode, overflow pages should be handled by the plan or fallback
   const overflowPages = []
-  while (remainingText.length > 0) {
-    const box = gridToMm(OVERFLOW_BODY_ELEMENT)
-    const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
-    if (capacity <= 0) throw new Error('오버플로우 텍스트 페이지의 수용량이 0입니다')
-    const { slice, consumed } = sliceAtWordBoundary(remainingText, capacity)
-    remainingText = remainingText.slice(consumed)
-    overflowPages.push({
-      elements: [OVERFLOW_BODY_ELEMENT],
-      textSlicesByElementId: { [OVERFLOW_BODY_ELEMENT.id]: slice },
-    })
+  if (!hasMultipleBlocks) {
+    while (remainingText.length > 0) {
+      const box = gridToMm(OVERFLOW_BODY_ELEMENT)
+      const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
+      if (capacity <= 0) throw new Error('오버플로우 텍스트 페이지의 수용량이 0입니다')
+      const { slice, consumed } = sliceAtWordBoundary(remainingText, capacity)
+      remainingText = remainingText.slice(consumed)
+      overflowPages.push({
+        elements: [OVERFLOW_BODY_ELEMENT],
+        textSlicesByElementId: { [OVERFLOW_BODY_ELEMENT.id]: slice },
+      })
+    }
   }
 
   return [...planPages, ...overflowPages]

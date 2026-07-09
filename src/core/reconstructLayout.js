@@ -7,7 +7,7 @@ import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM } from './layoutConstants.js'
 // text slots (with continuation pages for overflow), and an optional title-page prepended. This
 // is *not* the final refined/LaTeX-ready object yet (see refineLayout.js for that step).
 export function reconstructLayout({
-  layoutPlan, imagePaths, text, title,
+  layoutPlan, imagePaths, text, title, textBlocks,
 }) {
   // A grid_spec on the plan marks it as a column-flow grid plan (see fallbackLayoutPlan.js's
   // buildGridFallbackPlan): its body-role elements already carry their final pre-sliced `text`
@@ -23,7 +23,7 @@ export function reconstructLayout({
         p.elements.filter((el) => el.type === 'text' && el.role === 'body').map((el) => [el.id, el.text ?? null]),
       ),
     }))
-    : paginateGridPlan(layoutPlan, text)
+    : paginateGridPlan(layoutPlan, text, textBlocks)
   const gridSpec = layoutPlan.grid_spec
     ? {
       columns: layoutPlan.grid_spec.columns, rows: layoutPlan.grid_spec.rows, gutterMm: layoutPlan.grid_spec.gutter_mm,
