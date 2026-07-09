@@ -104,6 +104,23 @@ const COMPACT_SCHEMA_EXAMPLE = JSON.stringify({
       },
     ],
     grid: { columns: 6, rows: 12 },
+    // Optional (for grid-preset supplement): if present, elements' grid units are interpreted
+    // against user-chosen page size/margins/columns/grid_mode instead of the fixed A5/6-column:
+    grid_spec: {
+      page_size: 'A5', margin_preset: 'recommended', columns: 6, rows: 12, gutter_mm: 4, grid_mode: 'strict',
+    },
+    // Optional: list of image/element regions that body text must route around in ColumnFlowEngine:
+    reserved_regions: [
+      { page: 1, col_start: 1, col_span: 3, row_start: 1, row_span: 5 },
+    ],
+    // Optional: describes how body text flows across columns and pages:
+    text_flow: {
+      mode: 'block_flow',
+      flow_regions: [{ page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 12 }],
+      overflow_policy: { body_overflow: 'continue_to_next_page' },
+    },
+    // Optional: names the editorial grid strategy (e.g., distributed, anchored, column_flow_grid):
+    layout_variation: 'column_flow_grid',
     pages: [{
       page: 1,
       elements: [

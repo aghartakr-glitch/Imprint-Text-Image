@@ -154,3 +154,75 @@ test('rejects a wrong overflow_policy.body_overflow value', () => {
   assert.equal(result.passed, false)
   assert.ok(result.issues.some((i) => i.includes('overflow_policy')))
 })
+
+test('accepts a plan with grid_spec, reserved_regions, text_flow, and layout_variation', () => {
+  const plan = validPlan({
+    grid_spec: { columns: 4, rows: 12, gutter_mm: 4, page_size: 'A5', grid_mode: 'flexible' },
+    reserved_regions: [{ page: 1, col_start: 1, col_span: 1, row_start: 1, row_span: 5 }],
+    text_flow: {
+      mode: 'column_flow',
+      flow_regions: [{ page: 1, col_start: 1, col_span: 4, row_start: 1, row_span: 12 }],
+      overflow_policy: { body_overflow: 'continue_to_next_page' },
+    },
+    layout_variation: 'column_flow_grid',
+  })
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, true, `issues: ${JSON.stringify(result.issues)}`)
+})
+
+test('rejects invalid grid_spec.columns (must be positive integer)', () => {
+  const plan = validPlan({ grid_spec: { columns: 0, rows: 12 } })
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('columns')))
+})
+
+test('rejects invalid grid_spec.page_size', () => {
+  const plan = validPlan({ grid_spec: { columns: 4, rows: 12, page_size: 'A3' } })
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('page_size')))
+})
+
+test('rejects invalid grid_spec.grid_mode', () => {
+  const plan = validPlan({ grid_spec: { columns: 4, rows: 12, grid_mode: 'random' } })
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('grid_mode')))
+})
+
+test('rejects reserved_region elements that exceed grid_spec bounds', () => {
+  const plan = validPlan({
+    grid_spec: { columns: 4, rows: 12 },
+    reserved_regions: [{ page: 1, col_start: 3, col_span: 3, row_start: 1, row_span: 5 }],
+  })
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('col 범위')))
+})
+
+test('rejects empty layout_variation string', () => {
+  const plan = validPlan({ layout_variation: '' })
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('layout_variation')))
+})
+
+test('rejects invalid text_flow.mode', () => {
+  const plan = validPlan({ text_flow: { mode: 'invalid_mode' } })
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('text_flow.mode')))
+})
+
+test('rejects text_flow.overflow_policy with wrong body_overflow value', () => {
+  const plan = validPlan({
+    text_flow: {
+      mode: 'column_flow',
+      overflow_policy: { body_overflow: 'shrink' },
+    },
+  })
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('overflow_policy')))
+})

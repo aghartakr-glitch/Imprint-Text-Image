@@ -17,8 +17,9 @@ function checkEnum(value, allowed, fieldName, issues, required = true) {
 
 // Every check from spec v0.3 section 9 plus the v0.4 supplement's extended schema fields
 // (output_unit, layout_purpose, image_hierarchy, image_text_relation, composition_strategy,
-// object_position, design_sequence) validated against designSpace.js's vocabulary. "JSON parses"
-// isn't checked here -- that's the caller's job via JSON.parse before this ever runs.
+// object_position, design_sequence) plus the grid-preset supplement fields (grid_spec,
+// reserved_regions, text_flow, layout_variation), all validated against designSpace.js's
+// vocabulary. "JSON parses" isn't checked here -- that's the caller's job via JSON.parse.
 export function validateLayoutPlan(plan, { imageCount } = {}) {
   const issues = []
 
@@ -107,6 +108,73 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
 
   if (plan.overflow_policy?.body_overflow !== 'continue_to_next_page') {
     issues.push(`overflow_policy.body_overflow는 continue_to_next_page여야 합니다 (받은 값: ${plan.overflow_policy?.body_overflow})`)
+  }
+
+  // Grid-preset supplement fields (all optional, but if present must be self-consistent).
+  if (plan.grid_spec) {
+    const gs = plan.grid_spec
+    if (!Number.isInteger(gs.columns) || gs.columns < 1) {
+      issues.push(`grid_spec.columns는 양의 정수여야 합니다 (받은 값: ${gs.columns})`)
+    }
+    if (!Number.isInteger(gs.rows) || gs.rows < 1) {
+      issues.push(`grid_spec.rows는 양의 정수여야 합니다 (받은 값: ${gs.rows})`)
+    }
+    if (typeof gs.gutter_mm !== 'number' || gs.gutter_mm < 0) {
+      issues.push(`grid_spec.gutter_mm는 음이 아닌 숫자여야 합니다 (받은 값: ${gs.gutter_mm})`)
+    }
+    if (gs.page_size && !['A5', 'A4', 'B5', 'custom'].includes(gs.page_size)) {
+      issues.push(`grid_spec.page_size는 A5|A4|B5|custom 중 하나여야 합니다 (받은 값: ${gs.page_size})`)
+    }
+    if (gs.margin_preset && !['recommended', 'narrow', 'wide', 'custom'].includes(gs.margin_preset)) {
+      issues.push(`grid_spec.margin_preset는 recommended|narrow|wide|custom 중 하나여야 합니다 (받은 값: ${gs.margin_preset})`)
+    }
+    if (gs.grid_mode && !['strict', 'flexible'].includes(gs.grid_mode)) {
+      issues.push(`grid_spec.grid_mode는 strict|flexible 중 하나여야 합니다 (받은 값: ${gs.grid_mode})`)
+    }
+  }
+
+  if (Array.isArray(plan.reserved_regions)) {
+    plan.reserved_regions.forEach((region, i) => {
+      if (!Number.isInteger(region.col_start) || !Number.isInteger(region.col_span) || region.col_span < 1) {
+        issues.push(`reserved_regions[${i}]: col_start/col_span 값이 잘못되었습니다`)
+      }
+      if (!Number.isInteger(region.row_start) || !Number.isInteger(region.row_span) || region.row_span < 1) {
+        issues.push(`reserved_regions[${i}]: row_start/row_span 값이 잘못되었습니다`)
+      }
+      // If the plan also has grid_spec, check bounds against it
+      if (plan.grid_spec) {
+        if (region.col_start < 1 || region.col_start + region.col_span - 1 > plan.grid_spec.columns) {
+          issues.push(`reserved_regions[${i}]: col 범위가 grid(1~${plan.grid_spec.columns})를 벗어났습니다`)
+        }
+        if (region.row_start < 1 || region.row_start + region.row_span - 1 > plan.grid_spec.rows) {
+          issues.push(`reserved_regions[${i}]: row 범위가 grid(1~${plan.grid_spec.rows})를 벗어났습니다`)
+        }
+      }
+    })
+  }
+
+  if (typeof plan.layout_variation === 'string' && plan.layout_variation.length === 0) {
+    issues.push('layout_variation는 비어 있지 않은 문자열이어야 합니다')
+  }
+
+  if (plan.text_flow) {
+    const tf = plan.text_flow
+    if (tf.mode && !['block_flow', 'column_flow', 'none'].includes(tf.mode)) {
+      issues.push(`text_flow.mode는 block_flow|column_flow|none 중 하나여야 합니다 (받은 값: ${tf.mode})`)
+    }
+    if (Array.isArray(tf.flow_regions)) {
+      tf.flow_regions.forEach((region, i) => {
+        if (!Number.isInteger(region.col_start) || !Number.isInteger(region.col_span) || region.col_span < 1) {
+          issues.push(`text_flow.flow_regions[${i}]: col 값이 잘못되었습니다`)
+        }
+        if (!Number.isInteger(region.row_start) || !Number.isInteger(region.row_span) || region.row_span < 1) {
+          issues.push(`text_flow.flow_regions[${i}]: row 값이 잘못되었습니다`)
+        }
+      })
+    }
+    if (tf.overflow_policy?.body_overflow && tf.overflow_policy.body_overflow !== 'continue_to_next_page') {
+      issues.push(`text_flow.overflow_policy.body_overflow는 continue_to_next_page여야 합니다 (받은 값: ${tf.overflow_policy.body_overflow})`)
+    }
   }
 
   return { passed: issues.length === 0, issues }
