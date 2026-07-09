@@ -42,7 +42,12 @@ Fixed constraints:
   flows around it instead of overlapping. Format: [{ page, col_start, col_span, row_start, row_span }, ...]
 - MUST include text_flow: { mode: 'block_flow' | 'column_flow', flow_regions, overflow_policy }
   When layout has multiple images or user selected columns > 3, use 'column_flow' for sophisticated text routing.
-- Allowed text roles: title, subtitle, body, body_intro, body_conclusion, section_label, page_number.
+- Allowed text roles: title, subtitle, intro, body, case_body, section_label, page_number.
+  **CRITICAL**: Each text element MUST have a text_source field referencing a specific paragraph_N:
+  - FORBIDDEN: text_source: "body_all" (never merge all body paragraphs into one element)
+  - REQUIRED: text_source: "paragraph_1" or "paragraph_5" etc (cite actual paragraph IDs)
+  - REASON: Preserves user's paragraph structure for modular, flexible layout
+
   If has_title is true, you MUST decide where to place the title element (title_behavior):
   * same_page_with_image_body: title + image + body on one page
   * title_body_same_page_image_next: title + body on page 1, image on page 2+
@@ -137,13 +142,16 @@ const COMPACT_SCHEMA_EXAMPLE = JSON.stringify({
       page: 1,
       elements: [
         {
-          id: 'title_1', type: 'text', role: 'title', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 1,
+          id: 'title_1', type: 'text', role: 'title', text_source: 'title', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 1,
         },
         {
           id: 'image_1', type: 'image', role: 'hero', page: 1, col_start: 1, col_span: 3, row_start: 2, row_span: 5, fit: 'contain', object_position: 'center',
         },
         {
-          id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 4, col_span: 3, row_start: 2, row_span: 6,
+          id: 'intro_1', type: 'text', role: 'intro', text_source: 'paragraph_1', page: 1, col_start: 4, col_span: 3, row_start: 2, row_span: 3,
+        },
+        {
+          id: 'body_1', type: 'text', role: 'body', text_source: 'paragraph_2', page: 1, col_start: 4, col_span: 3, row_start: 5, row_span: 2,
         },
       ],
     }],
@@ -170,6 +178,9 @@ function buildInternalRequirements(inputMetadata) {
 export function buildUserPrompt({
   inputMetadata,
   contentStructure,
+  textBlocks,
+  imageTextMatching,
+  textFlowMode,
   imageMetadata,
   patternLibrarySummary,
   retrievedReferences,
@@ -184,6 +195,9 @@ export function buildUserPrompt({
   const sections = [
     `Input metadata:\n${JSON.stringify(inputMetadata)}`,
     `Content structure:\n${JSON.stringify(contentStructure ?? {})}`,
+    textBlocks && textBlocks.length > 0 ? `Available text blocks (reference these in element text_source field -- NEVER use "body_all"):\n${JSON.stringify(textBlocks.map((b) => ({ id: b.id, role: b.role, brand: b.brand, char_count: b.char_count })))}` : undefined,
+    imageTextMatching ? `Image-text relationships (suggested pairings):\n${JSON.stringify(imageTextMatching)}` : undefined,
+    textFlowMode ? `Recommended text flow mode: ${textFlowMode}` : undefined,
     suggestedLayoutFamily ? `Suggested layout family (based on image count and content structure):\n${JSON.stringify(suggestedLayoutFamily)}` : undefined,
     `Image metadata (per-image facts; estimated_role is a starting hint, you may override it):\n${JSON.stringify(imageMetadata ?? [])}`,
     `Layout knowledge base (design grammar reference, not fixed templates):\n${JSON.stringify(patternLibrarySummary ?? [])}`,

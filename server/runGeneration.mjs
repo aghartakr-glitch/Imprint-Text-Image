@@ -154,6 +154,9 @@ export async function runGeneration({
   const promptContext = {
     inputMetadata,
     contentStructure,
+    textBlocks: textBlocksAnalysis.text_blocks,
+    imageTextMatching,
+    textFlowMode: textFlowModeSelection.mode,
     imageTextRelation,
     suggestedLayoutFamily,
     imageMetadata,
