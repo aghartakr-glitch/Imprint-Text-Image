@@ -79,11 +79,28 @@ function imageBlock(image, pageNumber) {
     + '\\end{textblock}'
 }
 
-function textBlock(textZone, pageNumber, textSlice) {
+function textBlock(textZone, pageNumber, textSlice, role = 'body') {
   const xMm = leftMarginForPage(pageNumber) + textZone.xMm
   const yMm = MARGIN_TOP_MM + textZone.yMm
+
+  // Role-based LaTeX styling
+  let styleCmd = '\\BodyText'
+  if (role === 'section_title' || role === 'case_section_title') {
+    styleCmd = '\\SectionTitleText'
+  } else if (role === 'case_title_ko') {
+    styleCmd = '\\CaseTitleKoText'
+  } else if (role === 'case_title_en') {
+    styleCmd = '\\CaseTitleEnText'
+  } else if (role === 'case_body') {
+    styleCmd = '\\CaseBodyText'
+  } else if (role === 'credit') {
+    styleCmd = '\\CreditText'
+  } else if (role === 'overview' || role === 'context' || role === 'audience_value') {
+    styleCmd = '\\BodyText'
+  }
+
   return `\\begin{textblock}{${textZone.wMm}}(${xMm},${yMm})\n`
-    + `  \\BodyText{${escapeLatex(textSlice)}}\n`
+    + `  ${styleCmd}{${escapeLatex(textSlice)}}\n`
     + '\\end{textblock}'
 }
 
@@ -107,10 +124,10 @@ export function buildPagesLatex(resolvedPages) {
       if (page.type === 'title-page') {
         parts.push(titleBlock(page.textZone, pageNumber, page.title))
       } else if (Array.isArray(page.textBlocks) && page.textBlocks.length > 0) {
-        // Column-flow grid pages carry one text block per column slot -- render every one that
-        // actually has text (a reserved-region-blocked column can produce a zero-length slot).
+        // Render every text block with role-based styling (section_title, case_body, body, etc.)
+        // Each block is independent, enabling images and text to interleave.
         page.textBlocks.forEach((tb) => {
-          if (tb.slice) parts.push(textBlock(tb.zone, pageNumber, tb.slice))
+          if (tb.slice) parts.push(textBlock(tb.zone, pageNumber, tb.slice, tb.role))
         })
       } else if (page.textZone && page.textSlice) {
         parts.push(textBlock(page.textZone, pageNumber, page.textSlice))

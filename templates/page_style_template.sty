@@ -35,6 +35,14 @@
 
 \newcommand{\BodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont #1\par}
 
+% Role-based text styles for modular paragraph layouts
+% Enables different visual emphasis for section titles, case studies, body text, and credits
+\newcommand{\SectionTitleText}[1]{\fontsize{14pt}{16pt}\selectfont\bfseries #1\par}
+\newcommand{\CaseTitleKoText}[1]{\fontsize{11pt}{13pt}\selectfont\bfseries #1\par}
+\newcommand{\CaseTitleEnText}[1]{\fontsize{10pt}{12pt}\selectfont\bfseries\MakeUppercase{#1}\par}
+\newcommand{\CaseBodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont #1\par}
+\newcommand{\CreditText}[1]{\fontsize{7pt}{9pt}\selectfont\itshape #1\par}
+
 % 제목(섹션 오프너) 전용 서체: PRD 4.5의 제목/구조용 산세리프인 Noto Sans KR을
 % 본문 세리프(IBM Plex Serif)와는 별도의 폰트 패밀리로 선언한다.
 \newfontfamily\HeadingENFace{{{HEADING_FONT_FILE_EN}}}[

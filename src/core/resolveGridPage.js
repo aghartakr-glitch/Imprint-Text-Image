@@ -24,10 +24,17 @@ export function resolveGridPage(elements, imagePaths, textSlicesByElementId = {}
       images.push({
         path, ...box, fullBleed: false, objectPosition: el.object_position || 'center',
       })
-    } else if (el.type === 'text' && el.role === 'body') {
-      // Every body-role element on the page is kept (not just the first) -- a column-flow grid
-      // plan places one text element per column slot, and all of them must actually render.
-      textBlocks.push({ zone: box, slice: textSlicesByElementId[el.id] ?? null })
+    } else if (el.type === 'text') {
+      // CRITICAL FIX: Process ALL text roles, not just 'body'.
+      // This enables section_title, case_title_ko, case_body, overview, etc. to render.
+      // Each text element is independent, allowing images and text to interleave.
+      textBlocks.push({
+        zone: box,
+        slice: textSlicesByElementId[el.id] ?? null,
+        role: el.role,  // ← Pass role for LaTeX styling
+        id: el.id,
+        text_source: el.text_source,
+      })
     }
   })
 
