@@ -21,15 +21,22 @@ function sliceAtWordBoundary(text, capacity) {
 
 // Build text_source → paragraph_text mapping.
 // CRITICAL: Each textBlock is treated as an INDEPENDENT unit, never split across pages.
+//
+// The LLM references paragraphs by ordinal position as "paragraph_N" (enforced by the schema and
+// validateLayoutPlan's /^(title|paragraph_\d+)$/ regex), but parseDocumentStructure assigns block
+// ids in a different format ("p1", "p2", ...). Registering ONLY block.id here means a valid
+// interleaved plan (text_source: "paragraph_1") never matches, so every text element gets a null
+// slice and the whole body silently disappears. Fix: alias each block under BOTH its native id
+// AND its positional "paragraph_{index+1}" key so either reference resolves to the same paragraph.
 function buildTextSourceMap(textBlocks) {
   if (!Array.isArray(textBlocks) || textBlocks.length === 0) {
     return {}
   }
   const map = {}
-  textBlocks.forEach((block) => {
-    if (block.id && block.text) {
-      map[block.id] = block.text  // paragraph_1 → "전체 단락 텍스트"
-    }
+  textBlocks.forEach((block, index) => {
+    if (!block.text) return
+    if (block.id) map[block.id] = block.text // native id, e.g. "p1"
+    map[`paragraph_${index + 1}`] = block.text // ordinal alias the LLM actually emits
   })
   return map
 }
