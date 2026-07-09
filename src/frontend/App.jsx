@@ -34,7 +34,7 @@ export default function App() {
   const [pageSize, setPageSize] = useState('A5')
   const [marginPreset, setMarginPreset] = useState('recommended')
   const [columns, setColumns] = useState('4')
-  const [gridMode, setGridMode] = useState('strict')
+  const [gridMode, setGridMode] = useState('flexible')
 
   function handleApiKeyChange(e) {
     const newKey = e.target.value
