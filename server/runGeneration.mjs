@@ -9,11 +9,13 @@ import { textDensityFromLength } from '../src/core/textDensity.js'
 import { retrieveLayoutReferences } from '../src/core/retrieveLayoutReferences.js'
 import { callLayoutLLM } from '../src/core/callLayoutLLM.js'
 import { buildFallbackLayoutPlan } from '../src/core/fallbackLayoutPlan.js'
+import { validateLayoutPlan } from '../src/core/validateLayoutPlan.js'
 import { resolveGridSettings } from '../src/core/grid/GridPresetManager.js'
 import { parseTextBlocks } from '../src/core/text/parseTextBlocks.js'
 import { parseContentStructure } from '../src/core/content/parseContentStructure.js'
 import { mapImageTextRelations } from '../src/core/content/mapImageTextRelations.js'
 import { selectLayoutFamily } from '../src/core/layout/selectLayoutFamily.js'
+import { tryBuildSpecializedLayout } from '../src/core/layout/builders/index.js'
 import { reconstructLayout } from '../src/core/reconstructLayout.js'
 import { refineLayout } from '../src/core/refineLayout.js'
 import { estimateLayoutQuality } from '../src/core/estimateLayoutQuality.js'
@@ -150,6 +152,16 @@ export async function runGeneration({
 
   const recentLayouts = loadRecentLayouts(diversityHistoryPath)
 
+  // Try to build a specialized layout if the suggested family matches a builder
+  const specializedLayoutPlan = tryBuildSpecializedLayout({
+    suggestedLayoutFamily,
+    imageCount: analysis.imageCount,
+    textDensity,
+    hasTitle,
+    contentStructure,
+    userGridSettings: gridSettings.resolved_grid_settings,
+  })
+
   const candidatePool = llmResult.candidates.length > 0
     ? llmResult.candidates
     : [{
@@ -160,6 +172,19 @@ export async function runGeneration({
       validation: { passed: true, issues: [] },
       repaired: false,
     }]
+
+  // Add specialized layout as a candidate if it was successfully built
+  if (specializedLayoutPlan) {
+    const specializedValidation = validateLayoutPlan(specializedLayoutPlan, { imageCount: analysis.imageCount })
+    if (specializedValidation.passed) {
+      candidatePool.push({
+        candidateId: specializedLayoutPlan.candidate_id,
+        plan: specializedLayoutPlan,
+        validation: specializedValidation,
+        repaired: false,
+      })
+    }
+  }
 
   // 11-13. Layout Reconstructor -> Layout Refiner -> Layout Estimator, for every candidate
   const scoredCandidates = candidatePool.map((c) => {
