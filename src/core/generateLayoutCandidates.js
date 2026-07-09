@@ -41,18 +41,30 @@ async function callModel(client, userPromptContent, options = {}) {
   return JSON.parse(extractText(response).trim())
 }
 
-// Spec section 8: one LLM call asking for N distinct candidate layout_plans in a single JSON
-// response (N is set by the caller via promptContext.internalCandidateCount; runGeneration.mjs
-// currently uses 1 to minimize API cost -- see its own comment for the trade-off). Returns the
-// raw `candidates` array (unvalidated; callLayoutLLM.js validates/repairs/scores each one).
+// Phase 5-3: LLM performs 7-step content understanding + layout reasoning
+// Returns full reasoning output including content_understanding, image_analysis, layout_strategy, etc.
+// NOT just the candidates array (old approach).
 export async function generateLayoutCandidates(promptContext, options = {}) {
   const client = options.client ?? new Anthropic({ apiKey: options.apiKey })
   const userPrompt = buildUserPrompt(promptContext)
   const parsed = await callModel(client, userPrompt, options)
+
+  // Validate structure
   if (!Array.isArray(parsed.candidates) || parsed.candidates.length === 0) {
-    throw new Error('candidates 배열이 비어 있거나 없습니다')
+    throw new Error('LLM 응답에 candidates 배열이 없거나 비어있습니다')
   }
-  return parsed.candidates
+
+  // Phase 5-3: Return full LLM output (content understanding + candidates)
+  // NOT just candidates[]
+  return {
+    content_understanding: parsed.content_understanding || null,
+    image_analysis: parsed.image_analysis || [],
+    inferred_image_text_relations: parsed.inferred_image_text_relations || [],
+    reference_principles: parsed.reference_principles || null,
+    grid_interpretation: parsed.grid_interpretation || null,
+    layout_strategy_reasoning: parsed.layout_strategy_reasoning || null,
+    candidates: parsed.candidates,
+  }
 }
 
 // Spec section 17: a focused single-candidate re-ask carrying the previous failure forward.
