@@ -266,7 +266,6 @@ export async function runGeneration({
       ok: false,
       error: errorMsg,
       validationFailures,
-      fallbackError,
     }
   }
 

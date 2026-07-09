@@ -6,19 +6,22 @@ import { createLayoutCostBudget } from './layoutCostBudget.js'
 const MODEL = 'claude-sonnet-4-6'
 
 function extractText(response) {
-  return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
+  if (!response?.content || !Array.isArray(response.content)) {
+    throw new Error(`Invalid response structure: response.content is ${typeof response?.content}`)
+  }
+  const textParts = response.content.filter((b) => b.type === 'text').map((b) => b.text)
+  if (!Array.isArray(textParts)) {
+    throw new Error('Failed to extract text parts from response')
+  }
+  return textParts.join('')
 }
 
-// Output tokens cost 5x input tokens (Claude Sonnet pricing), so this cap is the single biggest
-// cost lever -- but too tight a cap is worse than no cap at all: a real generation (2026-07-08,
-// image_count=3) hit exactly 1200/1200 output tokens and got cut off mid-JSON, so the ~$0.025
-// already spent was wasted on a JSON.parse failure that fell through to the free fallback anyway.
-// 1600 leaves real margin; buildLayoutPrompt.js's explicit "<=8 words per reason" instruction is
-// the actual fix (keeps a genuine response well under this), this is just a safety ceiling. The
-// cost budget (layoutCostBudget.js) still clips this down further if the 0.03 ceiling requires
-// it. If a response is ever genuinely truncated, JSON.parse throws and callLayoutLLM.js falls
-// back -- there is no silent-corruption risk from capping this.
-const MAX_OUTPUT_TOKENS = 1600
+// Phase 5-3's 7-step reasoning output (content_understanding + image_analysis +
+// inferred_image_text_relations + reference_principles + grid_interpretation +
+// layout_strategy_reasoning + >=3 candidates with full pages/layout_signature) is much larger
+// than the old candidates-only output. 1600 tokens truncated real responses mid-string at ~2700
+// chars (confirmed 2026-07-09). 8000 gives real headroom for the full structured output.
+const MAX_OUTPUT_TOKENS = 8000
 const MIN_OUTPUT_TOKENS = 500
 
 async function callModel(client, userPromptContent, options = {}) {
@@ -38,7 +41,26 @@ async function callModel(client, userPromptContent, options = {}) {
     messages: [{ role: 'user', content: userPromptContent }],
   })
   costBudget.recordUsage(planned, response.usage)
-  return JSON.parse(extractText(response).trim())
+
+  // Extract and clean JSON (remove markdown code blocks if present)
+  let text = extractText(response).trim()
+
+  // Remove markdown code blocks: ```json...``` or ```...```
+  const codeBlockMatch = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/)
+  if (codeBlockMatch) {
+    text = codeBlockMatch[1].trim()
+  }
+
+  console.log('[LLM Response cleaned]', text.substring(0, 100) + '...')
+
+  try {
+    return JSON.parse(text)
+  } catch (parseErr) {
+    // Log position of error for debugging
+    console.error(`[JSON Parse Error at position ${parseErr.message.match(/position (\d+)/) ? parseErr.message.match(/position (\d+)/)[1] : '?'}]`)
+    console.error('[LLM Raw Response]', text.substring(0, 500) + '...')
+    throw parseErr
+  }
 }
 
 // Phase 5-3: LLM performs 7-step content understanding + layout reasoning

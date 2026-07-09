@@ -1,10 +1,11 @@
-// Back down to the original 0.03: callLayoutLLM.js no longer retries on validation failure (a
-// retry costs a full second API call and often fails again anyway, wasting money on top of the
-// free fallback that gets used regardless), so there's only ever one real attempt per generation
-// and no need for retry headroom. clampMaxSpendUsd() below still hard-caps any caller-supplied
-// value at this ceiling, and createLayoutCostBudget()/recordUsage() throw before/if spend would
-// exceed it -- 0.03 is a real, enforced maximum, not just a default.
-export const MAX_LAYOUT_LLM_SPEND_USD = 0.03
+// Phase 5-3's 7-step reasoning output needs up to ~8000 output tokens (see
+// generateLayoutCandidates.js MAX_OUTPUT_TOKENS). At $15/Mtok output, 8000 tokens alone costs
+// ~$0.12; the old 0.03 ceiling silently capped affordableOutputTokens to ~1400, which truncated
+// every real response mid-JSON (confirmed 2026-07-09, cut off at position 2762). 0.20 leaves
+// headroom for input tokens + full 8000-token output. clampMaxSpendUsd() below still hard-caps
+// any caller-supplied value at this ceiling, and createLayoutCostBudget()/recordUsage() throw
+// before/if spend would exceed it -- this is a real, enforced maximum, not just a default.
+export const MAX_LAYOUT_LLM_SPEND_USD = 0.2
 
 const PRICING_USD_PER_MTOK = {
   input: 3,

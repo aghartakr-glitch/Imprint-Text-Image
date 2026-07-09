@@ -136,9 +136,14 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
       }
     }
     try {
+      console.log(`[DEBUG] apiKey received: ${apiKey ? `${apiKey.substring(0, 10)}...` : 'NONE'}, mockMode: ${mockMode}`)
       const result = await runGeneration({
         imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode, ...(apiKey && { apiKey }) }, userControls, userLayoutSettings,
       })
+      // Phase 5-3: Handle LLM failure (fallback_used=true) → error response, not crash
+      if (!result.ok) {
+        return respond(500, { ok: false, error: result.error || '레이아웃 생성 실패' })
+      }
       const folderName = result.dir.split(/[\\/]/).pop()
       respond(200, {
         ok: true,

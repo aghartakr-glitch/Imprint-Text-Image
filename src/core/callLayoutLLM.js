@@ -38,9 +38,41 @@ export async function callLayoutLLM({ promptContext, imageCount }, options = {})
   const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY
   const mockMode = options.mockMode ?? process.env.MOCK_MODE === 'true'
 
-  if (!apiKey || mockMode) {
+  // Mock mode: return mock candidates without calling LLM
+  if (mockMode) {
+    console.log('[Mock Mode] Returning mock layout candidates')
     return {
-      candidates: [], rejectedCandidates: [], source: 'fallback', retryCount: 0, fallbackUsed: true, fallbackReason: 'mock 모드 또는 API 키 없음',
+      candidates: [
+        {
+          candidateId: 'mock_candidate_1',
+          plan: {
+            candidate_id: 'mock_candidate_1',
+            composition_strategy: 'flexible_modular_grid',
+            layout_family: 'image-first',
+            image_hierarchy: 'mixed',
+            layout_signature: { images_per_page: [2, 2, 0], text_spans: [2, 3, 4], strategy: 'mock' },
+            pages: [],
+            reasoning: 'Mock candidate for testing',
+          },
+          validation: { passed: true, issues: [] },
+          repaired: false,
+        },
+      ],
+      rejectedCandidates: [],
+      source: 'mock',
+      retryCount: 0,
+      fallbackUsed: false,
+      content_understanding: null,
+      image_analysis: [],
+      inferred_image_text_relations: [],
+      reference_principles: null,
+      layout_strategy_reasoning: null,
+    }
+  }
+
+  if (!apiKey) {
+    return {
+      candidates: [], rejectedCandidates: [], source: 'fallback', retryCount: 0, fallbackUsed: true, fallbackReason: 'API 키 없음',
     }
   }
 

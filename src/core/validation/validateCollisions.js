@@ -40,14 +40,24 @@ function gridPosToMm(gridCol, gridRow) {
 }
 
 // Get expanded bounding box with safe margins (mm)
-function getExpandedBox(el, safeMarginMm = 1.5) {
-  const colWidth = PAGE_WIDTH_MM / GRID_COLUMNS
-  const rowHeight = PAGE_HEIGHT_MM / GRID_ROWS
+// columns/rows default to the fallback grid constants but MUST be passed as the plan's
+// actual active grid (grid_spec.columns/rows or plan.grid.columns/rows) -- otherwise a
+// candidate correctly laid out on e.g. a user-chosen 4-column grid gets its col_start/col_span
+// mis-converted to mm using the hardcoded 6-column assumption, producing false collisions
+// between elements that don't actually overlap (confirmed 2026-07-09).
+function getExpandedBox(el, safeMarginMm = 1.5, columns = GRID_COLUMNS, rows = GRID_ROWS) {
+  const colWidth = PAGE_WIDTH_MM / columns
+  const rowHeight = PAGE_HEIGHT_MM / rows
   const gutter = COLUMN_GUTTER_MM
 
-  // Start position in mm
-  const x = el.col_start * (colWidth + gutter)
-  const y = el.row_start * rowHeight
+  // col_start/row_start are 1-indexed (col_start=1 is the first column), so position must be
+  // offset by (col_start - 1)/(row_start - 1) column-widths from the page edge. Using col_start
+  // directly (0-indexed math on a 1-indexed value) shifted every element one full column/row
+  // right/down, making adjacent-but-non-overlapping elements collide at grid boundaries
+  // (confirmed 2026-07-09: e.g. row_start=7 landed at the same y as a row_span=6 element's
+  // bottom edge that should have ended one full row-height earlier).
+  const x = (el.col_start - 1) * (colWidth + gutter)
+  const y = (el.row_start - 1) * rowHeight
 
   // Width and height in mm (grid span)
   const w = el.col_span * colWidth + (el.col_span - 1) * gutter
@@ -142,6 +152,8 @@ function getGapGridUnits(a, b) {
 export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox = true } = {}) {
   const issues = []
   const pages = Array.isArray(plan.pages) ? plan.pages : []
+  const activeColumns = plan.grid_spec?.columns ?? plan.grid?.columns ?? GRID_COLUMNS
+  const activeRows = plan.grid_spec?.rows ?? plan.grid?.rows ?? GRID_ROWS
 
   // Minimum gaps (in grid units; will be converted to mm later)
   const MIN_GAP_STRICT = 1 // at least 1 gutter
@@ -167,8 +179,8 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
 
         // Phase 5: Use expanded bounding box collision check (mm coordinates)
         if (useExpandedBbox) {
-          const boxA = getExpandedBox(a, 1.5)
-          const boxB = getExpandedBox(b, 1.5)
+          const boxA = getExpandedBox(a, 1.5, activeColumns, activeRows)
+          const boxB = getExpandedBox(b, 1.5, activeColumns, activeRows)
 
           if (expandedBoxesOverlap(boxA, boxB)) {
             // Determine minimum required gap
