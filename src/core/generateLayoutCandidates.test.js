@@ -12,7 +12,12 @@ test('generateLayoutCandidates returns the parsed candidates array', async () =>
       create: async () => textResponse({ candidates: [{ candidate_id: 'candidate_1' }, { candidate_id: 'candidate_2' }] }),
     },
   }
-  const candidates = await generateLayoutCandidates({ inputMetadata: { image_count: 1 } }, { client })
+  const mockCostBudget = {
+    planRequest: async () => ({ maxOutputTokens: 1600, minOutputTokens: 500 }),
+    recordUsage: () => {},
+    summary: () => ({ estimated: '$0.001' }),
+  }
+  const candidates = await generateLayoutCandidates({ inputMetadata: { image_count: 1 } }, { client, costBudget: mockCostBudget })
   assert.equal(candidates.length, 2)
   assert.equal(candidates[0].candidate_id, 'candidate_1')
 })

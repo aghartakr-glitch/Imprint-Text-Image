@@ -177,15 +177,18 @@ export function buildUserPrompt({
   userLayoutSettings,
   userGridHint,
   userPreferenceContext,
+  imageTextRelation,
+  suggestedLayoutFamily,
   internalCandidateCount = 3,
 }) {
   const sections = [
     `Input metadata:\n${JSON.stringify(inputMetadata)}`,
     `Content structure:\n${JSON.stringify(contentStructure ?? {})}`,
+    suggestedLayoutFamily ? `Suggested layout family (based on image count and content structure):\n${JSON.stringify(suggestedLayoutFamily)}` : undefined,
     `Image metadata (per-image facts; estimated_role is a starting hint, you may override it):\n${JSON.stringify(imageMetadata ?? [])}`,
     `Layout knowledge base (design grammar reference, not fixed templates):\n${JSON.stringify(patternLibrarySummary ?? [])}`,
     `Retrieved reference examples (real tagged pages most similar to this input -- guidance only, do not copy any single example verbatim):\n${JSON.stringify(retrievedReferences ?? [])}`,
-  ]
+  ].filter(Boolean)
 
   if (userLayoutSettings && Object.values(userLayoutSettings).some((v) => v && v !== 'auto')) {
     sections.push(`User's preferred grid layout (should be reflected in your grid_spec output):\n${JSON.stringify(userLayoutSettings)}\n\nResolved grid settings for this layout:\n${JSON.stringify(userGridHint)}`)

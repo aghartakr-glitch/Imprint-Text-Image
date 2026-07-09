@@ -11,6 +11,9 @@ import { callLayoutLLM } from '../src/core/callLayoutLLM.js'
 import { buildFallbackLayoutPlan } from '../src/core/fallbackLayoutPlan.js'
 import { resolveGridSettings } from '../src/core/grid/GridPresetManager.js'
 import { parseTextBlocks } from '../src/core/text/parseTextBlocks.js'
+import { parseContentStructure } from '../src/core/content/parseContentStructure.js'
+import { mapImageTextRelations } from '../src/core/content/mapImageTextRelations.js'
+import { selectLayoutFamily } from '../src/core/layout/selectLayoutFamily.js'
 import { reconstructLayout } from '../src/core/reconstructLayout.js'
 import { refineLayout } from '../src/core/refineLayout.js'
 import { estimateLayoutQuality } from '../src/core/estimateLayoutQuality.js'
@@ -66,7 +69,24 @@ export async function runGeneration({
   const imageOrientations = analysis.images.map((i) => i.orientation)
   const textDensity = textDensityFromLength(analysis.textLength)
   const hasTitle = typeof title === 'string' && title.trim().length > 0
-  const contentStructure = analyzeContentStructure({ title, text })
+  const contentStructure = parseContentStructure({ title, text })
+
+  // Map image-text relationships (used by both LLM and fallback)
+  const imageTextRelation = mapImageTextRelations({
+    imageCount: analysis.imageCount,
+    contentStructure,
+  })
+
+  // Select suggested layout family (advisory for LLM, used by fallback)
+  const suggestedLayoutFamily = selectLayoutFamily({
+    imageCount: analysis.imageCount,
+    textDensity,
+    contentStructure,
+    imageTextRelation,
+    gridMode: userLayoutSettings.grid_mode || 'strict',
+    hasTitle,
+    outputUnit: null, // Will be decided by LLM
+  })
 
   // Grid Preset + Column Flow supplement: resolve the user's 4 grid settings (page_size,
   // margin_preset, columns, grid_mode) plus content signals into the full grid_spec/
@@ -110,6 +130,8 @@ export async function runGeneration({
   const promptContext = {
     inputMetadata,
     contentStructure,
+    imageTextRelation,
+    suggestedLayoutFamily,
     imageMetadata,
     patternLibrarySummary,
     retrievedReferences,
