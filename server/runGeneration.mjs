@@ -198,6 +198,24 @@ export async function runGeneration({
   // 7-10. LLM Layout Candidate Generator + Layout Validator (validate/repair/retry inside)
   const llmResult = await callLayoutLLM({ promptContext, imageCount: analysis.imageCount }, llmOptions)
 
+  // Phase 5-3: If LLM fails (fallback_used=true), do NOT generate PDF with fallback template
+  // LLM understanding (content_understanding, image_text_relations, reference_principles) is REQUIRED
+  // for editorial layout generation. Without LLM reasoning, output is not editorial layout, just template.
+  if (llmResult.fallbackUsed) {
+    const errorMsg = `LLM-based layout reasoning failed: ${llmResult.fallbackReason || 'unknown error'}. Layout generation requires LLM content understanding and cannot fall back to fixed templates.`
+    console.error(`[GENERATION FAILED] ${errorMsg}`)
+    return {
+      ok: false,
+      error: errorMsg,
+      fallback_used: true,
+      fallback_reason: llmResult.fallbackReason,
+      llm_reasoning_available: false,
+      suggested_action: 'Check LLM API, cost budget, or schema parsing. Rule-based fallback is not available for image+text editorial layouts.',
+    }
+  }
+
+  // LLM succeeded - candidates available
+  const candidatePool = llmResult.candidates || []
   const recentLayouts = loadRecentLayouts(diversityHistoryPath)
 
   // Try to build a specialized layout if the suggested family matches a builder
@@ -209,45 +227,6 @@ export async function runGeneration({
     contentStructure,
     userGridSettings: gridSettings.resolved_grid_settings,
   })
-
-  // Phase 5: Build candidate pool from LLM or fallback
-  let fallbackError = null
-  let fallbackPlan = null
-  let candidatePool = []
-
-  if (llmResult.candidates.length > 0) {
-    candidatePool = llmResult.candidates
-  } else {
-    // Attempt fallback, but validate it properly (don't auto-pass)
-    try {
-      fallbackPlan = buildFallbackLayoutPlan({
-        imageCount: analysis.imageCount,
-        textDensity,
-        imageAspectRatios: imageRatios,
-        textLength: analysis.textLength,
-        text,
-        title,
-        gridSettings,
-      })
-      // If fallback succeeds, validate it (don't hard-code passed:true)
-      const fallbackValidation = validateLayoutPlan(fallbackPlan, { imageCount: analysis.imageCount })
-      candidatePool = [{
-        candidateId: 'fallback_1',
-        plan: fallbackPlan,
-        validation: fallbackValidation,
-        repaired: false,
-      }]
-    } catch (err) {
-      // Fallback threw (e.g., column_flow_grid forbidden)
-      fallbackError = {
-        code: err.code || 'FALLBACK_ERROR',
-        message: err.message,
-        imageCount: err.imageCount,
-        textLength: err.textLength,
-      }
-      // Log but don't crash -- we'll handle this downstream
-    }
-  }
 
   // Add specialized layout as a candidate if it was successfully built
   if (specializedLayoutPlan) {
@@ -262,17 +241,15 @@ export async function runGeneration({
     }
   }
 
-  // Phase 5: If no candidates are available, generation fails
+  // Validate candidates are available (should not happen if LLM succeeded above)
   if (candidatePool.length === 0) {
-    const errorMsg = fallbackError
-      ? `Fallback layout generation failed: ${fallbackError.code} - ${fallbackError.message}`
-      : 'No layout candidates available (LLM failed, fallback unavailable, specialized layout unavailable)'
+    const errorMsg = 'LLM produced valid response but no candidates are in candidatePool. This is an internal error.'
     console.error(`[GENERATION FAILED] ${errorMsg}`)
     return {
       ok: false,
       error: errorMsg,
-      fallbackError,
-      llmError: llmResult.fallbackReason || 'LLM did not produce valid candidates',
+      llm_reasoning_available: true,
+      llm_candidates_count: llmResult.candidates?.length || 0,
     }
   }
 
@@ -443,13 +420,24 @@ export async function runGeneration({
       grid: { columns: GRID_COLUMNS, rows: GRID_ROWS },
     },
     llm_cost_budget: llmResult.costBudget ?? null,
+    // Phase 5-3: Full LLM layout reasoning (content understanding + strategy reasoning)
+    llm_layout_reasoning: {
+      llm_reasoning_performed: !llmResult.fallbackUsed,
+      content_understanding: llmResult.content_understanding || null,
+      image_analysis: llmResult.image_analysis || [],
+      inferred_image_text_relations: llmResult.inferred_image_text_relations || [],
+      reference_principles: llmResult.reference_principles || null,
+      grid_interpretation: llmResult.grid_interpretation || null,
+      layout_strategy_reasoning: llmResult.layout_strategy_reasoning || null,
+      candidate_count: llmResult.candidates?.length || 0,
+    },
     generation_path: {
       llm_called: llmResult.fallbackUsed !== undefined,
       llm_succeeded: llmResult.candidates && llmResult.candidates.length > 0,
+      llm_reasoning_based: !llmResult.fallbackUsed && (llmResult.content_understanding !== null),
       fallback_used: llmResult.fallbackUsed,
       fallback_reason: llmResult.fallbackReason || null,
-      fallback_error: fallbackError || null,
-      selected_from: selected.candidateId.startsWith('fallback_') ? 'fallback_grid' : (selected.candidateId.startsWith('builtin_') ? 'specialized_layout' : 'llm'),
+      selected_from: selected.candidateId.startsWith('builtin_') ? 'specialized_layout' : 'llm',
     },
     validation: {
       passed: selected.validation.passed && compileResult.ok && spreadResult.ok,
