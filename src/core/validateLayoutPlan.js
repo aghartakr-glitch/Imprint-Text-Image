@@ -2,6 +2,7 @@ import { GRID_COLUMNS, GRID_ROWS } from './layoutConstants.js'
 import { DESIGN_SPACE } from './designSpace.js'
 import { validateCollisions } from './validation/validateCollisions.js'
 import { analyzeSpanVariation } from './layout/spanVariation.js'
+import { validateLayoutTextCapacity } from './estimateTextCapacity.js'
 
 const VALID_STYLES = ['Editorial', 'Magazine', 'Exhibition Catalog']
 
@@ -337,6 +338,12 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
   if (plan.composition_strategy === 'column_flow_grid' && imageCount >= 1) {
     issues.push(`⚠️  Phase 5-2: column_flow_grid는 fallback입니다. flexible_modular_grid, image_text_case_blocks 등을 우선 사용하세요.`)
   }
+
+  // Phase 5-2: Text capacity validation (detect overflow)
+  const textCapacityIssues = validateLayoutTextCapacity(plan)
+  textCapacityIssues.forEach((issue) => {
+    issues.push(`❌ 텍스트 오버플로우: ${issue.elementId} (page ${issue.page}): ${issue.reason}`)
+  })
 
   // Collision validation: text-image overlap, gap checks. validateCollisions returns structured
   // objects ({ type, severity, reason, ... }); every other check here pushes a plain string. Only
