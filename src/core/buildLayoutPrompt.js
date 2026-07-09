@@ -114,75 +114,31 @@ means "pick exactly one of these" -- never write the "|"-separated list itself a
 
 Return JSON only.`
 
-// One compact single-line example beats a pretty-printed one -- indentation/newlines are pure
-// token cost the model doesn't need to parse JSON. Kept to exactly one page/one image/one text
-// element; the model already knows how to extend the pattern to more pages/elements from the
-// field descriptions above. IMPORTANT: every field below holds one concrete, real, valid value --
-// never a "|"-separated list of options (a prior version did this and the model literally copied
-// the option list itself as the value, e.g. style: "Editorial | Magazine | Exhibition Catalog",
-// which then failed validation). The full option lists already live in SYSTEM_PROMPT's "allowed
-// decisions" section, so this example only needs to demonstrate the shape, not repeat the enums.
+// Minimal schema example: one candidate, one page, essential fields only.
+// Model extends this pattern to multiple pages/candidates/elements automatically.
 const COMPACT_SCHEMA_EXAMPLE = JSON.stringify({
   candidates: [{
     candidate_id: 'candidate_1',
     style: 'Editorial',
     output_unit: 'single_page',
     layout_family: 'balanced',
-    layout_purpose: 'case_analysis',
     image_hierarchy: 'equal_pair',
-    image_text_relation: 'text_explains_image',
     composition_strategy: 'image_above_text',
-    base_pattern_reference: 'a known pattern_id',
-    layout_intent: 'brief design intent',
     design_sequence: [
-      {
-        step: 1, decision_type: 'output_unit', value: '...', reason: 'short phrase, <=8 words',
-      },
-      {
-        step: 2, decision_type: 'composition_strategy', value: '...', reason: 'short phrase, <=8 words',
-      },
+      { step: 1, decision_type: 'output_unit', value: 'single_page', reason: '3 images fit on page' },
+      { step: 2, decision_type: 'composition_strategy', value: 'image_above_text', reason: 'images lead' },
     ],
     grid: { columns: 6, rows: 12 },
-    // Optional (for grid-preset supplement): if present, elements' grid units are interpreted
-    // against user-chosen page size/margins/columns/grid_mode instead of the fixed A5/6-column:
-    grid_spec: {
-      page_size: 'A5', margin_preset: 'recommended', columns: 6, rows: 12, gutter_mm: 4, grid_mode: 'strict',
-    },
-    // Optional: list of image/element regions that body text must route around in ColumnFlowEngine:
-    reserved_regions: [
-      { page: 1, col_start: 1, col_span: 3, row_start: 1, row_span: 5 },
-    ],
-    // Optional: describes how body text flows across columns and pages:
-    text_flow: {
-      mode: 'block_flow',
-      flow_regions: [{ page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 12 }],
-      overflow_policy: { body_overflow: 'continue_to_next_page' },
-    },
-    // Optional: names the editorial grid strategy (e.g., distributed, anchored, column_flow_grid):
-    layout_variation: 'column_flow_grid',
     pages: [{
       page: 1,
       elements: [
-        {
-          id: 'title_1', type: 'text', role: 'title', text_source: 'title', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 1,
-        },
-        {
-          id: 'image_1', type: 'image', role: 'hero', page: 1, col_start: 1, col_span: 3, row_start: 2, row_span: 5, fit: 'contain', object_position: 'center',
-        },
-        {
-          id: 'intro_1', type: 'text', role: 'intro', text_source: 'paragraph_1', page: 1, col_start: 4, col_span: 3, row_start: 2, row_span: 3,
-        },
-        {
-          id: 'context_2', type: 'text', role: 'body', text_source: 'paragraph_2', page: 1, col_start: 4, col_span: 3, row_start: 5, row_span: 2,
-        },
-        {
-          id: 'case_3', type: 'text', role: 'case_body', text_source: 'paragraph_3', page: 2, col_start: 1, col_span: 3, row_start: 2, row_span: 4,
-        },
+        { id: 'image_1', type: 'image', role: 'hero', col_start: 1, col_span: 6, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center' },
+        { id: 'para_1', type: 'text', role: 'body', text_source: 'paragraph_1', col_start: 1, col_span: 6, row_start: 6, row_span: 3 },
+        { id: 'para_2', type: 'text', role: 'case_body', text_source: 'paragraph_2', col_start: 1, col_span: 3, row_start: 9, row_span: 4 },
       ],
     }],
-    title_behavior: 'same_page_with_image_body',
     overflow_policy: { body_overflow: 'continue_to_next_page' },
-    reason: 'short phrase, <=8 words',
+    reason: 'hero-first layout with modular text blocks',
   }],
 })
 
@@ -226,14 +182,11 @@ export function buildUserPrompt({
     `Content structure:\n${JSON.stringify(contentStructure ?? {})}`,
     documentStructure ? `Document structure (sections and layout hints):\n${JSON.stringify(documentStructure)}` : undefined,
     textLayoutMode ? `Text layout mode: ${textLayoutMode} (treat text blocks as modular, not continuous)` : undefined,
-    textBlocks && textBlocks.length > 0 ? `CRITICAL: Text blocks to place (reference paragraph_N in text_source, never "body_all"):\n${JSON.stringify(textBlocks.map((b) => ({
+    textBlocks && textBlocks.length > 0 ? `Text blocks (use text_source: paragraph_N, NOT body_all):\n${JSON.stringify(textBlocks.map((b) => ({
       id: b.id,
       role: b.role,
-      type: b.type,
-      text: b.text.substring(0, 150) + (b.text.length > 150 ? '...' : ''),
       char_count: b.char_count,
-      brand: b.brand || null,
-    })), null, 2)}` : undefined,
+    })))}` : undefined,
     imageAnalysis && imageAnalysis.length > 0 ? `IMAGE VISUAL ANALYSIS (pre-analyzed for you):\n${JSON.stringify(imageAnalysis.map((img) => ({
       id: img.id,
       orientation: img.orientation,
