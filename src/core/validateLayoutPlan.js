@@ -40,6 +40,12 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
   checkEnum(plan.image_text_relation, DESIGN_SPACE.imageTextRelations, 'image_text_relation', issues)
   checkEnum(plan.composition_strategy, DESIGN_SPACE.compositionStrategies, 'composition_strategy', issues)
 
+  // 🔴 CRITICAL: Forbid gallery_page_text_page (separates all images from all text)
+  // Must use interleaving strategies for modular layouts
+  if (plan.composition_strategy === 'gallery_page_text_page') {
+    issues.push('❌ gallery_page_text_page는 금지됨: 모든 이미지를 한 페이지, 모든 글을 다른 페이지에 배치하므로 이미지-텍스트 interleaving 불가능. 대신 column_flow_grid, image_left_text_right, text_left_image_right, 또는 images_spread_across_pages를 사용하세요.')
+  }
+
   if (!Array.isArray(plan.design_sequence) || plan.design_sequence.length === 0) {
     issues.push('design_sequence가 비어 있거나 배열이 아닙니다')
   }
