@@ -41,7 +41,11 @@ test('a reserved region in the middle of a column splits it into two free segmen
   ])
 })
 
-test('expandFlowRegionToSlots produces one slot per free segment, in column order', () => {
+test('expandFlowRegionToSlots merges the free row-range into ONE wide slot spanning every free column, not one slot per column', () => {
+  // Grid columns are an alignment unit, not a mandate that text be sliced into 1-column slivers:
+  // when all 4 columns share the same free/occupied pattern for a row-range, that range must
+  // become a single 4-column-wide slot (a real editorial-width paragraph column), not four
+  // separate 1-column-wide slots side by side (the "rigid 4-column text wall" bug this replaces).
   const reservedRegions = [{
     page: 1, col_start: 1, col_span: 4, row_start: 1, row_span: 7,
   }]
@@ -49,20 +53,39 @@ test('expandFlowRegionToSlots produces one slot per free segment, in column orde
     page: 1, col_start: 1, col_span: 4, row_start: 1, row_span: 12,
   }
   const slots = expandFlowRegionToSlots(flowRegion, reservedRegions)
-  // every column's rows 1-7 are blocked by the image, so each column contributes exactly one
-  // free slot covering rows 8-12
-  assert.equal(slots.length, 4)
-  slots.forEach((slot, i) => {
-    assert.equal(slot.col_start, i + 1)
-    assert.deepEqual({ row_start: slot.row_start, row_span: slot.row_span }, { row_start: 8, row_span: 5 })
+  assert.equal(slots.length, 1)
+  assert.deepEqual(slots[0], {
+    page: 1, col_start: 1, col_span: 4, row_start: 8, row_span: 5,
   })
 })
 
-test('expandFlowRegionToSlots with no reserved regions returns one full-height slot per column', () => {
+test('expandFlowRegionToSlots with no reserved regions returns one full-width slot, not one per column', () => {
   const flowRegion = {
     page: 1, col_start: 1, col_span: 2, row_start: 1, row_span: 12,
   }
   const slots = expandFlowRegionToSlots(flowRegion, [])
+  assert.equal(slots.length, 1)
+  assert.deepEqual(slots[0], {
+    page: 1, col_start: 1, col_span: 2, row_start: 1, row_span: 12,
+  })
+})
+
+test('a reserved region blocking only some columns leaves the unblocked columns as one merged wide slot beside it', () => {
+  // Image occupies col 3-4 rows 1-5; col 1-2 are free the whole height -> ONE 2-column-wide slot,
+  // not two separate 1-column slots.
+  const reservedRegions = [{
+    page: 1, col_start: 3, col_span: 2, row_start: 1, row_span: 5,
+  }]
+  const flowRegion = {
+    page: 1, col_start: 1, col_span: 4, row_start: 1, row_span: 12,
+  }
+  const slots = expandFlowRegionToSlots(flowRegion, reservedRegions)
+  // rows 1-5: col 1-2 free (one 2-wide slot); rows 6-12: col 1-4 all free (one 4-wide slot)
   assert.equal(slots.length, 2)
-  assert.deepEqual(slots.map((s) => s.row_span), [12, 12])
+  assert.deepEqual(slots[0], {
+    page: 1, col_start: 1, col_span: 2, row_start: 1, row_span: 5,
+  })
+  assert.deepEqual(slots[1], {
+    page: 1, col_start: 1, col_span: 4, row_start: 6, row_span: 7,
+  })
 })

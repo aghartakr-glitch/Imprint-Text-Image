@@ -259,7 +259,10 @@ function colSpanForAspectRatio(ratio, columns) {
   else if (r >= 1.15) fraction = 0.6 // landscape
   else if (r >= 0.85) fraction = 0.4 // square
   else fraction = 0.28 // portrait
-  return Math.min(columns, Math.max(1, Math.round(columns * fraction)))
+  // Images read as editorial visual anchors, never as a single narrow grid sliver -- floor at 2
+  // columns whenever the grid has room for it (columns===1 has no choice but 1).
+  const floor = columns >= 2 ? 2 : 1
+  return Math.min(columns, Math.max(floor, Math.round(columns * fraction)))
 }
 
 function rowSpanForAspectRatio(ratio, rows) {

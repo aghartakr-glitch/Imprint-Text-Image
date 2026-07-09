@@ -39,22 +39,60 @@ export function freeRowSegmentsForColumn(occupiedSet, {
   return segments
 }
 
-// A flow_region spans multiple columns; this expands it into an ordered list of per-column free
-// slots (skipping any rows blocked by reserved regions), in column order -- exactly what
-// ColumnFlowEngine.js consumes to know where it may place text, one column at a time.
+// A flow_region spans multiple columns; this expands it into an ordered list of free rectangular
+// slots (skipping any rows blocked by reserved regions).
+//
+// CRITICAL: a slot is the WIDEST contiguous run of free columns available for a given row-range,
+// not one slot per individual column. A previous version emitted exactly one 1-column-wide slot
+// per grid column regardless of how wide the flow_region actually was -- so a 2-column-wide band
+// intended to read as a single readable paragraph column got shredded into two narrow slivers, and
+// a 4-column page-wide region became four separate narrow columns (the "rigid 4-column text wall"
+// the user reported, screenshots showing single sentences broken into 4 vertical strips). Grid
+// columns are an alignment/positioning unit, not a mandate that every text block must be exactly
+// one column wide -- editorial text blocks should span as many columns as are actually free.
 export function expandFlowRegionToSlots(flowRegion, reservedRegions) {
   const occupied = buildOccupiedCellSet(reservedRegions)
   const page = flowRegion.page ?? 1
+  const colStart = flowRegion.col_start
+  const colEnd = flowRegion.col_start + flowRegion.col_span - 1
+  const rowStart = flowRegion.row_start
+  const rowEnd = flowRegion.row_start + flowRegion.row_span - 1
+
+  // Per row, compute the free/occupied bit for every column, so we can find row-ranges that share
+  // an identical free-column pattern (an image obstruction is itself rectangular, so its free
+  // pattern is constant across its own row span and changes only at its top/bottom edge).
+  const rowPatterns = []
+  for (let row = rowStart; row <= rowEnd; row += 1) {
+    const pattern = []
+    for (let col = colStart; col <= colEnd; col += 1) pattern.push(isCellFree(occupied, page, col, row))
+    rowPatterns.push({ row, pattern })
+  }
+
   const slots = []
-  for (let col = flowRegion.col_start; col < flowRegion.col_start + flowRegion.col_span; col += 1) {
-    const segments = freeRowSegmentsForColumn(occupied, {
-      page, col, rowStart: flowRegion.row_start, rowSpan: flowRegion.row_span,
-    })
-    segments.forEach((seg) => {
-      slots.push({
-        page, col_start: col, col_span: 1, row_start: seg.row_start, row_span: seg.row_span,
-      })
-    })
+  let segStart = 0
+  for (let i = 1; i <= rowPatterns.length; i += 1) {
+    const changed = i === rowPatterns.length || !patternsEqual(rowPatterns[i].pattern, rowPatterns[segStart].pattern)
+    if (!changed) continue // eslint-disable-line no-continue
+    const segRowStart = rowPatterns[segStart].row
+    const segRowSpan = rowPatterns[i - 1].row - segRowStart + 1
+    // Within this row-range's shared pattern, merge contiguous free columns into maximal-width runs.
+    const pattern = rowPatterns[segStart].pattern
+    let runStart = null
+    for (let c = 0; c <= pattern.length; c += 1) {
+      const free = c < pattern.length && pattern[c]
+      if (free && runStart == null) runStart = c
+      if (!free && runStart != null) {
+        slots.push({
+          page, col_start: colStart + runStart, col_span: c - runStart, row_start: segRowStart, row_span: segRowSpan,
+        })
+        runStart = null
+      }
+    }
+    segStart = i
   }
   return slots
+}
+
+function patternsEqual(a, b) {
+  return a.length === b.length && a.every((v, i) => v === b[i])
 }

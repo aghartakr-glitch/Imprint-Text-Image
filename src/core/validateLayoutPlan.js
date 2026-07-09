@@ -1,6 +1,7 @@
 import { GRID_COLUMNS, GRID_ROWS } from './layoutConstants.js'
 import { DESIGN_SPACE } from './designSpace.js'
 import { validateCollisions } from './validation/validateCollisions.js'
+import { analyzeSpanVariation } from './layout/spanVariation.js'
 
 const VALID_STYLES = ['Editorial', 'Magazine', 'Exhibition Catalog']
 
@@ -44,6 +45,18 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
   // Must use interleaving strategies for modular layouts
   if (plan.composition_strategy === 'gallery_page_text_page') {
     issues.push('❌ gallery_page_text_page는 금지됨: 모든 이미지를 한 페이지, 모든 글을 다른 페이지에 배치하므로 이미지-텍스트 interleaving 불가능. 대신 column_flow_grid, image_left_text_right, text_left_image_right, 또는 images_spread_across_pages를 사용하세요.')
+  }
+
+  // 🔴 CRITICAL: a grid_spec's `columns` value is an alignment/positioning unit for a modular
+  // grid, NOT a mandate that every text block must be exactly one column wide. Reject plans where
+  // every text element is squeezed into a uniform single-column sliver (columns>=3) -- the exact
+  // "rigid forced N-column text wall" failure a real generation produced (4 parallel narrow text
+  // strips, single sentences split across column boundaries).
+  if (plan.grid_spec) {
+    const spanAnalysis = analyzeSpanVariation(plan)
+    if (spanAnalysis.forcedRigidColumns) {
+      issues.push(`❌ 모든 텍스트가 동일한(또는 1-column) 폭으로 강제 배치됨 (columns=${plan.grid_spec.columns}): grid는 이미지/텍스트의 span(1~${plan.grid_spec.columns}열)을 정하는 정렬 기준일 뿐, 모든 요소를 1열 폭으로 채우라는 뜻이 아닙니다. 문단마다 다른 col_span(2열, 3열 등)을 사용하세요.`)
+    }
   }
 
   if (!Array.isArray(plan.design_sequence) || plan.design_sequence.length === 0) {

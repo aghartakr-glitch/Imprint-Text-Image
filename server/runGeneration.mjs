@@ -23,6 +23,7 @@ import { validateCollisions } from '../src/core/validation/validateCollisions.js
 import { selectLayoutFamily } from '../src/core/layout/selectLayoutFamily.js'
 import { selectTextFlowMode } from '../src/core/layout/selectTextFlowMode.js'
 import { tryBuildSpecializedLayout } from '../src/core/layout/builders/index.js'
+import { analyzeSpanVariation } from '../src/core/layout/spanVariation.js'
 import { reconstructLayout } from '../src/core/reconstructLayout.js'
 import { refineLayout } from '../src/core/refineLayout.js'
 import { estimateLayoutQuality } from '../src/core/estimateLayoutQuality.js'
@@ -407,6 +408,12 @@ export async function runGeneration({
       text_flow: selected.plan.text_flow,
       mm_layout: selected.resolvedPages,
     } : null,
+    // Reports whether the grid's columns were actually used as a flexible alignment structure
+    // (elements spanning 1-4 columns as content demands) or degraded into a rigid forced-N-column
+    // text wall -- see spanVariation.js.
+    grid_interpretation: selected.plan.grid_spec
+      ? (({ forcedRigidColumns, imagesNeverSpanMultiple, ...rest }) => rest)(analyzeSpanVariation(selected.plan))
+      : null,
     overflow_policy: { auto_shrink: false, truncate_text: false, move_to_next_page: true },
     outputs: { best_layout: `${bestLayoutDir.split(/[\\/]/).pop()}/` },
   }

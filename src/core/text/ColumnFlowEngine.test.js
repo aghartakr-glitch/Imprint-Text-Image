@@ -28,23 +28,51 @@ test('short text fits in the first column slot, no remaining text', () => {
   assert.equal(filledSlots[0].textSlice, '짧은 본문입니다.')
 })
 
-test('long text flows across multiple columns of the same flow_region in column order', () => {
+test('a single flow_region becomes ONE wide slot spanning its full column width, not one narrow slot per column', () => {
+  // Grid columns are an alignment unit, not a mandate to slice text into 1-column slivers: a
+  // 4-column-wide flow_region must produce one 4-column-wide slot (readable paragraph width), so
+  // oversized text that doesn't fit becomes remainingText for the caller to place in the next
+  // flow_region/page, instead of being force-fit by fragmenting into 4 narrow columns.
   const words = Array.from({ length: 400 }, (_, i) => `word${i}`)
   const flowRegion = {
     page: 1, col_start: 1, col_span: 4, row_start: 1, row_span: 12,
   }
-  const { filledSlots } = flowTextAcrossColumns({
+  const { filledSlots, remainingText } = flowTextAcrossColumns({
     textBlocks: textBlocksFrom([words.join(' ')]),
     flowRegions: [flowRegion],
     gridSpec: GRID_SPEC,
   })
-  assert.ok(filledSlots.length > 1, 'should span more than one column')
-  assert.deepEqual(filledSlots.map((s) => s.col_start), filledSlots.map((s) => s.col_start).slice().sort((a, b) => a - b))
+  assert.equal(filledSlots.length, 1)
+  assert.equal(filledSlots[0].col_start, 1)
+  assert.equal(filledSlots[0].col_span, 4)
+  assert.ok(remainingText.length > 0, 'text too long for one slot must overflow to remainingText, not be crammed into narrow columns')
   // no slice ends mid-word
+  const lastWord = filledSlots[0].textSlice.trim().split(/\s+/).pop()
+  assert.ok(words.includes(lastWord), `slot ends mid-word: "${lastWord}"`)
+})
+
+test('text continues across multiple flow_regions in order, still word-boundary safe', () => {
+  const words = Array.from({ length: 400 }, (_, i) => `word${i}`)
+  const flowRegions = [
+    {
+      page: 1, col_start: 1, col_span: 2, row_start: 1, row_span: 12,
+    },
+    {
+      page: 1, col_start: 3, col_span: 2, row_start: 1, row_span: 12,
+    },
+  ]
+  const { filledSlots, remainingText } = flowTextAcrossColumns({
+    textBlocks: textBlocksFrom([words.join(' ')]),
+    flowRegions,
+    gridSpec: GRID_SPEC,
+  })
+  assert.equal(filledSlots.length, 2)
+  assert.deepEqual(filledSlots.map((s) => s.col_start), [1, 3])
   filledSlots.forEach((slot) => {
     const lastWord = slot.textSlice.trim().split(/\s+/).pop()
     assert.ok(words.includes(lastWord) || lastWord === '', `slot col ${slot.col_start} ends mid-word: "${lastWord}"`)
   })
+  assert.ok(remainingText.length > 0)
 })
 
 test('text avoids a reserved region: the blocked column only gets text in its free row range', () => {
