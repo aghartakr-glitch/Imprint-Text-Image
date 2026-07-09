@@ -338,7 +338,7 @@ function rowSpanForAspectRatio(ratio, rows) {
 // page's rows are exhausted, so images are distributed across the whole spread instead of
 // clustered in a single dense block. Left/right alternation per band (even index: image left/text
 // right; odd index: image right/text left) adds real visual variety along the way.
-function imageBandsFor(imageAspectRatios, columns, rows) {
+function imageBandsFor(imageAspectRatios, columns, rows, compositionStrategy = 'column_flow_grid') {
   const bands = []
   let page = 1
   let rowCursor = 1
@@ -349,7 +349,21 @@ function imageBandsFor(imageAspectRatios, columns, rows) {
       page += 1
       rowCursor = 1
     }
-    const imageOnRight = colSpan < columns && i % 2 === 1
+
+    // Phase 5: Strategy-specific image placement
+    let imageOnRight = false
+    if (compositionStrategy === 'flexible_modular_grid') {
+      // Flexible: varied placement (not rigidly alternating)
+      const seed = (i * 7 + 11) % 5
+      imageOnRight = seed >= 2 && colSpan < columns
+    } else if (compositionStrategy === 'image_text_case_blocks') {
+      // Case blocks: images mostly left, occasional right
+      imageOnRight = i % 3 === 2 && colSpan < columns
+    } else {
+      // column_flow_grid (fallback): strict alternating
+      imageOnRight = colSpan < columns && i % 2 === 1
+    }
+
     const imageColStart = imageOnRight ? columns - colSpan + 1 : 1
     const image = {
       page, col_start: imageColStart, col_span: colSpan, row_start: rowCursor, row_span: rowSpan,
@@ -402,7 +416,39 @@ export function buildGridFallbackPlan({
   // Real aspect ratios drive each image's column span (see imageBandsFor) so images are never
   // forced into a uniform grid; ratios missing/invalid fall back to a square guess.
   const ratios = Array.from({ length: imageCount }, (_, i) => imageAspectRatios[i] ?? 1)
-  const bands = imageBandsFor(ratios, columns, rows)
+
+  // Phase 5: First determine strategy, then generate bands with that strategy
+  let compositionStrategy = 'column_flow_grid'  // default fallback
+  let strategyReason = 'column-flow 폴백'
+
+  if (imageCount === 1) {
+    compositionStrategy = 'flexible_modular_grid'
+    strategyReason = 'flexible modular grid (hero + text)'
+  } else if (imageCount === 2) {
+    const variant = pickVariantIndex([imageCount, textDensity], 2)
+    if (variant === 0) {
+      compositionStrategy = 'flexible_modular_grid'
+      strategyReason = 'flexible modular grid (2-column image-text pairs)'
+    } else {
+      compositionStrategy = 'image_text_case_blocks'
+      strategyReason = 'case blocks (grouped image-text)'
+    }
+  } else if (imageCount >= 3) {
+    const variant = pickVariantIndex([imageCount, textDensity], 3)
+    if (variant === 0) {
+      compositionStrategy = 'flexible_modular_grid'
+      strategyReason = 'flexible modular grid (variable span images)'
+    } else if (variant === 1) {
+      compositionStrategy = 'image_text_case_blocks'
+      strategyReason = 'case blocks (grouped pairs)'
+    } else {
+      compositionStrategy = 'distributed_images_across_pages'
+      strategyReason = 'distributed spread (images per page)'
+    }
+  }
+
+  // Generate bands using the determined strategy (not always column_flow_grid)
+  const bands = imageBandsFor(ratios, columns, rows, compositionStrategy)
   const imageRole = imageCount === 1 ? 'hero' : (imageCount === 2 ? 'equal' : 'gallery')
   const imageEls = bands.map((band, i) => ({
     id: `image_${i + 1}`, type: 'image', role: imageRole, fit: 'contain', object_position: 'center', ...band.image,
@@ -477,39 +523,7 @@ export function buildGridFallbackPlan({
   const layoutPurpose = imageCount >= 3 ? 'gallery' : 'case_analysis'
   const imageHierarchy = imageCount === 1 ? 'single_hero' : (imageCount === 2 ? 'equal_pair' : 'grid_gallery')
 
-  // Phase 5-2: Determine composition strategy based on image count (not always column_flow_grid)
-  // This enables flexible_modular_grid as primary, only using column_flow_grid as fallback
-  let compositionStrategy = 'column_flow_grid'  // default fallback
-  let strategyReason = 'column-flow 폴백'
-
-  if (imageCount === 1) {
-    compositionStrategy = 'flexible_modular_grid'
-    strategyReason = 'flexible modular grid (hero + text)'
-  } else if (imageCount === 2) {
-    // For 2 images: alternates between layouts
-    const variant = pickVariantIndex([imageCount, textDensity], 2)
-    if (variant === 0) {
-      compositionStrategy = 'flexible_modular_grid'
-      strategyReason = 'flexible modular grid (2-column image-text pairs)'
-    } else {
-      compositionStrategy = 'image_text_case_blocks'
-      strategyReason = 'case blocks (grouped image-text)'
-    }
-  } else if (imageCount >= 3) {
-    // For 3+ images: more diverse strategies
-    const variant = pickVariantIndex([imageCount, textDensity], 3)
-    if (variant === 0) {
-      compositionStrategy = 'flexible_modular_grid'
-      strategyReason = 'flexible modular grid (variable span images)'
-    } else if (variant === 1) {
-      compositionStrategy = 'image_text_case_blocks'
-      strategyReason = 'case blocks (grouped pairs)'
-    } else {
-      compositionStrategy = 'distributed_images_across_pages'
-      strategyReason = 'distributed spread (images per page)'
-    }
-  }
-
+  // compositionStrategy already determined above before imageBandsFor call
   const reason = `이미지 ${imageCount}장 + ${textDensity} 본문: 사용자 grid 설정(${columns}열/${rows}행) 기반 ${strategyReason}`
 
   return {

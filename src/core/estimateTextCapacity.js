@@ -33,24 +33,28 @@ export function validateTextOverflow(textContent, gridElement) {
 
 // Phase 5-2: Validate all text elements in a layout don't overflow
 // Returns array of overflow issues
+// 주의: layout.json의 실제 구조는 page.elements가 아니라 page.textBlocks[]를 사용함
 export function validateLayoutTextCapacity(plan) {
   const issues = []
   const pages = Array.isArray(plan.pages) ? plan.pages : []
 
-  pages.forEach((page) => {
-    const elements = Array.isArray(page.elements) ? page.elements : []
+  pages.forEach((pageIdx, page) => {
+    // Phase 5: Text blocks 구조 (zone + slice)
+    const textBlocks = Array.isArray(page.textBlocks) ? page.textBlocks : []
 
-    elements.forEach((el) => {
-      if (el.type === 'text' && el.text) {
-        const validation = validateTextOverflow(el.text, el)
+    textBlocks.forEach((block, blockIdx) => {
+      if (block.slice) {
+        // zone은 { xMm, yMm, wMm, hMm } 형태
+        const zone = block.zone || {}
+        const validation = validateTextOverflow(block.slice, { wMm: zone.wMm || 0, hMm: zone.hMm || 0 })
         if (validation.overflow) {
           issues.push({
-            elementId: el.id,
-            page: page.page,
+            elementId: block.id || `text_${pageIdx}_${blockIdx}`,
+            page: pageIdx,
             textLength: validation.textLength,
             capacity: validation.capacity,
             ratio: validation.ratio.toFixed(2),
-            reason: `텍스트 오버플로우 (길이 ${validation.textLength}ch / 용량 ${validation.capacity}ch, 비율 ${validation.ratio.toFixed(2)}x)`,
+            reason: `텍스트 오버플로우 (길이 ${validation.textLength}ch / 용량 ${validation.capacity}ch, 비율 ${validation.ratio.toFixed(2)}x, 박스 ${zone.wMm}×${zone.hMm}mm)`,
           })
         }
       }

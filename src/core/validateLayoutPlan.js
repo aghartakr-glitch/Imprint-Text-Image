@@ -8,44 +8,40 @@ const VALID_STYLES = ['Editorial', 'Magazine', 'Exhibition Catalog']
 
 // Phase 5-2: Layout signature for diversity validation
 // Captures essential layout characteristics to detect if multiple candidates are actually different
+// 주의: layout.json의 실제 구조는 page.elements가 아니라 page.images[], page.textBlocks[] 사용
 function getLayoutSignature(plan) {
   const pages = Array.isArray(plan.pages) ? plan.pages : []
 
-  // Extract image positions as simple key
-  const imagePositions = pages.flatMap((p) =>
-    (p.elements ?? [])
-      .filter((e) => e.type === 'image')
-      .map((e) => `p${p.page}:c${e.col_start}s${e.col_span}r${e.row_start}s${e.row_span}`)
+  // Extract image positions as simple key (실제 구조: page.images[])
+  const imagePositions = pages.flatMap((p, pageIdx) =>
+    (p.images ?? [])
+      .map((img, imgIdx) => {
+        // xMm, yMm, wMm, hMm 기반 그리드 위치 추정 (대략적)
+        const colStart = Math.ceil(img.xMm / 29) // 대략 6열 / 116mm = 19.3mm per col
+        const colSpan = Math.ceil(img.wMm / 19.3)
+        const rowStart = Math.ceil(img.yMm / 14.67) // 12행 / 176mm = 14.67mm per row
+        const rowSpan = Math.ceil(img.hMm / 14.67)
+        return `p${pageIdx}:c${colStart}s${colSpan}r${rowStart}s${rowSpan}`
+      })
   )
 
-  // Extract text span pattern
-  const textSpans = pages.flatMap((p) =>
-    (p.elements ?? [])
-      .filter((e) => e.type === 'text')
-      .map((e) => e.col_span)
-  )
-  const textSpanSet = new Set(textSpans)
+  // Extract image count
+  const imageCount = pages.flatMap((p) => p.images ?? []).length
 
-  // Extract image span pattern
-  const imageSpans = pages.flatMap((p) =>
-    (p.elements ?? [])
-      .filter((e) => e.type === 'image')
-      .map((e) => e.col_span)
-  )
-  const imageSpanSet = new Set(imageSpans)
+  // Extract text block count (textBlocks[])
+  const textCount = pages.flatMap((p) => (p.textBlocks ?? []).filter((b) => b.slice)).length
 
   return {
-    compositionStrategy: plan.composition_strategy,
+    compositionStrategy: plan.compositionStrategy,
     pageCount: pages.length,
     imagePositions: imagePositions.sort(),
-    imageSpans: Array.from(imageSpanSet).sort((a, b) => a - b),
-    textSpans: Array.from(textSpanSet).sort((a, b) => a - b),
-    imageCount: pages.flatMap((p) => (p.elements ?? []).filter((e) => e.type === 'image')).length,
-    textCount: pages.flatMap((p) => (p.elements ?? []).filter((e) => e.type === 'text')).length,
+    imageCount,
+    textCount,
   }
 }
 
 // Detect if layout uses rigid zigzag alternating pattern (image-left/text-right, then opposite)
+// 주의: 실제 구조는 page.images[] 사용
 function isZigzagPattern(plan) {
   const pages = Array.isArray(plan.pages) ? plan.pages : []
   if (pages.length < 2) return false
@@ -54,12 +50,11 @@ function isZigzagPattern(plan) {
   let zigzagCount = 0
 
   for (const page of pages) {
-    const elements = page.elements ?? []
-    const images = elements.filter((e) => e.type === 'image' && e.col_span < 6) // Not full-width
-    const texts = elements.filter((e) => e.type === 'text')
+    const images = page.images ?? []
 
     for (const img of images) {
-      const imgOnLeft = img.col_start <= 3
+      // xMm 좌표로 좌/우 판단 (116mm 너비 기준 58mm 중점)
+      const imgOnLeft = img.xMm < 58
       if (prevImageOnLeft !== null && imgOnLeft !== prevImageOnLeft) {
         zigzagCount += 1
       }
