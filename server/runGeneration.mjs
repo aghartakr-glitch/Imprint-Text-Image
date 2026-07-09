@@ -15,8 +15,11 @@ import { parseTextBlocks } from '../src/core/text/parseTextBlocks.js'
 import { parseDocumentStructure } from '../src/core/content/parseDocumentStructure.js'
 import { parseContentStructure } from '../src/core/content/parseContentStructure.js'
 import { parseTextBlocksAdvanced } from '../src/core/content/parseTextBlocksAdvanced.js'
+import { analyzeImages } from '../src/core/content/analyzeImages.js'
+import { inferImageTextRelations } from '../src/core/content/inferImageTextRelations.js'
 import { matchImageToTextBlocks } from '../src/core/content/matchImageToTextBlocks.js'
 import { mapImageTextRelations } from '../src/core/content/mapImageTextRelations.js'
+import { validateCollisions } from '../src/core/validation/validateCollisions.js'
 import { selectLayoutFamily } from '../src/core/layout/selectLayoutFamily.js'
 import { selectTextFlowMode } from '../src/core/layout/selectTextFlowMode.js'
 import { tryBuildSpecializedLayout } from '../src/core/layout/builders/index.js'
@@ -132,6 +135,13 @@ export async function runGeneration({
   const imageMetadataRaw = buildImageMetadata(analysis.images)
   const { imageMetadata, imageHierarchy: estimatedImageHierarchy } = estimateImageHierarchy(imageMetadataRaw)
 
+  // Analyze image visual characteristics and infer image-text relations
+  const { image_analysis } = analyzeImages({ imageMetadata })
+  const { inferred_image_text_relations } = inferImageTextRelations({
+    textBlocks: contentStructure.text_blocks || [],
+    imageAnalysis: image_analysis,
+  })
+
   // 3. output_unit decision (advisory default; the LLM makes its own final call within this guidance)
   const { outputUnit, source: outputUnitSource } = decideOutputUnit({
     imageCount: analysis.imageCount, textDensity, preferredOutputUnit: userControls.preferred_output_unit,
@@ -165,6 +175,8 @@ export async function runGeneration({
     documentStructure: documentStructure.document_structure,
     textBlocks: textBlocksAdvanced, // Use advanced parser's blocks (with roles detected from structure)
     textLayoutMode: textLayoutMode, // continuous_flow, modular_blocks, or hybrid_flow
+    imageAnalysis: image_analysis, // Visual characteristics of each image
+    inferredImageTextRelations: inferred_image_text_relations, // Semantic matching between text and images
     imageTextMatching,
     textFlowMode: textFlowModeSelection.mode,
     imageTextRelation,
@@ -311,6 +323,8 @@ export async function runGeneration({
       has_lightweight_markers: documentStructure.has_lightweight_markers,
       has_explicit_tags: documentStructure.has_explicit_tags,
       merged_body_all: documentStructure.merged_body_all,
+      image_analysis,
+      inferred_image_text_relations,
       image_text_matching: imageTextMatching,
       content_structure: contentStructure,
       image_text_relation: imageTextRelation.relation,

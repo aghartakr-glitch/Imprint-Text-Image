@@ -1,5 +1,6 @@
 import { GRID_COLUMNS, GRID_ROWS } from './layoutConstants.js'
 import { DESIGN_SPACE } from './designSpace.js'
+import { validateCollisions } from './validation/validateCollisions.js'
 
 const VALID_STYLES = ['Editorial', 'Magazine', 'Exhibition Catalog']
 
@@ -190,5 +191,11 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
     }
   }
 
-  return { passed: issues.length === 0, issues }
+  // Collision validation: text-image overlap, gap checks
+  const collisionResult = validateCollisions(plan, {
+    gridMode: plan.grid_spec?.grid_mode || 'strict',
+  })
+  issues.push(...collisionResult.issues)
+
+  return { passed: issues.filter((i) => i.severity === 'error').length === 0, issues }
 }
