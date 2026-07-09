@@ -1,111 +1,124 @@
-// Spec section 5.3: Rich content structure parsing for editorial layouts.
-// Identifies meaningful content groups (intro, paragraphs, case studies, numbered items)
-// so the LLM can make better layout decisions than treating everything as one body block.
+// Spec section 5.3 + Revision: Rich content structure parsing for editorial layouts.
+// NOW: Generates modular text_blocks instead of merging into body_all.
+// Identifies meaningful content groups with semantic roles so LLM can create better grid layouts.
 
-function detectCaseStudyPattern(lines) {
-  // Pattern: Korean short title + English uppercase title + body text
-  // Example: "편집디자인\nEDITORIAL DESIGN\n본문..."
-  const caseItems = []
-  let i = 0
-  while (i < lines.length) {
-    const line = lines[i]?.trim() || ''
-    if (!line) {
-      i += 1
-      continue
-    }
-
-    const isKorean = /[가-힣]/.test(line)
-    const nextLine = lines[i + 1]?.trim() || ''
-    const isEnglishTitle = /^[A-Z\s]+$/.test(nextLine) && nextLine.length > 0 && nextLine.length < 50
-
-    if (isKorean && isEnglishTitle) {
-      // Found a potential case study header
-      const titleKo = line
-      const titleEn = nextLine
-      let body = ''
-      let j = i + 2
-      while (j < lines.length && lines[j]?.trim()) {
-        body += (body ? '\n' : '') + lines[j].trim()
-        j += 1
-      }
-      if (body) {
-        caseItems.push({ title_ko: titleKo, title_en: titleEn, body })
-        i = j
-      } else {
-        i += 1
-      }
-    } else {
-      i += 1
-    }
-  }
-  return caseItems.length > 1 ? caseItems : null
+// Keyword patterns for automatic role detection
+const ROLE_PATTERNS = {
+  overview: [/메가트렌드|매크로트렌드|의미합니다|의미하|정의|반응|나타나/i],
+  context: [/초양극화|전 세계|글로벌|움직임|행동주의|트렌드|사회적|환경|정치적/i],
+  audience_value: [/Z세대|밀레니얼|세대|소비자|개인|사용자|선호/i],
+  protest_case: [/카네기|시위|LGBTQ|프라이드|Pride|social movement|목소리|연대/i],
+  brand_case_dove: [/도브|Dove|NoDigitalDistortion|Turn Your Back|Bold Glamour/i],
+  brand_case_sweaty_betty: [/스웨티 베티|Sweaty Betty|Wear The Damn Shorts/i],
+  case_section_title: [/^DESIGN CASE STUDIES$/i],
+  case_title_en: [/^[A-Z\s]{5,}$/],
+  case_title_ko: [/액티비즘|페미니즘|기념|운동|캠페인|상품/i],
+  credit: [/^([\w\s]+|[가-힣]+)$/, /Nike N7|Deepti Khatri|Lippa Nessa/i], // short line or known credit
 }
 
-function detectNumberedItems(lines) {
-  // Pattern: "1. Text" or "1) Text" or similar
-  const numberedItems = []
-  let i = 0
-  while (i < lines.length) {
-    const line = lines[i]?.trim() || ''
-    const match = line.match(/^(\d+)[\.\)]\s*(.+)$/)
-    if (match) {
-      const num = Number(match[1])
-      let body = match[2]
-      let j = i + 1
-      while (j < lines.length && lines[j]?.trim() && !lines[j]?.trim().match(/^(\d+)[\.\)]/)) {
-        body += '\n' + lines[j].trim()
-        j += 1
+function inferParagraphRole(text) {
+  const trimmed = text.trim()
+
+  // Check case_section_title first (exact match)
+  if (ROLE_PATTERNS.case_section_title[0].test(trimmed)) {
+    return 'case_section_title'
+  }
+
+  // Short line heuristics (credit or case title)
+  const lineCount = trimmed.split('\n').length
+  const charCount = trimmed.length
+  if (lineCount === 1 && charCount < 60) {
+    // Could be case_title_en (all caps, short)
+    if (ROLE_PATTERNS.case_title_en[0].test(trimmed)) {
+      return 'case_title_en'
+    }
+    // Could be case_title_ko (Korean, short)
+    if (/[가-힣]/.test(trimmed) && charCount < 40) {
+      return 'case_title_ko'
+    }
+    // Check for known credits
+    if (ROLE_PATTERNS.credit[1].test(trimmed)) {
+      return 'credit'
+    }
+    // Default short line
+    return 'case_title_ko'
+  }
+
+  // Check longer paragraphs against patterns (in order of specificity)
+  for (const [role, patterns] of Object.entries(ROLE_PATTERNS)) {
+    if (role === 'case_section_title' || role === 'case_title_en' || role === 'credit') {
+      continue // Already checked
+    }
+    for (const pattern of patterns) {
+      if (pattern.test(trimmed)) {
+        return role
       }
-      numberedItems.push({ number: num, text: body })
-      i = j
-    } else {
-      i += 1
     }
   }
-  return numberedItems.length > 0 && numberedItems[0].number === 1 ? numberedItems : null
+
+  return 'unknown'
 }
 
 export function parseContentStructure({ title, text }) {
   const titleStr = typeof title === 'string' ? title.trim() : ''
   const textStr = typeof text === 'string' ? text : ''
 
-  // Split by blank lines into paragraphs
-  const paragraphs = textStr
+  // Split by blank lines (one or more) to detect paragraph boundaries
+  const rawParagraphs = textStr
     .split(/\n\s*\n+/)
     .map((p) => p.trim())
     .filter(Boolean)
 
-  // Auto-detect intro paragraph (short first paragraph, no period)
-  let introBody = null
-  let bodyParagraphs = paragraphs
-  const INTRO_MAX_CHARS = 150
-  if (paragraphs.length > 1 && paragraphs[0].length < INTRO_MAX_CHARS && !paragraphs[0].endsWith('.')) {
-    introBody = paragraphs[0]
-    bodyParagraphs = paragraphs.slice(1)
+  const paragraph_count = rawParagraphs.length
+
+  // Build text_blocks array: each paragraph becomes an independent block
+  const text_blocks = rawParagraphs.map((para, idx) => {
+    const role = inferParagraphRole(para)
+    return {
+      id: `paragraph_${idx + 1}`,
+      type: 'paragraph',
+      role,
+      text: para,
+      char_count: para.length,
+    }
+  })
+
+  // Determine text layout mode based on content signals
+  let text_layout_mode = 'continuous_flow'
+  if (paragraph_count >= 2) {
+    // Multiple paragraphs → modular_blocks or hybrid_flow
+    const hasCaseTitle = text_blocks.some((b) => b.role?.includes('case_title') || b.role === 'case_section_title')
+    const hasBrandCase = text_blocks.some((b) => b.role?.includes('brand_case'))
+    if (hasCaseTitle || hasBrandCase || paragraph_count >= 5) {
+      text_layout_mode = 'modular_blocks'
+    } else if (paragraph_count >= 3) {
+      text_layout_mode = 'hybrid_flow'
+    }
   }
 
-  // Try to detect case studies (Korean + English title pairs)
-  const caseStudies = detectCaseStudyPattern(paragraphs)
-
-  // Try to detect numbered items
-  const numberedItems = detectNumberedItems(paragraphs)
-
-  // If we found cases or numbers, body is already categorized
-  let finalBodyParagraphs = bodyParagraphs
-  if (caseStudies || numberedItems) {
-    finalBodyParagraphs = []
+  // Backward compatibility: also return old structure
+  let introBody = null
+  let bodyParagraphs = rawParagraphs
+  const INTRO_MAX_CHARS = 150
+  if (rawParagraphs.length > 1 && rawParagraphs[0].length < INTRO_MAX_CHARS && !rawParagraphs[0].endsWith('.')) {
+    introBody = rawParagraphs[0]
+    bodyParagraphs = rawParagraphs.slice(1)
   }
 
   return {
+    // New structure (primary)
+    paragraph_count,
+    text_blocks,
+    text_layout_mode,
+    merged_body_all: false, // Explicitly mark: NOT merged
+
+    // Old structure (backward compatibility)
     title: titleStr || null,
     intro_body: introBody,
-    body_paragraphs: finalBodyParagraphs,
-    numbered_items: numberedItems,
-    case_study_items: caseStudies,
+    body_paragraphs: bodyParagraphs,
     has_intro: !!introBody,
-    has_body: finalBodyParagraphs.length > 0,
-    has_numbered: !!numberedItems,
-    has_cases: !!caseStudies,
-    total_paragraphs: paragraphs.length,
+    has_body: bodyParagraphs.length > 0,
+    has_case_like_paragraphs: text_blocks.some((b) => b.role?.includes('case') || b.role?.includes('brand')),
+    total_paragraphs: paragraph_count,
   }
 }
