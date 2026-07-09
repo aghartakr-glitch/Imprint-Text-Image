@@ -86,6 +86,16 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
 
       if (el.type === 'text') {
         if (el.role != null) checkEnum(el.role, DESIGN_SPACE.textRoles, `요소 ${el.id}의 role`, issues)
+
+        // CRITICAL: text_source must reference specific paragraph, never "body_all"
+        if (!el.text_source) {
+          issues.push(`요소 ${el.id}: text_source가 없습니다 (paragraph_N 또는 title 필수)`)
+        } else if (el.text_source === 'body_all') {
+          issues.push(`요소 ${el.id}: text_source는 "body_all"이 아니라 구체적인 paragraph_N을 참조해야 합니다`)
+        } else if (!/^(title|paragraph_\d+)$/.test(el.text_source)) {
+          issues.push(`요소 ${el.id}: text_source 형식이 잘못되었습니다: "${el.text_source}" (title 또는 paragraph_N 형식)`)
+        }
+
         if (el.role === 'body') hasBodyText = true
       }
     })

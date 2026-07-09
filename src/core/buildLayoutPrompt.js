@@ -43,10 +43,13 @@ Fixed constraints:
 - MUST include text_flow: { mode: 'block_flow' | 'column_flow', flow_regions, overflow_policy }
   When layout has multiple images or user selected columns > 3, use 'column_flow' for sophisticated text routing.
 - Allowed text roles: title, subtitle, intro, body, case_body, section_label, page_number.
-  **CRITICAL**: Each text element MUST have a text_source field referencing a specific paragraph_N:
-  - FORBIDDEN: text_source: "body_all" (never merge all body paragraphs into one element)
-  - REQUIRED: text_source: "paragraph_1" or "paragraph_5" etc (cite actual paragraph IDs)
-  - REASON: Preserves user's paragraph structure for modular, flexible layout
+  🚨 **ABSOLUTELY CRITICAL - VALIDATION WILL FAIL IF VIOLATED**:
+  - EVERY text element MUST include "text_source" field
+  - text_source MUST be "title" OR "paragraph_N" (e.g., "paragraph_1", "paragraph_5")
+  - 🔴 FORBIDDEN: text_source: "body_all" (will fail validation and reject entire layout)
+  - 🔴 FORBIDDEN: omitting text_source (will fail validation)
+  - WHY: User separated paragraphs by blank lines on purpose. Each paragraph is a distinct visual/semantic unit.
+  - CONSEQUENCE: If you ignore this, the layout will be rejected and fallback deterministic layout used instead.
 
   If has_title is true, you MUST decide where to place the title element (title_behavior):
   * same_page_with_image_body: title + image + body on one page
@@ -151,7 +154,10 @@ const COMPACT_SCHEMA_EXAMPLE = JSON.stringify({
           id: 'intro_1', type: 'text', role: 'intro', text_source: 'paragraph_1', page: 1, col_start: 4, col_span: 3, row_start: 2, row_span: 3,
         },
         {
-          id: 'body_1', type: 'text', role: 'body', text_source: 'paragraph_2', page: 1, col_start: 4, col_span: 3, row_start: 5, row_span: 2,
+          id: 'context_2', type: 'text', role: 'body', text_source: 'paragraph_2', page: 1, col_start: 4, col_span: 3, row_start: 5, row_span: 2,
+        },
+        {
+          id: 'case_3', type: 'text', role: 'case_body', text_source: 'paragraph_3', page: 2, col_start: 1, col_span: 3, row_start: 2, row_span: 4,
         },
       ],
     }],
