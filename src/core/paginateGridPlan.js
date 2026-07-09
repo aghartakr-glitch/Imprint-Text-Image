@@ -41,58 +41,77 @@ function buildTextSourceMap(textBlocks) {
   return map
 }
 
-// NEW BEHAVIOR: text_source-based modular pagination (no sequential slicing).
-// Each element with text_source gets the ENTIRE paragraph text assigned directly.
-// This enables images and text to interleave as in the user's PDF example.
+// Break `text` into full-page overflow continuation pages at word boundaries. Shared by both the
+// modular (leftover paragraphs) and legacy (single long body) paths so no text is ever dropped.
+function buildOverflowPages(text) {
+  const pages = []
+  let remaining = text
+  while (remaining.length > 0) {
+    const box = gridToMm(OVERFLOW_BODY_ELEMENT)
+    const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
+    if (capacity <= 0) throw new Error('오버플로우 텍스트 페이지의 수용량이 0입니다')
+    const { slice, consumed } = sliceAtWordBoundary(remaining, capacity)
+    remaining = remaining.slice(consumed)
+    pages.push({
+      elements: [OVERFLOW_BODY_ELEMENT],
+      textSlicesByElementId: { [OVERFLOW_BODY_ELEMENT.id]: slice },
+    })
+  }
+  return pages
+}
+
+// Two content models, one guarantee: no paragraph is ever silently dropped.
+//  - Modular (>=2 text blocks): each element's text_source gets the WHOLE referenced paragraph
+//    (no sequential slicing), so images and paragraphs interleave. Any paragraph the plan forgets
+//    to reference is appended as overflow continuation pages instead of vanishing.
+//  - Legacy/continuous (<2 blocks, or no textBlocks): the plan's body boxes are filled in reading
+//    order up to each box's capacity, and the remainder continues onto overflow pages.
 export function paginateGridPlan(plan, text, textBlocks) {
   const textSourceMap = buildTextSourceMap(textBlocks)
-  const hasModularLayout = Object.keys(textSourceMap).length >= 2
+  const blocks = Array.isArray(textBlocks) ? textBlocks.filter((b) => b.text) : []
+  const hasModularLayout = blocks.length >= 2
 
-  // Phase 1: Assign text_source-based content to ALL text elements (not just body)
-  const planPages = plan.pages.map((page) => {
-    const textSlicesByElementId = {}
-
-    // Process ALL text elements: title, section_title, overview, context, body, case_body, credit, etc.
-    page.elements.forEach((el) => {
-      if (el.type !== 'text') return
-
-      let slice = null
-
-      // CRITICAL: If element has text_source, use it DIRECTLY (no sequential pagination)
-      if (el.text_source && textSourceMap[el.text_source]) {
-        slice = textSourceMap[el.text_source]  // ← Full paragraph text, not sliced
-      } else if (el.text_source) {
-        // text_source set but not found → leave empty (validation should catch)
-        slice = null
-      } else if (el.role === 'body' && !hasModularLayout) {
-        // Fallback: only for continuous_flow layouts (single long text)
-        // This preserves backward compatibility for non-modular content
-        // ← NOT IMPLEMENTED HERE (reserved for future legacy support)
-        slice = null
-      }
-
-      textSlicesByElementId[el.id] = slice
+  if (hasModularLayout) {
+    const referencedIndices = new Set()
+    const planPages = plan.pages.map((page) => {
+      const textSlicesByElementId = {}
+      page.elements.forEach((el) => {
+        if (el.type !== 'text') return
+        let slice = null
+        if (el.text_source && textSourceMap[el.text_source]) {
+          slice = textSourceMap[el.text_source] // full paragraph, never split
+          const m = /^paragraph_(\d+)$/.exec(el.text_source)
+          if (m) referencedIndices.add(Number(m[1]) - 1)
+          blocks.forEach((b, i) => { if (b.id === el.text_source) referencedIndices.add(i) })
+        }
+        textSlicesByElementId[el.id] = slice
+      })
+      return { elements: page.elements, textSlicesByElementId }
     })
 
+    // Safety net: append every paragraph the plan never placed so it still reaches the PDF.
+    const leftover = blocks.filter((_, i) => !referencedIndices.has(i)).map((b) => b.text).join('\n\n')
+    return [...planPages, ...buildOverflowPages(leftover)]
+  }
+
+  // Legacy continuous flow: fill body boxes in order, then overflow the remainder.
+  let remaining = text
+  const planPages = plan.pages.map((page) => {
+    const textSlicesByElementId = {}
+    page.elements.forEach((el) => {
+      if (el.type !== 'text') return
+      if (el.role !== 'body' || remaining.length === 0) {
+        textSlicesByElementId[el.id] = null
+        return
+      }
+      const box = gridToMm(el)
+      const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
+      const { slice, consumed } = sliceAtWordBoundary(remaining, Math.max(1, capacity))
+      remaining = remaining.slice(consumed)
+      textSlicesByElementId[el.id] = slice
+    })
     return { elements: page.elements, textSlicesByElementId }
   })
 
-  // Phase 2: Only create overflow pages if truly needed (single long text without text_source)
-  const overflowPages = []
-  if (!hasModularLayout) {
-    let remainingText = text
-    while (remainingText.length > 0) {
-      const box = gridToMm(OVERFLOW_BODY_ELEMENT)
-      const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
-      if (capacity <= 0) throw new Error('오버플로우 텍스트 페이지의 수용량이 0입니다')
-      const { slice, consumed } = sliceAtWordBoundary(remainingText, capacity)
-      remainingText = remainingText.slice(consumed)
-      overflowPages.push({
-        elements: [OVERFLOW_BODY_ELEMENT],
-        textSlicesByElementId: { [OVERFLOW_BODY_ELEMENT.id]: slice },
-      })
-    }
-  }
-
-  return [...planPages, ...overflowPages]
+  return [...planPages, ...buildOverflowPages(remaining)]
 }

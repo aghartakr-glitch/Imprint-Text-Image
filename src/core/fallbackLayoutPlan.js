@@ -548,24 +548,10 @@ export function buildFallbackLayoutPlan({
   }
 
   if (imageCount >= 3 && imageCount <= 6 && textDensity === 'long') {
-    return multiPagePlan({
-      layoutFamily: 'text-first',
-      layoutPurpose: 'gallery',
-      imageHierarchy: 'page_gallery',
-      imageTextRelation: 'gallery_then_text',
-      compositionStrategy: 'gallery_page_text_page',
-      outputUnit,
-      basePatternReference: 'one_page_gallery_one_page_text',
-      pagesElements: [
-        imageElements(imageCount, {
-          col_start: 1, col_span: 6, row_start: 1, row_span: 12,
-        }, 'gallery'),
-        [bodyText({
-          col_start: 1, col_span: 6, row_start: 1, row_span: 12,
-        })],
-      ],
-      reason: `이미지 ${imageCount}장 + 긴 본문: 갤러리 페이지와 읽기 전용 페이지를 분리하는 결정론적 폴백`,
-    })
+    // Was gallery_page_text_page (all images on one page, all text on the next) -- the exact
+    // "images front, text back" anti-pattern. Use the sparse one-image-per-page variant instead so
+    // images are distributed across pages (images_spread_across_pages) with the body following.
+    return sparsePerPageVariant(imageCount)
   }
 
   if (imageCount >= 3 && imageCount <= 6) {

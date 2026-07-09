@@ -28,7 +28,7 @@ function validPlan(overrides = {}) {
             id: 'image_2', type: 'image', role: 'equal', page: 1, col_start: 4, col_span: 3, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center',
           },
           {
-            id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 2, col_span: 4, row_start: 7, row_span: 4,
+            id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 2, col_span: 4, row_start: 7, row_span: 4, text_source: 'paragraph_1',
           },
         ],
       },
@@ -175,7 +175,7 @@ test('accepts a plan with grid_spec, reserved_regions, text_flow, and layout_var
     id: 'image_2', type: 'image', role: 'equal', page: 1, col_start: 3, col_span: 2, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center',
   }
   plan.pages[0].elements[2] = {  // body_1
-    id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 4, row_start: 7, row_span: 4,
+    id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 4, row_start: 7, row_span: 4, text_source: 'paragraph_1',
   }
 
   const result = validateLayoutPlan(plan, { imageCount: 2 })

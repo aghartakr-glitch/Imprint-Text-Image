@@ -35,11 +35,15 @@ test('every fallback plan is grid-based (uses col/row spans, never raw mm)', () 
   assert.ok(Number.isInteger(el.col_start) && Number.isInteger(el.row_start))
 })
 
-test('the long-text 3-6-image fallback splits gallery and text across two separate pages', () => {
+test('the long-text 3-6-image fallback spreads one image per page (no gallery/text split)', () => {
+  // Previously this returned gallery_page_text_page (all images page 1, all text page 2) -- the
+  // "images front, text back" anti-pattern. Now it distributes images one-per-page so the story
+  // reads with photos throughout, body text following.
   const generatedPlan = buildFallbackLayoutPlan({ imageCount: 5, textDensity: 'long' })
-  assert.equal(generatedPlan.pages.length, 2)
-  assert.ok(generatedPlan.pages[0].elements.every((e) => e.type === 'image'))
-  assert.ok(generatedPlan.pages[1].elements.every((e) => e.type === 'text'))
+  assert.equal(generatedPlan.composition_strategy, 'images_spread_across_pages')
+  assert.equal(generatedPlan.pages.length, 6, '5 image pages + 1 text page')
+  assert.ok(generatedPlan.pages.slice(0, 5).every((p) => p.elements.length === 1 && p.elements[0].type === 'image'))
+  assert.ok(generatedPlan.pages[5].elements.every((e) => e.type === 'text'))
 })
 
 test('throws for an unsupported image count', () => {

@@ -94,13 +94,19 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
       if (el.type === 'text') {
         if (el.role != null) checkEnum(el.role, DESIGN_SPACE.textRoles, `요소 ${el.id}의 role`, issues)
 
-        // CRITICAL: text_source must reference specific paragraph, never "body_all"
-        if (!el.text_source) {
-          issues.push(`요소 ${el.id}: text_source가 없습니다 (paragraph_N 또는 title 필수)`)
-        } else if (el.text_source === 'body_all') {
-          issues.push(`요소 ${el.id}: text_source는 "body_all"이 아니라 구체적인 paragraph_N을 참조해야 합니다`)
-        } else if (!/^(title|paragraph_\d+)$/.test(el.text_source)) {
-          issues.push(`요소 ${el.id}: text_source 형식이 잘못되었습니다: "${el.text_source}" (title 또는 paragraph_N 형식)`)
+        // Three legitimate ways a text element carries its content:
+        //  1. text_source: "paragraph_N"/"title" — modular reference resolved by paginateGridPlan.
+        //  2. text: "..."                        — pre-sliced content (grid/column-flow fallback).
+        //  3. neither                            — legacy continuous-flow body; paginateGridPlan
+        //                                          flows the whole body into it via overflow.
+        // Only guard against the one genuinely broken form: text_source present but malformed
+        // (e.g. "body_all", which used to merge every paragraph into a single undifferentiated blob).
+        if (el.text_source != null) {
+          if (el.text_source === 'body_all') {
+            issues.push(`요소 ${el.id}: text_source는 "body_all"이 아니라 구체적인 paragraph_N을 참조해야 합니다`)
+          } else if (!/^(title|paragraph_\d+)$/.test(el.text_source)) {
+            issues.push(`요소 ${el.id}: text_source 형식이 잘못되었습니다: "${el.text_source}" (title 또는 paragraph_N 형식)`)
+          }
         }
 
         if (el.role === 'body') hasBodyText = true
@@ -197,11 +203,20 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
     }
   }
 
-  // Collision validation: text-image overlap, gap checks
+  // Collision validation: text-image overlap, gap checks. validateCollisions returns structured
+  // objects ({ type, severity, reason, ... }); every other check here pushes a plain string. Only
+  // blocking errors are surfaced (as strings, to keep `issues` a flat string list the callers/tests
+  // expect); severity:'warning' gap notices are advisory and intentionally non-blocking.
   const collisionResult = validateCollisions(plan, {
     gridMode: plan.grid_spec?.grid_mode || 'strict',
   })
-  issues.push(...collisionResult.issues)
+  collisionResult.issues
+    .filter((i) => i.severity === 'error')
+    .forEach((i) => issues.push(`요소 충돌(${i.type}): ${i.element_a} ↔ ${i.element_b} (page ${i.page}) — ${i.reason}`))
 
-  return { passed: issues.filter((i) => i.severity === 'error').length === 0, issues }
+  // A plan is valid only when it has zero issues. Previously this filtered on `i.severity === 'error'`,
+  // but every check above pushes a *string* (no .severity), so that filter silently passed EVERY
+  // plan — disabling the entire validation layer (bad enums, unplaced images, missing paragraphs,
+  // forbidden composition strategies all sailed through as passed:true). Now string issues block.
+  return { passed: issues.length === 0, issues }
 }
