@@ -248,48 +248,72 @@ function sparsePerPageVariant(imageCount) {
   })
 }
 
-// Section 5.4/7 of the "Grid Preset + Column Flow" supplement: images become reserved_regions
-// that the body text must route around, expressed as a fraction of whatever grid the user
-// actually chose (columns/rows), not a fixed 6x12 shape.
-function imageRegionsFor(imageCount, columns, rows, imageBehavior) {
-  if (imageCount === 1) {
-    if (imageBehavior === 'anchored') {
-      const rightSpan = Math.max(1, Math.ceil(columns / 2))
-      return {
-        regions: [{
-          col_start: columns - rightSpan + 1, col_span: rightSpan, row_start: 1, row_span: Math.max(1, Math.round(rows * 0.42)),
-        }],
-        role: 'hero',
+// Classifies an image's aspect ratio (width/height) into how many grid columns it should claim.
+// A wide/landscape photo reads naturally as a banner across most or all of the row; a portrait
+// photo reads naturally as a narrow, tall column. Capped to the user's actual column count so a
+// 2-column grid never asks for a span that doesn't exist.
+function colSpanForAspectRatio(ratio, columns) {
+  const r = Number.isFinite(ratio) && ratio > 0 ? ratio : 1
+  let fraction
+  if (r >= 1.5) fraction = 1 // full-width banner
+  else if (r >= 1.15) fraction = 0.6 // landscape
+  else if (r >= 0.85) fraction = 0.4 // square
+  else fraction = 0.28 // portrait
+  return Math.min(columns, Math.max(1, Math.round(columns * fraction)))
+}
+
+function rowSpanForAspectRatio(ratio, rows) {
+  const r = Number.isFinite(ratio) && ratio > 0 ? ratio : 1
+  let fraction
+  if (r >= 1.5) fraction = 0.22
+  else if (r >= 1.15) fraction = 0.3
+  else if (r >= 0.85) fraction = 0.28
+  else fraction = 0.38
+  return Math.min(rows - 1, Math.max(2, Math.round(rows * fraction)))
+}
+
+// Section 5.4/7 of the "Grid Preset + Column Flow" supplement, redesigned so images and body text
+// genuinely interleave instead of "all images in a uniform grid up top, all text below/after"
+// (the exact anti-pattern this replaces -- confirmed by a real run where 6 images were forced into
+// identical 26mm cells via splitGridCells, ignoring every image's real aspect ratio, and
+// `resolved_grid_settings.variation_level` was computed but never actually consumed anywhere).
+//
+// Each image becomes its own "band": a row range on some page, with a column span (1..columns)
+// driven by its real aspect ratio -- landscape photos claim most/all of the row as a banner,
+// square photos claim less than half, portraits claim a narrow column -- and whatever columns
+// remain in that same row range become a `textRegion` so body text flows immediately beside that
+// image, not after every image. Bands stack down the page and wrap onto additional pages once a
+// page's rows are exhausted, so images are distributed across the whole spread instead of
+// clustered in a single dense block. Left/right alternation per band (even index: image left/text
+// right; odd index: image right/text left) adds real visual variety along the way.
+function imageBandsFor(imageAspectRatios, columns, rows) {
+  const bands = []
+  let page = 1
+  let rowCursor = 1
+  imageAspectRatios.forEach((ratio, i) => {
+    const colSpan = colSpanForAspectRatio(ratio, columns)
+    const rowSpan = rowSpanForAspectRatio(ratio, rows)
+    if (rowCursor + rowSpan - 1 > rows) {
+      page += 1
+      rowCursor = 1
+    }
+    const imageOnRight = colSpan < columns && i % 2 === 1
+    const imageColStart = imageOnRight ? columns - colSpan + 1 : 1
+    const image = {
+      page, col_start: imageColStart, col_span: colSpan, row_start: rowCursor, row_span: rowSpan,
+    }
+    let textRegion = null
+    if (colSpan < columns) {
+      const textColSpan = columns - colSpan
+      const textColStart = imageOnRight ? 1 : colSpan + 1
+      textRegion = {
+        page, col_start: textColStart, col_span: textColSpan, row_start: rowCursor, row_span: rowSpan,
       }
     }
-    return {
-      regions: [{
-        col_start: 1, col_span: columns, row_start: 1, row_span: Math.max(1, Math.round(rows * 0.45)),
-      }],
-      role: 'hero',
-    }
-  }
-  if (imageCount === 2) {
-    const colSpanEach = Math.max(1, Math.floor(columns / 2))
-    const rowSpan = Math.max(1, Math.round(rows * 0.38))
-    return {
-      regions: [
-        {
-          col_start: 1, col_span: colSpanEach, row_start: 1, row_span: rowSpan,
-        },
-        {
-          col_start: 1 + colSpanEach, col_span: columns - colSpanEach, row_start: 1, row_span: rowSpan,
-        },
-      ],
-      role: 'equal',
-    }
-  }
-  return {
-    regions: splitGridCells(imageCount, {
-      col_start: 1, col_span: columns, row_start: 1, row_span: Math.max(2, Math.round(rows * 0.55)),
-    }),
-    role: 'gallery',
-  }
+    bands.push({ image, textRegion })
+    rowCursor += rowSpan + 1 // +1 row gap between bands
+  })
+  return bands
 }
 
 function textElementsFromSlots(slots, pageNum) {
@@ -323,9 +347,16 @@ export function buildGridFallbackPlan({
     columns, rows, gutterMm: gridSpecRaw.gutter_mm, boxWidthMm: TEXT_BOX_WIDTH_MM, boxHeightMm: TEXT_BOX_HEIGHT_MM,
   }
 
-  const { regions: imageRegions, role: imageRole } = imageRegionsFor(imageCount, columns, rows, resolved.image_behavior)
-  const imageEls = imageElementsAt(1, imageRegions, imageRole)
-  const reservedRegions = imageRegions.map((cell) => ({ page: 1, ...cell }))
+  // Real aspect ratios drive each image's column span (see imageBandsFor) so images are never
+  // forced into a uniform grid; ratios missing/invalid fall back to a square guess.
+  const ratios = Array.from({ length: imageCount }, (_, i) => imageAspectRatios[i] ?? 1)
+  const bands = imageBandsFor(ratios, columns, rows)
+  const imageRole = imageCount === 1 ? 'hero' : (imageCount === 2 ? 'equal' : 'gallery')
+  const imageEls = bands.map((band, i) => ({
+    id: `image_${i + 1}`, type: 'image', role: imageRole, fit: 'contain', object_position: 'center', ...band.image,
+  }))
+  const reservedRegions = bands.map((band) => band.image)
+  const lastImagePage = bands.length > 0 ? bands[bands.length - 1].image.page : 1
 
   // parseTextBlocks may peel off an auto-detected title-like first paragraph when no explicit
   // title was given; with no explicit title there is no separate title page to render it on, so
@@ -339,26 +370,54 @@ export function buildGridFallbackPlan({
     ? parsed.text_blocks.filter((b) => b.role === 'body')
     : parsed.text_blocks.map((b) => (b.role === 'title' ? { ...b, role: 'body' } : b))
 
-  const flowRegion1 = {
-    page: 1, col_start: 1, col_span: columns, row_start: 1, row_span: rows,
-  }
-  const { filledSlots: slots1, remainingText: rest1 } = flowTextAcrossColumns({
-    textBlocks: bodyBlocks, flowRegions: [flowRegion1], reservedRegionsByPage: { 1: reservedRegions }, gridSpec,
+  // One flow_region per band's text slot (beside that band's image, same page/rows) IN BAND ORDER,
+  // so paragraphs land directly next to the image they're adjacent to instead of being pushed
+  // below every image. Bands whose image claims the full row (no side room) contribute no region
+  // here -- text simply continues into the next band or the trailing full-width region below.
+  const bandFlowRegions = bands.filter((b) => b.textRegion).map((b) => b.textRegion)
+  // After the last image band, whatever page it landed on may still have unused rows below it;
+  // give body text a trailing full-width region there so it isn't wasted.
+  const lastBand = bands[bands.length - 1]
+  const usedRowEnd = lastBand ? lastBand.image.row_start + lastBand.image.row_span : 0
+  const trailingRegion = usedRowEnd < rows
+    ? [{
+      page: lastImagePage, col_start: 1, col_span: columns, row_start: usedRowEnd + 1, row_span: rows - usedRowEnd,
+    }]
+    : []
+  const flowRegions = [...bandFlowRegions, ...trailingRegion]
+
+  const reservedRegionsByPage = {}
+  reservedRegions.forEach((r) => {
+    reservedRegionsByPage[r.page] = [...(reservedRegionsByPage[r.page] ?? []), r]
   })
 
-  const pagesElements = [[...imageEls, ...textElementsFromSlots(slots1, 1)]]
-  let remaining = rest1
-  let pageNum = 2
+  const { filledSlots, remainingText } = flowTextAcrossColumns({
+    textBlocks: bodyBlocks, flowRegions, reservedRegionsByPage, gridSpec,
+  })
+
+  // Group filled text slots (and images) by page to build each page's element list.
+  const pageNumbers = new Set([1, ...imageEls.map((el) => el.page), ...filledSlots.map((s) => s.page)])
+  const maxPage = Math.max(...pageNumbers)
+  const pagesElements = []
+  for (let p = 1; p <= maxPage; p += 1) {
+    pagesElements.push([
+      ...imageEls.filter((el) => el.page === p).map(({ page, ...rest }) => rest),
+      ...textElementsFromSlots(filledSlots.filter((s) => s.page === p), p).map(({ page, ...rest }) => rest),
+    ])
+  }
+
+  let remaining = remainingText
+  let pageNum = maxPage + 1
   const MAX_CONTINUATION_PAGES = 500 // safety cap against a pathological infinite loop
   while (remaining.length > 0 && pageNum <= MAX_CONTINUATION_PAGES) {
     const region = makeContinuationFlowRegion({ page: pageNum, gridSpec })
-    const { filledSlots, remainingText } = flowTextAcrossColumns({
+    const { filledSlots: contSlots, remainingText: contRemaining } = flowTextAcrossColumns({
       textBlocks: [{ id: `overflow_${pageNum}`, role: 'body', text: remaining }],
       flowRegions: [region],
       gridSpec,
     })
-    pagesElements.push(textElementsFromSlots(filledSlots, pageNum))
-    remaining = remainingText
+    pagesElements.push(textElementsFromSlots(contSlots, pageNum).map(({ page, ...rest }) => rest))
+    remaining = contRemaining
     pageNum += 1
   }
 
@@ -390,7 +449,7 @@ export function buildGridFallbackPlan({
     grid_spec: gridSpecRaw,
     resolved_grid_settings: resolved,
     reserved_regions: reservedRegions,
-    text_flow: { mode: resolved.text_flow, flow_regions: [flowRegion1] },
+    text_flow: { mode: resolved.text_flow, flow_regions: flowRegions },
     layout_variation: `${resolved.image_behavior}_${resolved.text_flow}`,
     pages: pagesElements.map((elements, i) => ({ page: i + 1, elements })),
     overflow_policy: { body_overflow: 'continue_to_next_page' },
