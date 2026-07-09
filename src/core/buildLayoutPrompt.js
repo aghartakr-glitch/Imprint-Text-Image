@@ -13,7 +13,14 @@ Your allowed decisions:
 - Decide the layout_purpose (visual_showcase, comparison, editorial_reading, case_analysis, gallery, report).
 - Decide the image_hierarchy (single_hero, equal_pair, hero_support, grid_gallery, page_gallery).
 - Decide the image_text_relation (image_sets_mood, text_explains_image, image_supports_text, equal_visual_text, gallery_then_text).
-- Decide the composition_strategy (full_image, image_above_text, text_above_image, image_left_text_right, text_left_image_right, equal_images, hero_support, grid_gallery, gallery_left_text_right, gallery_page_text_page, column_flow_grid, images_spread_across_pages).
+- Decide the composition_strategy. **PRIORITY (Phase 5: flexible grid first)**:
+  1. flexible_modular_grid — PRIMARY (when images+text both present, use this as default)
+  2. image_text_case_blocks — when content has case studies / grouped pairs
+  3. hybrid_report_layout — for mixed content density
+  4. images_spread_across_pages — when 3+ images benefit from distribution
+  5. grid_gallery, masonry, asymmetrical — for gallery/visual emphasis
+  6. ⚠️  column_flow_grid — FALLBACK ONLY (use only if flexible_modular_grid cannot accommodate text/image)
+  🚨 Never use column_flow_grid as default when images+text are present.
 - Decide which base pattern reference from the knowledge base best explains your composition.
 - Decide the grid_spec: if user has provided preferred grid settings (columns, page_size, grid_mode, margin_preset), your grid_spec MUST reflect them. Never ignore user's explicit column count or grid_mode choice. If no user setting is provided, use 6 columns/A5 as default.
 - Place elements using the grid system only, and record each decision as a step in design_sequence.
@@ -221,19 +228,28 @@ export function buildUserPrompt({
 Create exactly ${internalCandidateCount} distinct candidate layout_plans for the given input.
 Use the pattern library and retrieved references as design grammar guidance, not fixed templates.
 
-CRITICAL CANDIDATE DIVERSITY (each of the ${internalCandidateCount} candidates MUST differ):
+CRITICAL CANDIDATE DIVERSITY (Phase 5: each candidate MUST use DIFFERENT composition_strategy):
 🔴 FORBIDDEN: gallery_page_text_page (separates all images from all text -- defeats modular layout goal)
-   → Use column_flow_grid or images_spread_across_pages instead (interleave images and text)
+🔴 FORBIDDEN: all 3 candidates using column_flow_grid (this is the fallback, not the goal)
+   → Candidates must show real strategy variation, not just parameter tweaks
 
-1. Candidate 1: layout_family = "balanced" | "text_first", composition_strategy = "column_flow_grid"
-   → Use column_flow for text to wrap around images
-   → Modular case/brand text blocks each with text_source: paragraph_N
-2. Candidate 2: layout_family = "balanced" | "image_text_case_blocks", composition_strategy = "image_left_text_right" or "text_left_image_right"
-   → Alternate image-text pairs on left/right (Dove + Dove text, SweetyBetty + SweetyBetty text)
-   → Use case_title_ko/en as section separators with text_source field
-3. Candidate 3: layout_family = "balanced" | "gallery", composition_strategy = "images_spread_across_pages"
-   → One-two images per page with adjacent case/brand text on SAME page
-   → Separate "DESIGN CASE STUDIES" as section_title element, not merged into body text
+**Candidate 1 (STABLE EDITORIAL)**: composition_strategy = "flexible_modular_grid"
+   → layout_family: balanced, image_hierarchy: hero_support or equal_pair
+   → Use 2-3 column image spans + 2-3 column text spans
+   → Example: image 2-col + text 2-col, then image 3-col, then text 3-col (stagger pattern)
+   → Text directly next to/below relevant images
+
+**Candidate 2 (GROUPED CASES)**: composition_strategy = "image_text_case_blocks"
+   → layout_family: balanced, image_hierarchy: grid_gallery or case-specific
+   → Group image-text pairs as case studies (Dove image + Dove text together, SweetyBetty image + SweetyBetty text together)
+   → Use case_title_ko/en as section dividers (text_source field required)
+   → CRITICAL: Keep case_title and case_body blocks together, not separated by pages
+
+**Candidate 3 (DIVERSE ASYMMETRICAL)**: composition_strategy = "asymmetrical_layout" or "masonry"
+   → layout_family: image-first, image_hierarchy: page_gallery or mixed
+   → Vary image sizes: mix 1-col + 2-col + 3-col images (NOT all same size)
+   → Intentional whitespace: some areas fully text, some fully image, some mixed
+   → Spread images 1-2 per page (not all crammed together)
 
 INFERRED RELATIONSHIPS TO PRESERVE:
 - For every high-confidence image-text pair (confidence >= 0.7):
