@@ -47,18 +47,6 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
     issues.push('❌ gallery_page_text_page는 금지됨: 모든 이미지를 한 페이지, 모든 글을 다른 페이지에 배치하므로 이미지-텍스트 interleaving 불가능. 대신 column_flow_grid, image_left_text_right, text_left_image_right, 또는 images_spread_across_pages를 사용하세요.')
   }
 
-  // 🔴 CRITICAL: a grid_spec's `columns` value is an alignment/positioning unit for a modular
-  // grid, NOT a mandate that every text block must be exactly one column wide. Reject plans where
-  // every text element is squeezed into a uniform single-column sliver (columns>=3) -- the exact
-  // "rigid forced N-column text wall" failure a real generation produced (4 parallel narrow text
-  // strips, single sentences split across column boundaries).
-  if (plan.grid_spec) {
-    const spanAnalysis = analyzeSpanVariation(plan)
-    if (spanAnalysis.forcedRigidColumns) {
-      issues.push(`❌ 모든 텍스트가 동일한(또는 1-column) 폭으로 강제 배치됨 (columns=${plan.grid_spec.columns}): grid는 이미지/텍스트의 span(1~${plan.grid_spec.columns}열)을 정하는 정렬 기준일 뿐, 모든 요소를 1열 폭으로 채우라는 뜻이 아닙니다. 문단마다 다른 col_span(2열, 3열 등)을 사용하세요.`)
-    }
-  }
-
   if (!Array.isArray(plan.design_sequence) || plan.design_sequence.length === 0) {
     issues.push('design_sequence가 비어 있거나 배열이 아닙니다')
   }
@@ -78,6 +66,7 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
 
   const seenImageIndices = new Set()
   let hasBodyText = false
+  let spanAnalysis = null
 
   pages.forEach((page) => {
     const elements = Array.isArray(page.elements) ? page.elements : []
@@ -213,6 +202,30 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
     }
     if (tf.overflow_policy?.body_overflow && tf.overflow_policy.body_overflow !== 'continue_to_next_page') {
       issues.push(`text_flow.overflow_policy.body_overflow는 continue_to_next_page여야 합니다 (받은 값: ${tf.overflow_policy.body_overflow})`)
+    }
+  }
+
+  // Phase 5: Grid specification and span variation checks (after pages are analyzed)
+  if (plan.grid_spec) {
+    spanAnalysis = analyzeSpanVariation(plan)
+    if (spanAnalysis.forcedRigidColumns) {
+      issues.push(`❌ 모든 텍스트가 동일한(또는 1-column) 폭으로 강제 배치됨 (columns=${plan.grid_spec.columns}): grid는 이미지/텍스트의 span(1~${plan.grid_spec.columns}열)을 정하는 정렬 기준일 뿐, 모든 요소를 1열 폭으로 채우라는 뜻이 아닙니다. 문단마다 다른 col_span(2열, 3열 등)을 사용하세요.`)
+    }
+
+    // Phase 5: Reject plans with insufficient text span variation (for 3+ column grids)
+    if (activeColumns >= 3 && !spanAnalysis.text_span_variation_used) {
+      issues.push(`❌ Phase 5: 텍스트 span 다양화 부족: 모든 텍스트가 동일한 폭(${spanAnalysis.text_span_patterns[0] || '1-column'})으로만 배치됨. 2-column, 3-column 등을 혼합하세요.`)
+    }
+
+    // Phase 5: Reject plans with no image span variation (when multiple images exist)
+    const imageCount = seenImageIndices.size
+    if (imageCount >= 2 && !spanAnalysis.image_span_variation_used) {
+      issues.push(`❌ Phase 5: 이미지 span 다양화 부족: ${imageCount}장의 이미지가 모두 같은 크기로 배치됨. 1-column, 2-column, 3-column 등을 혼합하세요.`)
+    }
+
+    // Phase 5: Warn if column_flow_grid is used (fallback only)
+    if (plan.composition_strategy === 'column_flow_grid') {
+      issues.push(`⚠️  Phase 5: column_flow_grid는 fallback입니다. flexible_modular_grid, image_text_case_blocks, asymmetrical 등을 우선 사용하세요.`)
     }
   }
 

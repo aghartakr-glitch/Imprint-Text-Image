@@ -33,21 +33,33 @@ export function analyzeSpanVariation(plan) {
   const textColSpans = allTextElements.map((el) => el.col_span).filter((n) => Number.isInteger(n))
   const imageColSpans = allImageElements.map((el) => el.col_span).filter((n) => Number.isInteger(n))
   const distinctTextSpans = new Set(textColSpans)
+  const distinctImageSpans = new Set(imageColSpans)
 
   const allTextForcedToSingleColumns = Number.isInteger(columns) && columns >= 3
     && textColSpans.length > 0 && textColSpans.every((s) => s === 1)
   const noSpanVariation = textColSpans.length > 1 && distinctTextSpans.size <= 1
   const imagesNeverSpanMultiple = imageColSpans.length > 0 && imageColSpans.every((s) => s <= 1)
+  const noImageSpanVariation = imageColSpans.length > 1 && distinctImageSpans.size <= 1
 
   const spanPatterns = [...new Set(
     pages.map((p) => analyzePage((p.elements ?? []).filter((el) => el.type === 'text'), columns).pattern).filter(Boolean),
   )]
+
+  // Text span patterns for generation-log
+  const textSpanPatterns = Array.from(distinctTextSpans).sort((a, b) => a - b).map((s) => `${s}-column`)
+
+  // Image span patterns for generation-log
+  const imageSpanPatterns = Array.from(distinctImageSpans).sort((a, b) => a - b).map((s) => `${s}-column`)
 
   const forcedRigidColumns = allTextForcedToSingleColumns || (noSpanVariation && Number.isInteger(columns) && columns >= 3)
 
   return {
     grid_interpretation: 'alignment_structure_not_forced_columns',
     span_variation_used: distinctTextSpans.size >= 2 || spanPatterns.length > 0,
+    text_span_variation_used: distinctTextSpans.size >= 2,
+    image_span_variation_used: distinctImageSpans.size >= 2,
+    text_span_patterns: textSpanPatterns,
+    image_span_patterns: imageSpanPatterns,
     span_patterns: spanPatterns,
     all_text_forced_to_single_columns: allTextForcedToSingleColumns,
     readable_text_width_passed: !allTextForcedToSingleColumns,
@@ -55,5 +67,6 @@ export function analyzeSpanVariation(plan) {
     rejected_because_forced_four_column_text: forcedRigidColumns,
     forcedRigidColumns,
     imagesNeverSpanMultiple,
+    noImageSpanVariation,
   }
 }

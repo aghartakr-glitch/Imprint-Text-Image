@@ -414,6 +414,32 @@ export async function runGeneration({
     grid_interpretation: selected.plan.grid_spec
       ? (({ forcedRigidColumns, imagesNeverSpanMultiple, ...rest }) => rest)(analyzeSpanVariation(selected.plan))
       : null,
+    // Phase 5: Extended grid & collision validation fields
+    phase5_layout_analysis: selected.plan.grid_spec ? (() => {
+      const spanAnalysis = analyzeSpanVariation(selected.plan)
+      return {
+        default_grid_mode: 'flexible_modular_grid',
+        column_flow_grid_used: selected.plan.composition_strategy === 'column_flow_grid',
+        column_flow_grid_reason: selected.plan.composition_strategy === 'column_flow_grid' ? selected.plan.reason ?? 'fallback' : null,
+        grid_interpretation: 'modular_alignment_structure',
+        text_span_patterns: spanAnalysis.text_span_patterns || [],
+        image_span_patterns: spanAnalysis.image_span_patterns || [],
+        span_variation_used: spanAnalysis.span_variation_used,
+        text_span_variation_used: spanAnalysis.text_span_variation_used,
+        image_span_variation_used: spanAnalysis.image_span_variation_used,
+        column_gutter_mm: 4,
+        text_inner_padding_mm: 2,
+        text_image_min_gap_mm: 4,
+        text_text_min_gap_mm: 3,
+        image_image_min_gap_mm: 3,
+        section_title_margin_mm: 5,
+        expanded_collision_validation: {
+          passed: !issues.filter((i) => i.includes('expanded_bbox_overlap')).length,
+          issues: issues.filter((i) => i.includes('expanded_bbox_overlap') || i.includes('insufficient_gap')),
+        },
+        rejected_because_rigid_column_flow: selected.plan.composition_strategy === 'column_flow_grid' && spanAnalysis.forcedRigidColumns,
+      }
+    })() : null,
     overflow_policy: { auto_shrink: false, truncate_text: false, move_to_next_page: true },
     outputs: { best_layout: `${bestLayoutDir.split(/[\\/]/).pop()}/` },
   }

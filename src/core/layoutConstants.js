@@ -18,6 +18,14 @@ export const LINE_HEIGHT_MM = BODY_LEADING_PT * PT_TO_MM
 
 export const IMAGE_TEXT_GAP_MM = 6
 
+// Spacing & margin constants for Phase 5 collision validation
+export const COLUMN_GUTTER_MM = 4
+export const TEXT_BOX_INNER_PADDING_MM = 2
+export const TEXT_IMAGE_MIN_GAP_MM = 4
+export const TEXT_TEXT_MIN_GAP_MM = 3
+export const IMAGE_IMAGE_MIN_GAP_MM = 3
+export const SECTION_TITLE_MARGIN_MM = 5
+
 // Grid-based layout_plan system (v0.3): the LLM places elements on this grid instead of
 // inventing mm coordinates directly. The grid spans the full physical page (not just the
 // margin-constrained text box) so that full-bleed compositions (e.g. single_full_page) stay

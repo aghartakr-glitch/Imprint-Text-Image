@@ -265,6 +265,55 @@ function colSpanForAspectRatio(ratio, columns) {
   return Math.min(columns, Math.max(floor, Math.round(columns * fraction)))
 }
 
+// Phase 5: Determine image column span based on hierarchy role, aspect ratio, and grid structure.
+// Introduces more variation than aspect ratio alone: hero images claim large spans, support
+// images vary between 1-2 columns, thumbnails use 1 column, and full-bleed images span all columns.
+function imageSpanForHierarchy(role, ratio, columns, imageIndex = 0) {
+  const r = Number.isFinite(ratio) && ratio > 0 ? ratio : 1
+
+  // Role-based span (primary driver in Phase 5)
+  if (role === 'hero' || role === 'opener') {
+    // Hero/opener images: 2-4 columns (prefer large)
+    if (columns >= 4) return r >= 1.5 ? 4 : 3
+    if (columns >= 3) return 3
+    return Math.min(columns, 2)
+  }
+
+  if (role === 'support' || role === 'secondary') {
+    // Support images: 1-2 columns (vary based on aspect ratio)
+    if (columns >= 2 && r >= 1.2) return 2
+    return 1
+  }
+
+  if (role === 'case' || role === 'case-image') {
+    // Case images: 1-3 columns (paired with related text)
+    if (columns >= 3 && r >= 1.3) return 3
+    if (columns >= 2 && r >= 1.1) return 2
+    return 1
+  }
+
+  if (role === 'thumbnail' || role === 'small') {
+    // Thumbnail: always 1 column
+    return 1
+  }
+
+  if (role === 'full-bleed') {
+    // Full-bleed: full width
+    return columns
+  }
+
+  if (role === 'gallery') {
+    // Gallery: let aspect ratio decide, but with variation
+    if (r >= 1.8) return Math.min(columns, 4)
+    if (r >= 1.3) return Math.min(columns, 3)
+    if (r >= 0.9) return Math.min(columns, 2)
+    return 1
+  }
+
+  // Default: aspect ratio-based (existing logic)
+  return colSpanForAspectRatio(r, columns)
+}
+
 function rowSpanForAspectRatio(ratio, rows) {
   const r = Number.isFinite(ratio) && ratio > 0 ? ratio : 1
   let fraction

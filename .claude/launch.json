@@ -4,7 +4,7 @@
     {
       "name": "imprint-image-text-frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": ["run", "dev:all"],
       "port": 5175
     }
   ]
