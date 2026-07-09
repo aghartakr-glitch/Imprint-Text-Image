@@ -12,6 +12,7 @@ import { buildFallbackLayoutPlan } from '../src/core/fallbackLayoutPlan.js'
 import { validateLayoutPlan } from '../src/core/validateLayoutPlan.js'
 import { resolveGridSettings } from '../src/core/grid/GridPresetManager.js'
 import { parseTextBlocks } from '../src/core/text/parseTextBlocks.js'
+import { parseDocumentStructure } from '../src/core/content/parseDocumentStructure.js'
 import { parseContentStructure } from '../src/core/content/parseContentStructure.js'
 import { parseTextBlocksAdvanced } from '../src/core/content/parseTextBlocksAdvanced.js'
 import { matchImageToTextBlocks } from '../src/core/content/matchImageToTextBlocks.js'
@@ -74,9 +75,16 @@ export async function runGeneration({
   const imageOrientations = analysis.images.map((i) => i.orientation)
   const textDensity = textDensityFromLength(analysis.textLength)
   const hasTitle = typeof title === 'string' && title.trim().length > 0
+
+  // Primary: Advanced document structure parsing (recognizes Markdown, separators, etc.)
+  const documentStructure = parseDocumentStructure({ title, text })
+  const textBlocksAdvanced = documentStructure.text_blocks || []
+  const textLayoutMode = documentStructure.text_layout_mode || 'continuous_flow'
+
+  // Fallback to old structure analyzer for compatibility
   const contentStructure = parseContentStructure({ title, text })
 
-  // Advanced text block parsing: modular paragraph-level structure
+  // Also keep advanced text block parsing for multi-role analysis
   const textBlocksAnalysis = parseTextBlocksAdvanced({ title, text })
 
   // Match images to text blocks based on semantic roles
@@ -154,7 +162,9 @@ export async function runGeneration({
   const promptContext = {
     inputMetadata,
     contentStructure,
-    textBlocks: textBlocksAnalysis.text_blocks,
+    documentStructure: documentStructure.document_structure,
+    textBlocks: textBlocksAdvanced, // Use advanced parser's blocks (with roles detected from structure)
+    textLayoutMode: textLayoutMode, // continuous_flow, modular_blocks, or hybrid_flow
     imageTextMatching,
     textFlowMode: textFlowModeSelection.mode,
     imageTextRelation,
@@ -287,12 +297,21 @@ export async function runGeneration({
       image_orientations: imageOrientations,
       text_length: analysis.textLength,
       text_density: textDensity,
-      paragraph_count: textBlocksAnalysis.paragraph_count,
-      has_modular_blocks: textBlocksAnalysis.has_modular_blocks,
+      paragraph_count: documentStructure.paragraph_count,
+      has_modular_blocks: documentStructure.document_structure?.sections?.length > 0,
       has_case_like_paragraphs: textBlocksAnalysis.has_case_like_paragraphs,
-      text_blocks: textBlocksAnalysis.text_blocks,
+      text_blocks: textBlocksAdvanced.map((b) => ({
+        id: b.id,
+        role: b.role,
+        type: b.type,
+        char_count: b.char_count,
+      })),
+      document_structure: documentStructure.document_structure,
+      text_layout_mode: textLayoutMode,
+      has_lightweight_markers: documentStructure.has_lightweight_markers,
+      has_explicit_tags: documentStructure.has_explicit_tags,
+      merged_body_all: documentStructure.merged_body_all,
       image_text_matching: imageTextMatching,
-      text_flow_mode: textFlowModeSelection.mode,
       content_structure: contentStructure,
       image_text_relation: imageTextRelation.relation,
       suggested_layout_family: suggestedLayoutFamily.family,
