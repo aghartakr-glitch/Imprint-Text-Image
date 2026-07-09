@@ -31,9 +31,19 @@ export function reconstructLayout({
     : undefined
   const gridResolvedPages = paginated.map((p) => resolveGridPage(p.elements, imagePaths, p.textSlicesByElementId, gridSpec))
 
+  // Check if plan includes a title element placed by the LLM; if so, it's already in gridResolvedPages
+  // and we don't need to prepend a separate title page.
   const hasTitle = typeof title === 'string' && title.trim().length > 0
-  const titlePage = hasTitle
-    ? {
+  const planIncludesTitle = layoutPlan.pages?.some((page) =>
+    page.elements?.some((el) => el.type === 'text' && el.role === 'title'),
+  )
+
+  // Only create a fallback title-only page if:
+  // 1. User provided a title
+  // 2. LLM did NOT place a title element in the plan (shouldn't happen if LLM respected the spec)
+  // This is a safety net; the LLM should place title in the layout_plan, not expect auto-creation.
+  if (hasTitle && !planIncludesTitle) {
+    const fallbackTitlePage = {
       type: 'title-page',
       images: [],
       textZone: {
@@ -42,7 +52,8 @@ export function reconstructLayout({
       textSlice: null,
       title: title.trim(),
     }
-    : null
+    return [fallbackTitlePage, ...gridResolvedPages]
+  }
 
-  return titlePage ? [titlePage, ...gridResolvedPages] : gridResolvedPages
+  return gridResolvedPages
 }

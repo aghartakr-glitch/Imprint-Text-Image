@@ -42,10 +42,15 @@ Fixed constraints:
   flows around it instead of overlapping. Format: [{ page, col_start, col_span, row_start, row_span }, ...]
 - MUST include text_flow: { mode: 'block_flow' | 'column_flow', flow_regions, overflow_policy }
   When layout has multiple images or user selected columns > 3, use 'column_flow' for sophisticated text routing.
-- Allowed text roles: title, subtitle, body, section_label, page_number, continuation_body.
-  You do not need to place a title/subtitle element yourself -- if has_title is true, it is
-  rendered on its own separate opener page automatically. Only place body (and optionally
-  section_label) elements.
+- Allowed text roles: title, subtitle, body, body_intro, body_conclusion, section_label, page_number.
+  If has_title is true, you MUST decide where to place the title element (title_behavior):
+  * same_page_with_image_body: title + image + body on one page
+  * title_body_same_page_image_next: title + body on page 1, image on page 2+
+  * title_image_same_page_body_next: title + image on page 1, body on page 2+
+  * opener_split: title alone on opener, but then immediately continue to content (not a title-only page)
+  * title_page_only: only as last resort if you cannot fit content
+  Default should be same_page_with_image_body or opener_split (not title_page_only).
+  If has_title is false, you must still place body element(s).
 
 Design principles:
 1. If there is one strong image and short text, use a large image.
@@ -132,13 +137,17 @@ const COMPACT_SCHEMA_EXAMPLE = JSON.stringify({
       page: 1,
       elements: [
         {
-          id: 'image_1', type: 'image', role: 'hero', page: 1, col_start: 1, col_span: 3, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center',
+          id: 'title_1', type: 'text', role: 'title', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 1,
         },
         {
-          id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 4, row_start: 7, row_span: 4,
+          id: 'image_1', type: 'image', role: 'hero', page: 1, col_start: 1, col_span: 3, row_start: 2, row_span: 5, fit: 'contain', object_position: 'center',
+        },
+        {
+          id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 4, col_span: 3, row_start: 2, row_span: 6,
         },
       ],
     }],
+    title_behavior: 'same_page_with_image_body',
     overflow_policy: { body_overflow: 'continue_to_next_page' },
     reason: 'short phrase, <=8 words',
   }],
@@ -148,9 +157,11 @@ function buildInternalRequirements(inputMetadata) {
   return `Validation reminders:
 - Every uploaded image (image_1 through image_${inputMetadata.image_count}) must be placed exactly once in every candidate.
 - No overlap between any elements.
-- All col/row values must stay inside 6 columns and 12 rows.
+- All col/row values must stay inside the active grid (check grid_spec if provided, otherwise 6 columns and 12 rows).
 - fit must be contain for every image; object_position must be one of center/top/bottom/left/right.
 - Do not generate captions. Do not place text over images.
+- If has_title is true, you MUST include a title element in your layout (not omitted for auto-creation).
+- title_behavior must be specified when title element is present.
 - Each candidate must include a non-empty design_sequence explaining its decisions in order.
 - Keep every reason field to 8 words or fewer -- you will run out of output room otherwise.
 - Return JSON only, no prose before or after it.`

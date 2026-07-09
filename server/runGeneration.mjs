@@ -117,12 +117,10 @@ export async function runGeneration({
     userLayoutSettings,
     userGridHint: gridSettings.resolved_grid_settings,
     userPreferenceContext,
-    // Cost lever: 1 candidate per call instead of 3 (spec's original ask) -- cuts output tokens
-    // to roughly a third. The reconstruct/refine/estimate/select pipeline still runs on whatever
-    // candidates come back, so this is a pure cost/quality-diversity trade-off, not an
-    // architecture change; bump this back up if candidate diversity turns out to matter more
-    // than the extra API cost.
-    internalCandidateCount: 1,
+    // Generate 3 candidates for layout diversity. Each should use a different composition
+    // strategy (e.g., title+body+image same page vs. image-led vs. column-flow). Cost trade-off
+    // is acceptable for quality; if budget is tight, set FAST_MODE=true to reduce to 1 candidate.
+    internalCandidateCount: process.env.FAST_MODE === 'true' ? 1 : 3,
   }
 
   // 7-10. LLM Layout Candidate Generator + Layout Validator (validate/repair/retry inside)

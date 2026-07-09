@@ -157,6 +157,7 @@ test('rejects a wrong overflow_policy.body_overflow value', () => {
 
 test('accepts a plan with grid_spec, reserved_regions, text_flow, and layout_variation', () => {
   const plan = validPlan({
+    grid: { columns: 4, rows: 12 },  // Must match grid_spec.columns
     grid_spec: { columns: 4, rows: 12, gutter_mm: 4, page_size: 'A5', grid_mode: 'flexible' },
     reserved_regions: [{ page: 1, col_start: 1, col_span: 1, row_start: 1, row_span: 5 }],
     text_flow: {
@@ -166,6 +167,17 @@ test('accepts a plan with grid_spec, reserved_regions, text_flow, and layout_var
     },
     layout_variation: 'column_flow_grid',
   })
+  // Adjust elements to fit within 4-column grid
+  plan.pages[0].elements[0] = {  // image_1
+    id: 'image_1', type: 'image', role: 'equal', page: 1, col_start: 1, col_span: 2, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center',
+  }
+  plan.pages[0].elements[1] = {  // image_2
+    id: 'image_2', type: 'image', role: 'equal', page: 1, col_start: 3, col_span: 2, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center',
+  }
+  plan.pages[0].elements[2] = {  // body_1
+    id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 4, row_start: 7, row_span: 4,
+  }
+
   const result = validateLayoutPlan(plan, { imageCount: 2 })
   assert.equal(result.passed, true, `issues: ${JSON.stringify(result.issues)}`)
 })

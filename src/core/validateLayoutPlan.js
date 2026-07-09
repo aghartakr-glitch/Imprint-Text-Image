@@ -27,6 +27,10 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
     return { passed: false, issues: ['layout_plan이 객체가 아닙니다'] }
   }
 
+  // Compute active grid dimensions: if plan has grid_spec, use it; otherwise fall back to defaults
+  const activeColumns = plan.grid_spec?.columns ?? GRID_COLUMNS
+  const activeRows = plan.grid_spec?.rows ?? GRID_ROWS
+
   checkEnum(plan.style, VALID_STYLES, 'style', issues)
   checkEnum(plan.layout_family, DESIGN_SPACE.layoutFamilies, 'layout_family', issues)
   checkEnum(plan.output_unit, DESIGN_SPACE.outputUnits, 'output_unit', issues)
@@ -39,11 +43,12 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
     issues.push('design_sequence가 비어 있거나 배열이 아닙니다')
   }
 
-  if (!plan.grid || plan.grid.columns !== GRID_COLUMNS) {
-    issues.push(`grid.columns는 ${GRID_COLUMNS}이어야 합니다 (받은 값: ${plan.grid?.columns})`)
+  // Validate grid.columns/rows match the active grid (either from grid_spec or defaults)
+  if (!plan.grid || plan.grid.columns !== activeColumns) {
+    issues.push(`grid.columns는 ${activeColumns}이어야 합니다 (받은 값: ${plan.grid?.columns})`)
   }
-  if (!plan.grid || plan.grid.rows !== GRID_ROWS) {
-    issues.push(`grid.rows는 ${GRID_ROWS}이어야 합니다 (받은 값: ${plan.grid?.rows})`)
+  if (!plan.grid || plan.grid.rows !== activeRows) {
+    issues.push(`grid.rows는 ${activeRows}이어야 합니다 (받은 값: ${plan.grid?.rows})`)
   }
 
   const pages = Array.isArray(plan.pages) ? plan.pages : []
@@ -60,13 +65,13 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
     elements.forEach((el) => {
       if (!Number.isInteger(el.col_start) || !Number.isInteger(el.col_span) || el.col_span < 1) {
         issues.push(`요소 ${el.id}: col_start/col_span 값이 잘못되었습니다`)
-      } else if (el.col_start < 1 || el.col_start + el.col_span - 1 > GRID_COLUMNS) {
-        issues.push(`요소 ${el.id}: col 범위가 grid(1~${GRID_COLUMNS})를 벗어났습니다`)
+      } else if (el.col_start < 1 || el.col_start + el.col_span - 1 > activeColumns) {
+        issues.push(`요소 ${el.id}: col 범위가 grid(1~${activeColumns})를 벗어났습니다`)
       }
       if (!Number.isInteger(el.row_start) || !Number.isInteger(el.row_span) || el.row_span < 1) {
         issues.push(`요소 ${el.id}: row_start/row_span 값이 잘못되었습니다`)
-      } else if (el.row_start < 1 || el.row_start + el.row_span - 1 > GRID_ROWS) {
-        issues.push(`요소 ${el.id}: row 범위가 grid(1~${GRID_ROWS})를 벗어났습니다`)
+      } else if (el.row_start < 1 || el.row_start + el.row_span - 1 > activeRows) {
+        issues.push(`요소 ${el.id}: row 범위가 grid(1~${activeRows})를 벗어났습니다`)
       }
 
       if (el.type === 'image') {
@@ -141,14 +146,12 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
       if (!Number.isInteger(region.row_start) || !Number.isInteger(region.row_span) || region.row_span < 1) {
         issues.push(`reserved_regions[${i}]: row_start/row_span 값이 잘못되었습니다`)
       }
-      // If the plan also has grid_spec, check bounds against it
-      if (plan.grid_spec) {
-        if (region.col_start < 1 || region.col_start + region.col_span - 1 > plan.grid_spec.columns) {
-          issues.push(`reserved_regions[${i}]: col 범위가 grid(1~${plan.grid_spec.columns})를 벗어났습니다`)
-        }
-        if (region.row_start < 1 || region.row_start + region.row_span - 1 > plan.grid_spec.rows) {
-          issues.push(`reserved_regions[${i}]: row 범위가 grid(1~${plan.grid_spec.rows})를 벗어났습니다`)
-        }
+      // Check reserved regions against active grid (user's grid_spec or defaults)
+      if (region.col_start < 1 || region.col_start + region.col_span - 1 > activeColumns) {
+        issues.push(`reserved_regions[${i}]: col 범위가 grid(1~${activeColumns})를 벗어났습니다`)
+      }
+      if (region.row_start < 1 || region.row_start + region.row_span - 1 > activeRows) {
+        issues.push(`reserved_regions[${i}]: row 범위가 grid(1~${activeRows})를 벗어났습니다`)
       }
     })
   }
