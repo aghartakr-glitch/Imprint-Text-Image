@@ -49,8 +49,6 @@ test('analyzeInput reads width/height/aspect ratio per image and text length', (
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('analyzeInput rejects 0 images or more than 6', () => {
-  assert.throws(() => analyzeInput({ imagePaths: [], text: 'x' }), /1~6/)
-  const seven = Array(7).fill('unused.png')
-  assert.throws(() => analyzeInput({ imagePaths: seven, text: 'x' }), /1~6/)
+test('analyzeInput rejects 0 images but accepts any number >= 1', () => {
+  assert.throws(() => analyzeInput({ imagePaths: [], text: 'x' }), /최소 1장/)
 })

@@ -1,42 +1,139 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { generateLayoutCandidates } from './generateLayoutCandidates.js'
 import { validateLayoutPlan } from './validateLayoutPlan.js'
+import { normalizeLayoutPlan } from './normalizeLayoutPlan.js'
 import { repairLayoutPlan } from './repairLayoutPlan.js'
+import { repairTextOverflow } from './validation/repairTextOverflow.js'
+import { repairCollisions } from './validation/repairCollisions.js'
+import { enforceGridOccupancy } from './validation/enforceGridOccupancy.js'
+import { validateAndFixLayoutMm } from './validation/validateAndFixLayoutMm.js'
 import { createLayoutCostBudget, LayoutCostBudgetExceeded } from './layoutCostBudget.js'
+import { writeDebugStage, summarizePlan } from '../../server/debugDump.mjs'
 
-function processCandidate(rawPlan, index, imageCount) {
+// A compact per-element digest (id/type/text_source/grid position) instead of the full plan --
+// enough for the model to locate what it placed without re-sending every field (style, reasoning,
+// design_sequence, etc.) it already got right.
+function summarizeFailedPlan(plan) {
+  const pages = Array.isArray(plan?.pages) ? plan.pages : []
+  return {
+    composition_strategy: plan?.composition_strategy,
+    grid_spec: plan?.grid_spec,
+    pages: pages.map((page) => ({
+      page: page.page,
+      elements: (page.elements || []).map((el) => ({
+        id: el.id,
+        type: el.type,
+        text_source: el.text_source,
+        col_start: el.col_start,
+        col_span: el.col_span,
+        row_start: el.row_start,
+        row_span: el.row_span,
+      })),
+    })),
+  }
+}
+
+// Local, API-free repair chain, applied in order so each step feeds the next:
+//   1. field defaults (fit/role/overflow_policy)          -- repairLayoutPlan
+//   2. grow text boxes that overflow their paragraph       -- repairTextOverflow
+//   3. shift any now-overlapping elements apart            -- repairCollisions
+// Steps 1 and 2 are applied unconditionally (they only ever make the plan more correct); step 3 is
+// kept only if the final plan actually passes validation. This lets the LLM be imperfect about box
+// sizing/positioning -- the common, deterministic geometry failures get fixed here with no API call.
+function processCandidate(rawPlan, index, imageCount, textBlocks) {
   const candidateId = rawPlan?.candidate_id || `candidate_${index + 1}`
-  let result = validateLayoutPlan(rawPlan, { imageCount })
-  let planToUse = rawPlan
+  // CRITICAL: normalize enum aliases (e.g. margin_preset "default" -> "recommended") BEFORE the
+  // first validation pass, so a schema-legal-in-spirit value never triggers a rejection/retry.
+  let candidatePlan = normalizeLayoutPlan(rawPlan)
+  let candidateResult = validateLayoutPlan(candidatePlan, { imageCount, textBlocks })
   let repaired = false
 
-  if (!result.passed) {
-    const { plan: repairedPlan, repaired: didRepair } = repairLayoutPlan(rawPlan)
-    if (didRepair) {
-      const revalidated = validateLayoutPlan(repairedPlan, { imageCount })
-      if (revalidated.passed) {
-        planToUse = repairedPlan
-        result = revalidated
+  // Debug instrumentation (first candidate only): capture exactly what the LLM returned, and what
+  // normalization changed, before any repair touches it. Pure logging -- no effect on the pipeline.
+  if (index === 0) {
+    writeDebugStage('01-raw-llm-candidate.json', rawPlan)
+    writeDebugStage('01-raw-llm-candidate-summary.json', summarizePlan(rawPlan, 'raw'))
+    writeDebugStage('02-normalized-candidate.json', candidatePlan)
+    writeDebugStage('02-normalized-candidate-summary.json', summarizePlan(candidatePlan, 'normalized'))
+  }
+
+  if (!candidateResult.passed) {
+    const { plan: defaultsRepaired, repaired: didRepairDefaults } = repairLayoutPlan(candidatePlan)
+    if (didRepairDefaults) candidatePlan = defaultsRepaired
+
+    const { plan: overflowRepaired, repaired: didRepairOverflow } = repairTextOverflow(candidatePlan, textBlocks)
+    if (didRepairOverflow) candidatePlan = overflowRepaired
+
+    if (didRepairDefaults || didRepairOverflow) {
+      candidateResult = validateLayoutPlan(candidatePlan, { imageCount, textBlocks })
+      repaired = true
+    }
+
+    if (!candidateResult.passed) {
+      const { plan: collisionsRepaired, repaired: didRepairCollisions } = repairCollisions(candidatePlan)
+      if (didRepairCollisions) {
+        const revalidated = validateLayoutPlan(collisionsRepaired, { imageCount, textBlocks })
+        // Keep the collision-repaired plan/result whenever it strictly reduces the outstanding
+        // issue count, even if it doesn't fully pass -- the plan/result this function returns must
+        // always reflect the best state actually achieved, never revert to a stale pre-repair
+        // snapshot just because the LAST repair step alone didn't finish the job.
+        if (revalidated.issues.length < candidateResult.issues.length) {
+          candidatePlan = collisionsRepaired
+          candidateResult = revalidated
+        }
         repaired = true
       }
+    }
+
+    // Final, guaranteed-complete backstop: repairCollisions nudges pairwise and can fail to
+    // converge when 3+ elements mutually overlap (confirmed 2026-07-10: real reports of 4-way
+    // tangles surviving the pairwise pass). enforceGridOccupancy cannot fail to converge -- it
+    // deterministically places every element into a unique free grid cell or a new page, so any
+    // overlap still present at this point is eliminated by construction, not by iterative nudging.
+    if (!candidateResult.passed) {
+      const { plan: occupancyRepaired, repaired: didEnforceOccupancy } = enforceGridOccupancy(candidatePlan)
+      if (didEnforceOccupancy) {
+        const revalidated = validateLayoutPlan(occupancyRepaired, { imageCount, textBlocks })
+        if (revalidated.issues.length < candidateResult.issues.length) {
+          candidatePlan = occupancyRepaired
+          candidateResult = revalidated
+        }
+        repaired = true
+      }
+    }
+
+    // Final mm-coordinate overlap check: grid-based checks can miss actual mm-level overlaps
+    // (e.g. image and text both fit in their grid cells but their mm coordinates still overlap).
+    // This direct mm-level check detects and fixes those cases by moving text blocks.
+    const { plan: mmFixed, fixed: didFixMm } = validateAndFixLayoutMm(candidatePlan)
+    if (didFixMm) {
+      const revalidated = validateLayoutPlan(mmFixed, { imageCount, textBlocks })
+      if (revalidated.issues.length < candidateResult.issues.length) {
+        candidatePlan = mmFixed
+        candidateResult = revalidated
+      }
+      repaired = true
     }
   }
 
   return {
-    candidateId, plan: planToUse, validation: result, repaired,
+    candidateId, plan: candidatePlan, validation: candidateResult, repaired,
   }
 }
 
-// One real LLM attempt per generation -- no retries. A validation-failure retry still costs a
-// full second API call, and if that retry *also* fails (which happens), the user has now paid
-// for two wasted attempts on top of the free fallback that gets used anyway. Cheap local repair
-// (fit/role/overflow_policy defaults, no API call) still applies before giving up. If the single
-// attempt doesn't produce a valid candidate -- for any reason: bad JSON, failed validation, or the
-// cost budget itself refusing the call -- this returns fallbackUsed=true immediately and leaves
-// the deterministic fallback plan to the caller (runGeneration.mjs). Never throws.
-export async function callLayoutLLM({ promptContext, imageCount }, options = {}) {
+// Up to two real LLM attempts per generation. Cheap local repair (fit/role/overflow_policy
+// defaults, then collision geometry shifts -- no API call) applies first; only if that still
+// doesn't produce a valid candidate does this spend a second real API call, feeding the model its
+// own failed plan plus the exact validation issues (buildLayoutPrompt's previousAttemptFeedback)
+// so it can target the specific problem instead of blindly regenerating from scratch. If the retry
+// also fails -- for any reason: bad JSON, failed validation, or the cost budget refusing the call
+// -- this returns fallbackUsed=true and leaves the deterministic fallback plan to the caller
+// (runGeneration.mjs). Never throws.
+export async function callLayoutLLM({ promptContext, imageCount, textBlocks }, options = {}) {
   const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY
   const mockMode = options.mockMode ?? process.env.MOCK_MODE === 'true'
+
+  console.log(`[DEBUG] callLayoutLLM mockMode=${mockMode}, process.env.MOCK_MODE=${process.env.MOCK_MODE}, options.mockMode=${options.mockMode}`)
 
   // Mock mode: return mock candidates without calling LLM
   if (mockMode) {
@@ -101,16 +198,59 @@ export async function callLayoutLLM({ promptContext, imageCount }, options = {})
 
   // Extract candidates from llmOutput
   const rawCandidates = llmOutput.candidates || []
-  const processed = rawCandidates.map((rawPlan, i) => processCandidate(rawPlan, i, imageCount))
-  const validCandidates = processed.filter((c) => c.validation.passed)
-  const rejectedCandidates = processed.filter((c) => !c.validation.passed)
+  let processed = rawCandidates.map((rawPlan, i) => processCandidate(rawPlan, i, imageCount, textBlocks))
+  let validCandidates = processed.filter((c) => c.validation.passed)
+  let rejectedCandidates = processed.filter((c) => !c.validation.passed)
+  let retryCount = 0
+
+  // A second real API call here would silently double the spend for a single generation with no
+  // visibility to the user (confirmed 2026-07-10: this is exactly the invisible-cost complaint that
+  // prompted removing it). It's also far less necessary now: enforceGridOccupancy guarantees any
+  // geometry issue (the vast majority of what used to trigger a retry) is resolved locally with zero
+  // API cost, and bestEffortCandidate below already renders the least-broken candidate instead of
+  // hard-failing when something genuinely unrepairable slips through (e.g. an invalid enum value).
+  // Opt in explicitly per call via { allowRetry: true } if a future caller wants it back.
+  if (validCandidates.length === 0 && processed.length > 0 && options.allowRetry) {
+    retryCount = 1
+    try {
+      // Ask for exactly 1 corrected candidate (not the usual 3) and summarize the failed plan
+      // instead of echoing it back verbatim -- both shrink the retry's prompt/expected-output size,
+      // which lowers the risk of the response getting cut off mid-JSON by the output token limit
+      // (confirmed 2026-07-10: a full previous-plan echo plus a fresh 3-candidate request produced
+      // a truncated, unparseable retry response).
+      const retryContext = {
+        ...promptContext,
+        internalCandidateCount: 1,
+        previousAttemptFeedback: {
+          failedPlanSummary: summarizeFailedPlan(processed[0].plan),
+          validationIssues: processed[0].validation.issues,
+        },
+      }
+      const retryOutput = await generateLayoutCandidates(retryContext, { client, costBudget })
+      const retryProcessed = (retryOutput.candidates || [])
+        .map((rawPlan, i) => processCandidate(rawPlan, i, imageCount, textBlocks))
+      const retryValid = retryProcessed.filter((c) => c.validation.passed)
+
+      if (retryValid.length > 0) {
+        llmOutput = retryOutput
+        processed = retryProcessed
+        validCandidates = retryValid
+        rejectedCandidates = retryProcessed.filter((c) => !c.validation.passed)
+      } else {
+        rejectedCandidates = [...rejectedCandidates, ...retryProcessed]
+      }
+    } catch {
+      // Retry attempt itself failing (bad JSON, budget exhausted) doesn't change the outcome --
+      // fall through to the fallback-used path below with the original rejection reasons.
+    }
+  }
 
   if (validCandidates.length > 0) {
     return {
       candidates: validCandidates,
       rejectedCandidates,
       source: 'llm',
-      retryCount: 0,
+      retryCount,
       fallbackUsed: false,
       costBudget: costBudget.summary(),
       // Phase 5-3: Include content understanding from LLM output
@@ -123,13 +263,25 @@ export async function callLayoutLLM({ promptContext, imageCount }, options = {})
   }
 
   const issues = processed.flatMap((c) => c.validation.issues)
+
+  // No candidate reached a clean pass, but every candidate here IS real LLM reasoning (content
+  // understanding, image analysis, composition decisions) that went through the full local repair
+  // chain -- it's not a rule-based/fixed template. Refusing to output anything just because a
+  // handful of geometry issues survived repair wastes the API spend that already happened for
+  // nothing the user can see. Surface the least-broken candidate as a best-effort result instead of
+  // hard-failing; the caller decides whether to render it (flagged) rather than show zero output.
+  const bestEffort = processed.length > 0
+    ? processed.reduce((best, c) => (c.validation.issues.length < best.validation.issues.length ? c : best))
+    : null
+
   return {
     candidates: [],
     rejectedCandidates: processed,
+    bestEffortCandidate: bestEffort,
     source: 'fallback',
-    retryCount: 0,
+    retryCount,
     fallbackUsed: true,
-    fallbackReason: `후보 검증 실패 (재시도 없음, 비용 절약을 위해 바로 폴백): ${issues.slice(0, 5).join('; ')}`,
+    fallbackReason: `후보 검증 실패 (재시도 ${retryCount}회 시도 후에도 실패): ${issues.slice(0, 5).join('; ')}`,
     costBudget: costBudget.summary(),
     // Phase 5-3: Include content understanding for logging
     content_understanding: llmOutput?.content_understanding || null,

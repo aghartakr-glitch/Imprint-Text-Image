@@ -12,8 +12,8 @@ function fakeClientWithCountTokens(inputTokens) {
   return { messages: { countTokens: async () => ({ input_tokens: inputTokens }) } }
 }
 
-test('MAX_LAYOUT_LLM_SPEND_USD is 0.03 (callLayoutLLM.js makes at most one real API call per generation, no retries)', () => {
-  assert.equal(MAX_LAYOUT_LLM_SPEND_USD, 0.03)
+test('MAX_LAYOUT_LLM_SPEND_USD is 0.15 (1 candidate, 4000-token cap, retry opt-in/off by default)', () => {
+  assert.equal(MAX_LAYOUT_LLM_SPEND_USD, 0.15)
 })
 
 test('a caller-requested maxSpendUsd above the ceiling is clamped down to it, never exceeded', async () => {

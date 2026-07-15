@@ -258,25 +258,3 @@ test('multipart file part with no filename= (application/octet-stream) returns a
   rmSync(uploadsDir, { recursive: true, force: true })
 })
 
-test('POST /api/generate rejects a 7th image over the 6-file limit', async () => {
-  const outputsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-outputs-'))
-  const uploadsDir = mkdtempSync(join(tmpdir(), 'imprint-it-http-uploads-'))
-  const app = createApp({ outputsDir, uploadsDir })
-  const port = await startServer(app)
-
-  const form = new FormData()
-  form.append('text', '가나다라마바사아자차카파타하'.repeat(30))
-  for (let i = 0; i < 7; i += 1) {
-    form.append('images', new Blob([Buffer.from(TINY_PNG_BASE64, 'base64')], { type: 'image/png' }), `photo${i}.png`)
-  }
-
-  const response = await fetch(`http://localhost:${port}/api/generate?mock=1`, { method: 'POST', body: form })
-  const body = await response.json()
-
-  assert.equal(response.status, 400)
-  assert.match(body.error, /최대 6장/)
-
-  app.close()
-  rmSync(outputsDir, { recursive: true, force: true })
-  rmSync(uploadsDir, { recursive: true, force: true })
-})

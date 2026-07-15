@@ -7,6 +7,7 @@ import {
   BODY_FONT_SIZE_PT, BODY_LEADING_PT,
   TITLE_FONT_SIZE_PT, TITLE_LEADING_PT, TITLE_VERTICAL_POSITION_RATIO,
 } from './layoutConstants.js'
+import { stripMarkdownHeadingMarkers } from './text/parseMarkdownBlocks.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const TEMPLATE_DIR = join(__dirname, '..', '..', 'templates')
@@ -74,34 +75,43 @@ function imageBlock(image, pageNumber) {
   const xMm = image.fullBleed ? image.xMm : leftMarginForPage(pageNumber) + image.xMm
   const yMm = image.fullBleed ? image.yMm : MARGIN_TOP_MM + image.yMm
   const path = image.path.replace(/\\/g, '/')
-  return `\\begin{textblock}{${image.wMm}}(${xMm},${yMm})\n`
-    + `  \\includegraphics[width=${image.wMm}mm,height=${image.hMm}mm,keepaspectratio]{${path}}\n`
-    + '\\end{textblock}'
+  return `\\begin{textblock*}{${image.wMm}mm}(${xMm}mm,${yMm}mm)\n`
+    + `  \\noindent\\includegraphics[width=${image.wMm}mm,height=${image.hMm}mm,keepaspectratio]{${path}}\n`
+    + '\\end{textblock*}'
+}
+
+// Map semantic role to LaTeX style command
+function styleCommandForRole(role) {
+  const roleMap = {
+    title: '\\TitleText',
+    section_title: '\\SectionTitleText',
+    section_label: '\\SectionTitleText',
+    case_title: '\\CaseTitleKoText',
+    case_title_ko: '\\CaseTitleKoText',
+    case_title_en: '\\CaseTitleEnText',
+    case_body: '\\CaseBodyText',
+    credit: '\\CreditText',
+    label: '\\SectionTitleText',
+    body: '\\BodyText',
+  }
+  return roleMap[role] || '\\BodyText'
 }
 
 function textBlock(textZone, pageNumber, textSlice, role = 'body') {
   const xMm = leftMarginForPage(pageNumber) + textZone.xMm
   const yMm = MARGIN_TOP_MM + textZone.yMm
+  const hMm = textZone.hMm || 100 // Default fallback height if not specified
 
-  // Role-based LaTeX styling
-  let styleCmd = '\\BodyText'
-  if (role === 'section_title' || role === 'case_section_title') {
-    styleCmd = '\\SectionTitleText'
-  } else if (role === 'case_title_ko') {
-    styleCmd = '\\CaseTitleKoText'
-  } else if (role === 'case_title_en') {
-    styleCmd = '\\CaseTitleEnText'
-  } else if (role === 'case_body') {
-    styleCmd = '\\CaseBodyText'
-  } else if (role === 'credit') {
-    styleCmd = '\\CreditText'
-  } else if (role === 'overview' || role === 'context' || role === 'audience_value') {
-    styleCmd = '\\BodyText'
-  }
+  const styleCmd = styleCommandForRole(role)
 
-  return `\\begin{textblock}{${textZone.wMm}}(${xMm},${yMm})\n`
-    + `  ${styleCmd}{${escapeLatex(textSlice)}}\n`
-    + '\\end{textblock}'
+  // Safety: strip remaining markdown heading markers (should be cleaned in parser, but safety net)
+  const cleanedSlice = stripMarkdownHeadingMarkers(textSlice)
+
+  return `\\begin{textblock*}{${textZone.wMm}mm}(${xMm}mm,${yMm}mm)\n`
+    + `  \\noindent\\begin{minipage}[t][${hMm}mm][t]{${textZone.wMm}mm}\n`
+    + `    ${styleCmd}{${escapeLatex(cleanedSlice)}}\n`
+    + `  \\end{minipage}\n`
+    + '\\end{textblock*}'
 }
 
 // Section-opener title page: large heading type sitting in generous whitespace, not
@@ -110,9 +120,12 @@ function textBlock(textZone, pageNumber, textSlice, role = 'body') {
 function titleBlock(textZone, pageNumber, title) {
   const xMm = leftMarginForPage(pageNumber) + textZone.xMm
   const yMm = MARGIN_TOP_MM + textZone.yMm + textZone.hMm * TITLE_VERTICAL_POSITION_RATIO
-  return `\\begin{textblock}{${textZone.wMm}}(${xMm},${yMm})\n`
-    + `  \\TitleText{${escapeLatex(title)}}\n`
-    + '\\end{textblock}'
+  const hMm = textZone.hMm || 100
+  return `\\begin{textblock*}{${textZone.wMm}mm}(${xMm}mm,${yMm}mm)\n`
+    + `  \\noindent\\begin{minipage}[t][${hMm}mm][t]{${textZone.wMm}mm}\n`
+    + `    \\TitleText{${escapeLatex(title)}}\n`
+    + `  \\end{minipage}\n`
+    + '\\end{textblock*}'
 }
 
 export function buildPagesLatex(resolvedPages) {

@@ -9,8 +9,8 @@ export function orientationFromRatio(ratio) {
 }
 
 export function analyzeInput({ imagePaths, text }) {
-  if (!Array.isArray(imagePaths) || imagePaths.length < 1 || imagePaths.length > 6) {
-    throw new Error(`이미지는 1~6장이어야 합니다 (받은 개수: ${imagePaths?.length ?? 0})`)
+  if (!Array.isArray(imagePaths) || imagePaths.length < 1) {
+    throw new Error(`이미지는 최소 1장 이상이어야 합니다 (받은 개수: ${imagePaths?.length ?? 0})`)
   }
 
   const images = imagePaths.map((path) => {

@@ -1,0 +1,26 @@
+[
+  {
+    "type": "layout-plan-page",
+    "images": [],
+    "textZone": {
+      "xMm": 0,
+      "yMm": 0,
+      "wMm": 116,
+      "hMm": 176
+    },
+    "textSlice": "가나다",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 0,
+          "wMm": 116,
+          "hMm": 176
+        },
+        "slice": "가나다",
+        "role": "body",
+        "id": "body_overflow"
+      }
+    ]
+  }
+]

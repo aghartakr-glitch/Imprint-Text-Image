@@ -182,6 +182,58 @@ test('accepts a plan with grid_spec, reserved_regions, text_flow, and layout_var
   assert.equal(result.passed, true, `issues: ${JSON.stringify(result.issues)}`)
 })
 
+// Regression: a symmetrical two-column magazine spread (every text block at the same non-1
+// col_span) was being hard-rejected as "insufficient span variation", identical to the genuinely
+// broken case of every text block forced to col_span=1. Only the latter is an actual bug.
+test('does not reject a plan where every text block uses the same non-1 col_span', () => {
+  const plan = validPlan({
+    grid: { columns: 4, rows: 12 },
+    grid_spec: {
+      columns: 4, rows: 12, gutter_mm: 4, page_size: 'A5', grid_mode: 'flexible',
+    },
+  })
+  plan.pages[0].elements[0] = {
+    id: 'image_1', type: 'image', role: 'equal', page: 1, col_start: 1, col_span: 1, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center',
+  }
+  plan.pages[0].elements[1] = {
+    id: 'image_2', type: 'image', role: 'equal', page: 1, col_start: 2, col_span: 3, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center',
+  }
+  plan.pages[0].elements[2] = {
+    id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 2, row_start: 7, row_span: 4, text_source: 'paragraph_1',
+  }
+  plan.pages[0].elements.push({
+    id: 'body_2', type: 'text', role: 'body', page: 1, col_start: 3, col_span: 2, row_start: 7, row_span: 4, text_source: 'paragraph_2',
+  })
+
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.ok(!result.issues.some((i) => i.includes('span 다양화') || i.includes('강제 배치')), `unexpected span issues: ${JSON.stringify(result.issues)}`)
+})
+
+test('still rejects every text block forced to col_span=1 on a 3+ column grid', () => {
+  const plan = validPlan({
+    grid: { columns: 4, rows: 12 },
+    grid_spec: {
+      columns: 4, rows: 12, gutter_mm: 4, page_size: 'A5', grid_mode: 'flexible',
+    },
+  })
+  plan.pages[0].elements[0] = {
+    id: 'image_1', type: 'image', role: 'equal', page: 1, col_start: 1, col_span: 1, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center',
+  }
+  plan.pages[0].elements[1] = {
+    id: 'image_2', type: 'image', role: 'equal', page: 1, col_start: 2, col_span: 3, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center',
+  }
+  plan.pages[0].elements[2] = {
+    id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 1, row_start: 7, row_span: 4, text_source: 'paragraph_1',
+  }
+  plan.pages[0].elements.push({
+    id: 'body_2', type: 'text', role: 'body', page: 1, col_start: 2, col_span: 1, row_start: 7, row_span: 4, text_source: 'paragraph_2',
+  })
+
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('강제 배치')))
+})
+
 test('rejects invalid grid_spec.columns (must be positive integer)', () => {
   const plan = validPlan({ grid_spec: { columns: 0, rows: 12 } })
   const result = validateLayoutPlan(plan, { imageCount: 2 })
@@ -237,4 +289,17 @@ test('rejects text_flow.overflow_policy with wrong body_overflow value', () => {
   const result = validateLayoutPlan(plan, { imageCount: 2 })
   assert.equal(result.passed, false)
   assert.ok(result.issues.some((i) => i.includes('overflow_policy')))
+})
+
+// Regression: same-span images used to be a hard rejection ("이미지 span 다양화 부족"), discarding
+// an otherwise fully valid candidate over a pure design-taste observation (same span is a
+// legitimate choice for an equal comparison/before-after pair/case series). Confirmed 2026-07-10:
+// a real generation failed entirely on exactly this message with zero geometry/schema problems.
+// It must now be a non-blocking warning.
+test('same-span images produce a warning, not a rejection', () => {
+  const plan = validPlan({ grid_spec: { columns: 6, rows: 12, margin_preset: 'recommended', gutter_mm: 4 } })
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, true)
+  assert.deepEqual(result.issues, [])
+  assert.ok(result.warnings.some((w) => w.includes('span 다양화')), `expected a span-variation warning, got: ${JSON.stringify(result.warnings)}`)
 })

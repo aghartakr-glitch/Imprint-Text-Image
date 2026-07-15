@@ -10,6 +10,10 @@
 % 한국어는 어절 단위 공백이 의미를 가지므로 xeCJK의 공백 무시 기본값을 꺼야 한다.
 \xeCJKsetup{CJKspace = true}
 
+% 전역 문단 들여쓰기 및 간격 제거 (textblock 정렬 보장)
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+
 \geometry{
   paperwidth={{PAGE_WIDTH}}mm,
   paperheight={{PAGE_HEIGHT}}mm,

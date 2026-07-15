@@ -32,7 +32,6 @@ export default function App() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [pageSize, setPageSize] = useState('A5')
-  const [marginPreset, setMarginPreset] = useState('recommended')
   const [columns, setColumns] = useState('4')
   const [gridMode, setGridMode] = useState('flexible')
 
@@ -47,7 +46,7 @@ export default function App() {
   }
 
   function handleImageChange(e) {
-    setImages(Array.from(e.target.files).slice(0, 6))
+    setImages(Array.from(e.target.files))
   }
 
   async function handleGenerate() {
@@ -69,7 +68,7 @@ export default function App() {
     form.append('text', text)
     if (apiKey) form.append('apiKey', apiKey)
     form.append('userLayoutSettings', JSON.stringify({
-      page_size: pageSize, margin_preset: marginPreset, columns: Number(columns), grid_mode: gridMode,
+      page_size: pageSize, columns: Number(columns), grid_mode: gridMode,
     }))
 
     try {
@@ -109,10 +108,10 @@ export default function App() {
 
       <div style={{ maxWidth: 720, margin: '32px auto', padding: '0 24px' }}>
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: 20 }}>
-          <p style={{ fontSize: 12, color: T.muted, marginTop: 0 }}>이미지 1~6장과 본문 텍스트를 넣으면, 입력 조건을 분석해 가장 적합한 편집디자인 레이아웃 1개를 만듭니다.</p>
+          <p style={{ fontSize: 12, color: T.muted, marginTop: 0 }}>이미지와 본문 텍스트를 넣으면, 입력 조건을 분석해 가장 적합한 편집디자인 레이아웃 1개를 만듭니다.</p>
 
           <div style={fieldWrapper}>
-            <div style={groupTitle}>이미지 (최대 6장)</div>
+            <div style={groupTitle}>이미지</div>
             <input type="file" accept="image/*" multiple onChange={handleImageChange} />
             <p style={{ fontSize: 12, color: T.muted }}>{images.length}장 선택됨</p>
           </div>
@@ -131,21 +130,18 @@ export default function App() {
 
           <div style={fieldWrapper}>
             <div style={groupTitle}>판형 · 그리드 설정</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               <select value={pageSize} onChange={(e) => setPageSize(e.target.value)} style={selectStyle}>
                 <option value="A5">A5</option>
                 <option value="A4">A4</option>
                 <option value="B5">B5</option>
               </select>
-              <select value={marginPreset} onChange={(e) => setMarginPreset(e.target.value)} style={selectStyle}>
-                <option value="recommended">여백: 권장</option>
-                <option value="narrow">여백: 좁게</option>
-                <option value="wide">여백: 넓게</option>
-              </select>
               <select value={columns} onChange={(e) => setColumns(e.target.value)} style={selectStyle}>
+                <option value="1">1단</option>
                 <option value="2">2단</option>
                 <option value="3">3단</option>
                 <option value="4">4단</option>
+                <option value="5">5단</option>
                 <option value="6">6단</option>
               </select>
               <select value={gridMode} onChange={(e) => setGridMode(e.target.value)} style={selectStyle}>
@@ -153,7 +149,7 @@ export default function App() {
                 <option value="flexible">유연한 그리드</option>
               </select>
             </div>
-            <p style={{ fontSize: 12, color: T.muted }}>행 수·거터·텍스트 흐름 방식·이미지 배치는 이 설정을 바탕으로 자동 결정됩니다.</p>
+            <p style={{ fontSize: 12, color: T.muted }}>판형, 단 수를 선택하면 이미지·텍스트가 그 그리드 안에서 각자 정해진 단수(1~n단)로 배치됩니다.</p>
           </div>
 
           <button type="button" onClick={handleGenerate} disabled={status === 'generating'} style={primaryBtn}>
@@ -173,6 +169,11 @@ export default function App() {
                 스타일: {result.style} · outputs/{result.runId}/
               </p>
               {result.reason && <p style={{ fontSize: 12, color: T.muted }}>선택 이유: {result.reason}</p>}
+              {result.bestEffortUsed && (
+                <p style={{ fontSize: 12, color: '#B8860B', background: '#FFF8E1', padding: '8px 10px', borderRadius: 4 }}>
+                  ⚠️ {result.bestEffortWarning}
+                </p>
+              )}
               {result.compileOk ? (
                 <p style={{ fontSize: 13 }}>
                   <a href={result.pagesPdf} target="_blank" rel="noreferrer">낱장 PDF 열기</a>

@@ -48,6 +48,8 @@ Fixed constraints:
   center | top | bottom | left | right, default center). The implementation converts grid units to mm.
 - MUST include grid_spec in every candidate: { page_size, columns, rows, margin_preset, gutter_mm, grid_mode }
   reflecting user's preferences if they were provided, otherwise sensible defaults.
+  margin_preset MUST be exactly one of: "recommended" | "narrow" | "wide" | "custom" -- never "default"
+  or any other value. If no specific margin preference applies, use "recommended".
 - MUST include reserved_regions array: every image element becomes a reserved_region so body text
   flows around it instead of overlapping. Format: [{ page, col_start, col_span, row_start, row_span }, ...]
 - MUST include text_flow: { mode: 'block_flow' | 'column_flow', flow_regions, overflow_policy }
@@ -195,8 +197,20 @@ export function buildUserPrompt({
   imageTextRelation,
   suggestedLayoutFamily,
   internalCandidateCount = 3,
+  previousAttemptFeedback,
 }) {
   const sections = [
+    previousAttemptFeedback ? `🔴 YOUR PREVIOUS ATTEMPT FAILED VALIDATION. Fix these EXACT issues in your new candidates -- do not repeat them:
+${previousAttemptFeedback.validationIssues.map((issue) => `- ${issue}`).join('\n')}
+
+Previous (failed) layout_plan summary (element positions only -- your reasoning/style/composition_strategy were fine, only fix the geometry):
+${JSON.stringify(previousAttemptFeedback.failedPlanSummary)}
+
+For every "텍스트 오버플로우" (text overflow) issue above: the box (row_span, or col_span+row_span)
+for that exact element_id is too small for its text_source's char_count. Increase row_span (and/or
+col_span) for that element until its box capacity comfortably exceeds the character count reported.
+For every "겹칩니다" / "overlap" issue above: move the two named elements so their grid boxes no
+longer intersect and keep the required mm gap (text-text 3mm, text-image 4mm, image-image 3mm).` : undefined,
     `Input metadata:\n${JSON.stringify(inputMetadata)}`,
     `Content structure:\n${JSON.stringify(contentStructure ?? {})}`,
     documentStructure ? `Document structure (sections and layout hints):\n${JSON.stringify(documentStructure)}` : undefined,
@@ -236,36 +250,47 @@ export function buildUserPrompt({
     sections.push(`User preference context (learned from past edits -- soft guidance, never overrides fixed constraints or validation):\n${JSON.stringify(userPreferenceContext)}`)
   }
 
-  sections.push(`Task:
-Create exactly ${internalCandidateCount} distinct candidate layout_plans for the given input.
-Use the pattern library and retrieved references as design grammar guidance, not fixed templates.
-
+  const candidateProfiles = [
+    `**Candidate 1 (STABLE EDITORIAL)**: composition_strategy = "image_left_text_right" (or "text_left_image_right")
+   → layout_family: balanced, image_hierarchy: hero_support or equal_pair
+   → Use 2-3 column image spans + 2-3 column text spans
+   → Example: image 2-col + text 2-col, then image 3-col, then text 3-col (stagger pattern)
+   → Text directly next to/below relevant images`,
+    `**Candidate 2 (GROUPED CASES)**: composition_strategy = "image_above_text" (or "text_above_image")
+   → layout_family: balanced, image_hierarchy: grid_gallery or hero_support
+   → Group image-text pairs as case studies (Dove image + Dove text together, SweetyBetty image + SweetyBetty text together)
+   → Use role: section_label for case-title text blocks as section dividers (text_source field required)
+   → CRITICAL: Keep a case's title and body blocks together, not separated by pages`,
+    `**Candidate 3 (DIVERSE ASYMMETRICAL)**: composition_strategy = "images_spread_across_pages" (or "grid_gallery")
+   → layout_family: image-first, image_hierarchy: page_gallery or grid_gallery
+   → Vary image sizes: mix 1-col + 2-col + 3-col images (NOT all same size)
+   → Intentional whitespace: some areas fully text, some fully image, some mixed
+   → Spread images 1-2 per page (not all crammed together)`,
+  ]
+  // Only include as many per-candidate style profiles as candidates were actually asked for --
+  // sending all 3 profiles when internalCandidateCount=1 is dead prompt weight (the model has
+  // nothing to apply candidates 2/3's guidance to) that costs input tokens for no benefit.
+  const diversityGuidance = internalCandidateCount > 1
+    ? `
 CRITICAL CANDIDATE DIVERSITY (each candidate MUST use a DIFFERENT composition_strategy,
 chosen only from: full_image | image_above_text | text_above_image | image_left_text_right |
 text_left_image_right | equal_images | hero_support | grid_gallery | gallery_left_text_right |
 images_spread_across_pages | column_flow_grid):
 🔴 FORBIDDEN: gallery_page_text_page -- this value does not exist, never output it
-🔴 FORBIDDEN: all 3 candidates using column_flow_grid (this is the fallback, not the goal)
+🔴 FORBIDDEN: all candidates using column_flow_grid (this is the fallback, not the goal)
    → Candidates must show real strategy variation, not just parameter tweaks
 
-**Candidate 1 (STABLE EDITORIAL)**: composition_strategy = "image_left_text_right" (or "text_left_image_right")
-   → layout_family: balanced, image_hierarchy: hero_support or equal_pair
-   → Use 2-3 column image spans + 2-3 column text spans
-   → Example: image 2-col + text 2-col, then image 3-col, then text 3-col (stagger pattern)
-   → Text directly next to/below relevant images
+${candidateProfiles.slice(0, internalCandidateCount).join('\n\n')}
+`
+    : `
+Use the STABLE EDITORIAL profile as your default approach:
+${candidateProfiles[0]}
+`
 
-**Candidate 2 (GROUPED CASES)**: composition_strategy = "image_above_text" (or "text_above_image")
-   → layout_family: balanced, image_hierarchy: grid_gallery or hero_support
-   → Group image-text pairs as case studies (Dove image + Dove text together, SweetyBetty image + SweetyBetty text together)
-   → Use role: section_label for case-title text blocks as section dividers (text_source field required)
-   → CRITICAL: Keep a case's title and body blocks together, not separated by pages
-
-**Candidate 3 (DIVERSE ASYMMETRICAL)**: composition_strategy = "images_spread_across_pages" (or "grid_gallery")
-   → layout_family: image-first, image_hierarchy: page_gallery or grid_gallery
-   → Vary image sizes: mix 1-col + 2-col + 3-col images (NOT all same size)
-   → Intentional whitespace: some areas fully text, some fully image, some mixed
-   → Spread images 1-2 per page (not all crammed together)
-
+  sections.push(`Task:
+Create exactly ${internalCandidateCount} distinct candidate layout_plans for the given input.
+Use the pattern library and retrieved references as design grammar guidance, not fixed templates.
+${diversityGuidance}
 INFERRED RELATIONSHIPS TO PRESERVE:
 - For every high-confidence image-text pair (confidence >= 0.7):
   → Place text and image on SAME PAGE or ADJACENT PAGES only

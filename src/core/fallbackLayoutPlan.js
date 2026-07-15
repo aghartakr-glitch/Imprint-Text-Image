@@ -733,5 +733,10 @@ export function buildFallbackLayoutPlan({
     return variants[pickVariantIndex(variantSeed, variants.length)](imageCount)
   }
 
+  // 7장 이상: 한 이미지 = 한 페이지 (이미지-텍스트 겹침 방지)
+  if (imageCount >= 7) {
+    return sparsePerPageVariant(imageCount)
+  }
+
   throw new Error(`지원하지 않는 이미지 개수: ${imageCount}`)
 }

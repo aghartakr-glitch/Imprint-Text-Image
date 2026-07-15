@@ -37,7 +37,6 @@ export function analyzeSpanVariation(plan) {
 
   const allTextForcedToSingleColumns = Number.isInteger(columns) && columns >= 3
     && textColSpans.length > 0 && textColSpans.every((s) => s === 1)
-  const noSpanVariation = textColSpans.length > 1 && distinctTextSpans.size <= 1
   const imagesNeverSpanMultiple = imageColSpans.length > 0 && imageColSpans.every((s) => s <= 1)
   const noImageSpanVariation = imageColSpans.length > 1 && distinctImageSpans.size <= 1
 
@@ -51,7 +50,11 @@ export function analyzeSpanVariation(plan) {
   // Image span patterns for generation-log
   const imageSpanPatterns = Array.from(distinctImageSpans).sort((a, b) => a - b).map((s) => `${s}-column`)
 
-  const forcedRigidColumns = allTextForcedToSingleColumns || (noSpanVariation && Number.isInteger(columns) && columns >= 3)
+  // Only the genuinely-reported failure mode (every text block squeezed into a 1-column sliver,
+  // splitting sentences) is a hard reject. A uniform non-1 span across all text blocks (e.g. every
+  // paragraph at 2-column) is a legitimate, common editorial pattern -- a symmetrical two-column
+  // magazine spread, not a bug -- so it must not be conflated with the rigid-wall case here.
+  const forcedRigidColumns = allTextForcedToSingleColumns
 
   return {
     grid_interpretation: 'alignment_structure_not_forced_columns',

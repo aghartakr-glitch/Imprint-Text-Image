@@ -1,13 +1,31 @@
 // server/index.mjs
 import { createServer } from 'node:http'
 import {
-  createReadStream, createWriteStream, existsSync, mkdirSync, statSync,
+  createReadStream, createWriteStream, existsSync, mkdirSync, statSync, readFileSync,
 } from 'node:fs'
 import { join, extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import Busboy from 'busboy'
 import { runGeneration } from './runGeneration.mjs'
 import { ROOT, OUTPUTS_DIR } from './env.mjs'
+
+// Load .env.local if it exists (Node.js --env-file flag may not work reliably)
+const envLocalPath = join(ROOT, '.env.local')
+if (existsSync(envLocalPath)) {
+  const envContent = readFileSync(envLocalPath, 'utf-8')
+  const lines = envContent.split('\n')
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed && !trimmed.startsWith('#')) {
+      const [key, ...valueParts] = trimmed.split('=')
+      const value = valueParts.join('=')
+      if (key && value) {
+        process.env[key.trim()] = value.trim()
+      }
+    }
+  }
+  console.log('[ENV] .env.local loaded')
+}
 
 const DEFAULT_UPLOADS_DIR = join(ROOT, 'uploads')
 const MIME_TYPES = {
@@ -21,17 +39,14 @@ function sendJson(res, status, body) {
 
 function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
   mkdirSync(uploadsDir, { recursive: true })
-  // limits.files is set to 7 (one above the intended cap of 6), not 6: busboy silently stops
-  // emitting 'file' events once the limit is reached (no error, no event), which would make our
-  // own `fileCount > 6` rejection below dead code. Raising the busboy limit by 1 lets a 7th file
-  // actually reach the 'file' handler so the manual check can see it and reject it.
+  // No client-side image count limit; rely on server-side constraints (fileSize, timeout).
   let bb
   try {
     // Busboy's constructor throws *synchronously* (before any listener can be attached) for
     // things like a Content-Type of "multipart/form-data" with no boundary= parameter, or a
     // missing/malformed Content-Type entirely. Without this try/catch, that throw is an uncaught
     // exception that crashes the whole Node process on a single bad request.
-    bb = Busboy({ headers: req.headers, limits: { files: 7, fileSize: 30 * 1024 * 1024 } })
+    bb = Busboy({ headers: req.headers, limits: { files: 100, fileSize: 30 * 1024 * 1024 } })
   } catch (err) {
     return sendJson(res, 400, { ok: false, error: `잘못된 업로드 요청입니다: ${String(err.message || err)}` })
   }
@@ -71,11 +86,6 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
     // case above already degrades gracefully instead of crashing.
     try {
       fileCount += 1
-      if (fileCount > 6) {
-        rejected = '이미지는 최대 6장까지 업로드할 수 있습니다'
-        stream.resume()
-        return
-      }
       // A multipart file part with an empty/missing filename (filename="") makes info.filename
       // falsy; calling .replace on it directly throws a synchronous TypeError.
       const originalName = info.filename || 'unnamed'
@@ -138,7 +148,7 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
     try {
       console.log(`[DEBUG] apiKey received: ${apiKey ? `${apiKey.substring(0, 10)}...` : 'NONE'}, mockMode: ${mockMode}`)
       const result = await runGeneration({
-        imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode, ...(apiKey && { apiKey }) }, userControls, userLayoutSettings,
+        imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode, allowRetry: true, ...(apiKey && { apiKey }) }, userControls, userLayoutSettings,
       })
       // Phase 5-3: Handle LLM failure (fallback_used=true) → error response, not crash
       if (!result.ok) {
@@ -157,6 +167,8 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
         spreadPdf: `/outputs/${result.runId}/${folderName}/spread-preview.pdf`,
         compileOk: result.compile.ok,
         spreadOk: result.spread.ok,
+        bestEffortUsed: result.bestEffortUsed,
+        bestEffortWarning: result.bestEffortWarning,
       })
     } catch (err) {
       respond(500, { ok: false, error: String(err.message || err) })

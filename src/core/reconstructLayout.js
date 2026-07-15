@@ -1,22 +1,41 @@
 import { paginateGridPlan } from './paginateGridPlan.js'
 import { resolveGridPage } from './resolveGridPage.js'
 import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM } from './layoutConstants.js'
+import { stripMarkdownHeadingMarkers } from './text/parseMarkdownDocument.js'
 
 // Spec section 9.2: converts an already-validated grid layout_plan into the actual page
 // structure -- mm boxes, real image files assigned to image slots, body text distributed across
 // text slots (with continuation pages for overflow), and an optional title-page prepended. This
 // is *not* the final refined/LaTeX-ready object yet (see refineLayout.js for that step).
+// The deterministic column-flow fallback (buildGridFallbackPlan) pre-slices body text directly
+// onto each element as literal `el.text`. Real LLM candidates never do this -- they reference
+// paragraphs indirectly via `el.text_source` (e.g. "paragraph_2") and expect paginateGridPlan to
+// resolve that against the actual textBlocks. buildLayoutPrompt.js requires every LLM candidate to
+// also include grid_spec/reserved_regions/text_flow for documentation purposes, so grid_spec
+// presence alone can no longer distinguish the two shapes (confirmed 2026-07-09: a real LLM
+// candidate carrying grid_spec+text_source elements was misrouted into the literal-text branch,
+// which read `el.text` -- undefined for every element -- producing an all-image, zero-text PDF).
+function planUsesTextSource(layoutPlan) {
+  return (layoutPlan.pages || []).some((p) => (p.elements || []).some((el) => el.type === 'text' && el.text_source))
+}
+
 export function reconstructLayout({
   layoutPlan, imagePaths, text, title, textBlocks,
 }) {
-  // A grid_spec on the plan marks it as a column-flow grid plan (see fallbackLayoutPlan.js's
-  // buildGridFallbackPlan): its body-role elements already carry their final pre-sliced `text`
-  // (computed by ColumnFlowEngine against the user's chosen column count and image reserved
-  // regions), so re-running paginateGridPlan's own word-boundary slicing against the *original*
-  // full text here would re-slice text that was already consumed, duplicating it. Every other
-  // plan shape (LLM-generated, or the legacy fixed 6x12 fallback) has no grid_spec and keeps
-  // going through paginateGridPlan exactly as before.
-  const paginated = layoutPlan.grid_spec
+  // DEBUG: Log incoming textBlocks
+  if (Array.isArray(textBlocks) && textBlocks.length > 0) {
+    const hasMarkers = textBlocks.some((b) => b.text && b.text.match(/^\s*#+\s/))
+    if (hasMarkers) {
+      console.warn('[reconstructLayout DEBUG] ⚠️ Incoming textBlocks have markdown markers:')
+      textBlocks
+        .filter((b) => b.text && b.text.match(/^\s*#+\s/))
+        .slice(0, 3)
+        .forEach((b) => console.warn(`  - id=${b.id}, text="${b.text.substring(0, 60)}"...`))
+    }
+  }
+
+  const isColumnFlowFallbackPlan = Boolean(layoutPlan.grid_spec) && !planUsesTextSource(layoutPlan)
+  const paginated = isColumnFlowFallbackPlan
     ? layoutPlan.pages.map((p) => ({
       elements: p.elements,
       textSlicesByElementId: Object.fromEntries(
@@ -50,7 +69,7 @@ export function reconstructLayout({
         xMm: 0, yMm: 0, wMm: TEXT_BOX_WIDTH_MM, hMm: TEXT_BOX_HEIGHT_MM,
       },
       textSlice: null,
-      title: title.trim(),
+      title: stripMarkdownHeadingMarkers(title.trim()),
     }
     return [fallbackTitlePage, ...gridResolvedPages]
   }

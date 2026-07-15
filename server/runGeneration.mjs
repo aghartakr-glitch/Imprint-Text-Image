@@ -20,6 +20,10 @@ import { inferImageTextRelations } from '../src/core/content/inferImageTextRelat
 import { matchImageToTextBlocks } from '../src/core/content/matchImageToTextBlocks.js'
 import { mapImageTextRelations } from '../src/core/content/mapImageTextRelations.js'
 import { validateCollisions } from '../src/core/validation/validateCollisions.js'
+import { validateResolvedLayout, assertResolvedPagesInsideBounds } from '../src/core/validation/validateResolvedLayout.js'
+import { assertNoMarkdownInResolvedPages } from '../src/core/validation/validateTextIntegrity.js'
+import { repairResolvedLayout } from '../src/core/layout/repairResolvedLayout.js'
+import { reorganizeTextOnlyPages } from '../src/core/reorganizeTextOnlyPages.js'
 import { selectLayoutFamily } from '../src/core/layout/selectLayoutFamily.js'
 import { selectTextFlowMode } from '../src/core/layout/selectTextFlowMode.js'
 import { tryBuildSpecializedLayout } from '../src/core/layout/builders/index.js'
@@ -41,6 +45,9 @@ import {
 import {
   FONTS_DIR, OUTPUTS_DIR, LOGS_DIR, ROOT,
 } from './env.mjs'
+import {
+  writeDebugStage, summarizeResolvedPages, coordinateTable, overlapReport,
+} from './debugDump.mjs'
 import {
   BODY_FONT_SIZE_PT, BODY_LEADING_PT, GRID_COLUMNS, GRID_ROWS,
 } from '../src/core/layoutConstants.js'
@@ -84,6 +91,18 @@ export async function runGeneration({
   const documentStructure = parseDocumentStructure({ title, text })
   const textBlocksAdvanced = documentStructure.text_blocks || []
   const textLayoutMode = documentStructure.text_layout_mode || 'continuous_flow'
+
+  // DEBUG: Check if text_blocks have markdown markers
+  if (textBlocksAdvanced.length > 0) {
+    const hasMarkers = textBlocksAdvanced.some((b) => b.text && b.text.match(/^\s*#+\s/))
+    if (hasMarkers) {
+      console.warn('[runGeneration DEBUG] ⚠️ parseDocumentStructure returned text_blocks with markdown markers:')
+      textBlocksAdvanced
+        .filter((b) => b.text && b.text.match(/^\s*#+\s/))
+        .slice(0, 3)
+        .forEach((b) => console.warn(`  - role=${b.role}, text="${b.text.substring(0, 60)}"...`))
+    }
+  }
 
   // Fallback to old structure analyzer for compatibility
   const contentStructure = parseContentStructure({ title, text })
@@ -189,20 +208,23 @@ export async function runGeneration({
     userLayoutSettings,
     userGridHint: gridSettings.resolved_grid_settings,
     userPreferenceContext,
-    // Generate 3 candidates for layout diversity. Each should use a different composition
-    // strategy (e.g., title+body+image same page vs. image-led vs. column-flow). Cost trade-off
-    // is acceptable for quality; if budget is tight, set FAST_MODE=true to reduce to 1 candidate.
-    internalCandidateCount: process.env.FAST_MODE === 'true' ? 1 : 3,
+    // Generate 1 candidate by default (~1/3 the API cost of the old 3-candidate default). The
+    // grid-occupancy backstop (enforceGridOccupancy.js) now guarantees any candidate's geometry
+    // converges to zero overlap deterministically, so a single candidate no longer needs to be
+    // "the best of 3" to be usable -- most of what 3-candidate diversity bought was insurance
+    // against a badly-overlapping candidate, which is no longer a real risk. Set
+    // LAYOUT_CANDIDATE_COUNT=3 (or any number) to restore multi-candidate diversity if desired.
+    internalCandidateCount: Number(process.env.LAYOUT_CANDIDATE_COUNT) || 1,
   }
 
   // 7-10. LLM Layout Candidate Generator + Layout Validator (validate/repair/retry inside)
-  const llmResult = await callLayoutLLM({ promptContext, imageCount: analysis.imageCount }, llmOptions)
+  const llmResult = await callLayoutLLM({ promptContext, imageCount: analysis.imageCount, textBlocks: textBlocksAdvanced }, llmOptions)
 
-  // Phase 5-3: If LLM fails (fallback_used=true), do NOT generate PDF with fallback template
-  // LLM understanding (content_understanding, image_text_relations, reference_principles) is REQUIRED
-  // for editorial layout generation. Without LLM reasoning, output is not editorial layout, just template.
+  // CRITICAL: best-effort rendering is banned (user directive). If no candidate reached a clean
+  // validation pass, fail hard -- do NOT fabricate output from a plan that failed raw validation.
+  const bestEffortUsed = false
   if (llmResult.fallbackUsed) {
-    const errorMsg = `LLM-based layout reasoning failed: ${llmResult.fallbackReason || 'unknown error'}. Layout generation requires LLM content understanding and cannot fall back to fixed templates.`
+    const errorMsg = `LLM-based layout reasoning failed: ${llmResult.fallbackReason || 'no candidate passed validation'}. Best-effort rendering is disabled; layout generation requires a fully validated candidate.`
     console.error(`[GENERATION FAILED] ${errorMsg}`)
     return {
       ok: false,
@@ -210,7 +232,7 @@ export async function runGeneration({
       fallback_used: true,
       fallback_reason: llmResult.fallbackReason,
       llm_reasoning_available: false,
-      suggested_action: 'Check LLM API, cost budget, or schema parsing. Rule-based fallback is not available for image+text editorial layouts.',
+      suggested_action: 'Check LLM API, cost budget, or schema parsing. Best-effort/rule-based fallback is disabled.',
     }
   }
 
@@ -230,7 +252,7 @@ export async function runGeneration({
 
   // Add specialized layout as a candidate if it was successfully built
   if (specializedLayoutPlan) {
-    const specializedValidation = validateLayoutPlan(specializedLayoutPlan, { imageCount: analysis.imageCount })
+    const specializedValidation = validateLayoutPlan(specializedLayoutPlan, { imageCount: analysis.imageCount, textBlocks: textBlocksAdvanced })
     if (specializedValidation.passed) {
       candidatePool.push({
         candidateId: specializedLayoutPlan.candidate_id,
@@ -253,7 +275,8 @@ export async function runGeneration({
     }
   }
 
-  // Phase 5: Filter to only validation-passed candidates before scoring
+  // Phase 5: Filter to only validation-passed candidates before scoring. Best-effort (rendering a
+  // candidate that failed raw validation) is banned -- every candidate must pass validation.
   const validatedCandidates = candidatePool.filter((c) => c.validation.passed)
   if (validatedCandidates.length === 0) {
     const validationFailures = candidatePool.map((c) => ({
@@ -270,14 +293,155 @@ export async function runGeneration({
   }
 
   // 11-13. Layout Reconstructor -> Layout Refiner -> Layout Estimator, for every validated candidate
-  const scoredCandidates = validatedCandidates.map((c) => {
+  // CRITICAL: Filter out candidates that fail resolved layout validation (hard-block)
+  const scoredCandidates = validatedCandidates.map((c, candidateIdx) => {
+    const debugThisCandidate = candidateIdx === 0 // instrumentation only follows the first candidate
+
+    // Ground truth for the "did images vanish mid-pipeline" check below: how many image elements
+    // the (normalized) candidate plan itself declared, before any reconstruction/refinement.
+    const rawImageElementCount = (c.plan.pages || []).reduce(
+      (sum, p) => sum + (p.elements || []).filter((el) => el.type === 'image').length, 0,
+    )
+
     const reconstructed = reconstructLayout({
       layoutPlan: c.plan, imagePaths, text, title, textBlocks: textBlocksAdvanced,
     })
-    const { resolvedPages, refinements } = refineLayout(reconstructed, { imagePaths, imageAspectRatios: imageRatios })
+    if (debugThisCandidate) {
+      writeDebugStage('03-reconstructed-pages.json', reconstructed)
+      writeDebugStage('03-reconstructed-summary.json', summarizeResolvedPages(reconstructed, 'reconstructed'))
+    }
+    if (rawImageElementCount > 0 && summarizeResolvedPages(reconstructed, 'reconstructed').image_count === 0) {
+      throw new Error(`IMAGE_LOST_DURING_RECONSTRUCTION: candidate plan had ${rawImageElementCount} image element(s), 0 remain after reconstructLayout`)
+    }
+
+    const { resolvedPages: refinedPages, refinements } = refineLayout(reconstructed, { imagePaths, imageAspectRatios: imageRatios })
+    if (debugThisCandidate) {
+      writeDebugStage('04-refined-pages.json', refinedPages)
+      writeDebugStage('04-refined-summary.json', summarizeResolvedPages(refinedPages, 'refined'))
+    }
+    if (rawImageElementCount > 0 && summarizeResolvedPages(refinedPages, 'refined').image_count === 0) {
+      throw new Error(`IMAGE_LOST_DURING_REFINEMENT: candidate plan had ${rawImageElementCount} image element(s), 0 remain after refineLayout`)
+    }
+
+    // Image widths already reflect each image's grid col_span (set by gridToMm during
+    // reconstructLayout/refineLayout) -- no separate distribution/rescaling pass needed, and
+    // rescaling here would silently discard the LLM's per-image column choice (confirmed
+    // 2026-07-10: a large_100 rescale to full page width overrode a col_span=3 hero image,
+    // pushing it into an adjacent column's text and failing collision validation).
+    // Reorganize text-only pages into multi-column layouts
+    let finalResolvedPages = reorganizeTextOnlyPages(refinedPages, userLayoutSettings)
+    // Snapshot the pre-repair state (repair reassigns finalResolvedPages below, so this is the only
+    // chance to capture what validation actually saw on the first pass).
+    const preRepairPages = finalResolvedPages
+
+    // Validation gate: check resolved mm-coordinates after distribution scaling
+    console.log('[STEP] first resolved validation start')
+    let resolvedValidation = validateResolvedLayout(finalResolvedPages)
+    console.log('[STEP] first resolved validation', resolvedValidation.passed ? 'PASSED' : `FAILED (${resolvedValidation.error_issues?.length || 0} errors)`)
+
+    const firstValidationIssues = resolvedValidation.error_issues ? [...resolvedValidation.error_issues] : []
+    let repairActions = []
+    let repairUnresolvedIssues = []
+    let secondValidationIssues = null
+
+    if (!resolvedValidation.passed) {
+      console.log(`[STEP] repair started for candidate_id=${c.candidateId}`)
+
+      // Try to repair
+      const repairResult = repairResolvedLayout({
+        resolvedPages: finalResolvedPages,
+        contentWidthMm: 116,
+        contentHeightMm: 176,
+      })
+
+      console.log(`[STEP] repair actions: ${repairResult.actions.length}`)
+      repairActions = repairResult.actions
+      repairUnresolvedIssues = repairResult.unresolvedIssues
+
+      // CRITICAL: Always use repaired pages, not original
+      finalResolvedPages = repairResult.pages
+
+      if (repairResult.unresolvedIssues.length > 0) {
+        console.log(`[STEP] repair unresolved issues: ${repairResult.unresolvedIssues.length}`)
+      }
+
+      if (rawImageElementCount > 0 && summarizeResolvedPages(finalResolvedPages, 'repaired').image_count === 0) {
+        throw new Error(`IMAGE_LOST_DURING_REPAIR: candidate plan had ${rawImageElementCount} image element(s), 0 remain after repairResolvedLayout`)
+      }
+
+      if (debugThisCandidate) {
+        writeDebugStage('05-repaired-pages.json', finalResolvedPages)
+        writeDebugStage('05-repaired-summary.json', summarizeResolvedPages(finalResolvedPages, 'repaired'))
+      }
+
+      // Re-validate after repair
+      console.log('[STEP] second resolved validation start')
+      resolvedValidation = validateResolvedLayout(finalResolvedPages)
+      console.log('[STEP] second resolved validation', resolvedValidation.passed ? 'PASSED' : `FAILED (${resolvedValidation.error_issues?.length || 0} errors)`)
+      secondValidationIssues = resolvedValidation.error_issues ? [...resolvedValidation.error_issues] : []
+
+      if (!resolvedValidation.passed) {
+        // Still failing after repair - log and reject
+        console.error(`[RESOLVED VALIDATION FAILED AFTER REPAIR] candidate_id=${c.candidateId}`)
+        if (resolvedValidation.error_issues && resolvedValidation.error_issues.length > 0) {
+          console.error(`  Remaining issues: ${resolvedValidation.error_issues.length}`)
+          resolvedValidation.error_issues.slice(0, 3).forEach((issue) => {
+            console.error(`    - Page ${issue.page}: ${issue.type} (${issue.element_id}): ${issue.message}`)
+          })
+        }
+        if (debugThisCandidate) writeDebugStage('06-validation-report.json', buildValidationReport())
+        // Return undefined candidate
+        return null
+      }
+
+      console.log(`[RESOLVED VALIDATION PASSED AFTER REPAIR] candidate_id=${c.candidateId}`)
+    } else if (debugThisCandidate) {
+      // Passed on the first try -- no repair stage ran, so 05 is identical to 04's post-scaling state.
+      writeDebugStage('05-repaired-pages.json', finalResolvedPages)
+      writeDebugStage('05-repaired-summary.json', summarizeResolvedPages(finalResolvedPages, 'repaired (no repair needed)'))
+    }
+
+    function buildValidationReport() {
+      const coordsBeforeRepair = coordinateTable(preRepairPages)
+      const coordsAfterRepair = coordinateTable(finalResolvedPages)
+      return {
+        stage_counts: {
+          raw: 'see 01-raw-llm-candidate-summary.json',
+          normalized: 'see 02-normalized-candidate-summary.json',
+          reconstructed: summarizeResolvedPages(reconstructed, 'reconstructed'),
+          refined: summarizeResolvedPages(refinedPages, 'refined'),
+          repaired: summarizeResolvedPages(finalResolvedPages, 'repaired'),
+        },
+        first_validation: {
+          passed: firstValidationIssues.length === 0,
+          issue_count: firstValidationIssues.length,
+          issues: firstValidationIssues,
+          coordinate_table: coordsBeforeRepair,
+          overlaps: overlapReport(coordsBeforeRepair),
+        },
+        repair: {
+          actions_count: repairActions.length,
+          actions: repairActions,
+          unresolved_count: repairUnresolvedIssues.length,
+          unresolved_issues: repairUnresolvedIssues,
+        },
+        second_validation: secondValidationIssues === null ? null : {
+          passed: secondValidationIssues.length === 0,
+          issue_count: secondValidationIssues.length,
+          issues: secondValidationIssues,
+          coordinate_table: coordsAfterRepair,
+          overlaps: overlapReport(coordsAfterRepair),
+        },
+      }
+    }
+
+    if (debugThisCandidate && resolvedValidation.passed) {
+      writeDebugStage('06-validation-report.json', buildValidationReport())
+    }
+
     const repetitionPenaltyApplied = shouldApplyRepetitionPenalty(recentLayouts, c.plan.composition_strategy)
     const { layout_quality_score: qualityScore } = estimateLayoutQuality({
-      plan: c.plan, resolvedPages, refinements, repetitionPenaltyApplied,
+      plan: c.plan, resolvedPages: finalResolvedPages, refinements, repetitionPenaltyApplied,
       validationIssues: c.validation.issues,
       inferredImageTextRelations: inferred_image_text_relations,
     })
@@ -286,14 +450,27 @@ export async function runGeneration({
       plan: c.plan,
       validation: c.validation,
       repaired: c.repaired,
-      resolvedPages,
+      resolvedPages: finalResolvedPages,
       refinements,
       qualityScore,
       repetitionPenaltyApplied,
+      repairActions,
+      resolved_validation: resolvedValidation,
     }
-  })
+  }).filter(c => c !== null) // Remove candidates that failed resolved layout validation
 
   // 14. Best Layout Selector
+  // CRITICAL: Fail hard if all candidates were rejected by resolved layout validation
+  if (scoredCandidates.length === 0) {
+    const errorMsg = 'All layout candidates failed resolved layout validation (page boundary/collision checks)'
+    console.error(`[GENERATION FAILED] ${errorMsg}`)
+    return {
+      ok: false,
+      error: errorMsg,
+      validationFailures: [],
+    }
+  }
+
   const { selected, ranked } = selectBestLayout(scoredCandidates)
   recordLayoutUsage(diversityHistoryPath, {
     layoutFamily: selected.plan.layout_family, compositionStrategy: selected.plan.composition_strategy,
@@ -304,7 +481,34 @@ export async function runGeneration({
   const { imageNames } = saveInputCopies(runDir, { imagePaths, text })
 
   // 15. LaTeX Renderer
-  const mainTex = buildMainTex({ resolvedPages: selected.resolvedPages })
+  // CRITICAL: Final validation before LaTeX generation
+  const finalPages = selected.resolvedPages
+
+  // Assert: no pages exceed bounds
+  const boundaryIssues = assertResolvedPagesInsideBounds(finalPages)
+  if (boundaryIssues.length > 0) {
+    const errorMsg = `Final boundary check failed:\n${boundaryIssues.join('\n')}`
+    console.error(`[GENERATION FAILED] ${errorMsg}`)
+    return {
+      ok: false,
+      error: errorMsg,
+      validationFailures: boundaryIssues,
+    }
+  }
+
+  // Assert: no markdown markers in final pages
+  try {
+    assertNoMarkdownInResolvedPages(finalPages)
+  } catch (err) {
+    console.error(`[GENERATION FAILED] ${err.message}`)
+    return {
+      ok: false,
+      error: err.message,
+      validationFailures: [],
+    }
+  }
+
+  const mainTex = buildMainTex({ resolvedPages: finalPages })
   const styleTex = buildStyleTex({ fontsDir })
 
   const bestLayoutDir = writeBestLayoutSources(runDir, {
@@ -444,7 +648,7 @@ export async function runGeneration({
       repair_attempted: selected.repaired,
       llm_retry_count: llmResult.retryCount,
       fallback_used: llmResult.fallbackUsed,
-      fallback_error_code: fallbackError?.code || null,
+      fallback_error_code: null,
     },
     refinement: {
       text_capacity_checked: true,
@@ -501,6 +705,7 @@ export async function runGeneration({
   writeGenerationLog(runDir, log)
 
   return {
+    ok: true,
     runId,
     runDir,
     llmResult,
@@ -515,5 +720,9 @@ export async function runGeneration({
     compile: compileResult,
     spread: spreadResult,
     log,
+    bestEffortUsed,
+    bestEffortWarning: bestEffortUsed
+      ? `일부 요소가 완벽하게 배치되지 않았을 수 있습니다 (남은 문제: ${selected.validation.issues.slice(0, 2).join('; ')})`
+      : null,
   }
 }

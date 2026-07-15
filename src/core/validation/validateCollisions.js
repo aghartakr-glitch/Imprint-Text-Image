@@ -2,42 +2,17 @@
 // Prevents text and image overlap, ensures minimum spacing (gutter/gap).
 // Phase 5: Supports both grid-unit and expanded bounding box (mm) collision checks.
 
+import { gridToMm } from '../gridToMm.js'
 import {
-  COLUMN_GUTTER_MM,
   TEXT_BOX_INNER_PADDING_MM,
   TEXT_IMAGE_MIN_GAP_MM,
   TEXT_TEXT_MIN_GAP_MM,
   IMAGE_IMAGE_MIN_GAP_MM,
-  SECTION_TITLE_MARGIN_MM,
   PAGE_WIDTH_MM,
   PAGE_HEIGHT_MM,
   GRID_COLUMNS,
   GRID_ROWS,
 } from '../layoutConstants.js'
-
-// Convert grid column span to mm width
-function gridColsToMm(colSpan, pageWidthMm = PAGE_WIDTH_MM) {
-  const colWidth = pageWidthMm / GRID_COLUMNS
-  const gutter = COLUMN_GUTTER_MM
-  return colSpan * colWidth + (colSpan - 1) * gutter
-}
-
-// Convert grid row span to mm height (rough estimate)
-function gridRowsToMm(rowSpan, pageHeightMm = PAGE_HEIGHT_MM) {
-  const rowHeight = pageHeightMm / GRID_ROWS
-  return rowSpan * rowHeight
-}
-
-// Convert grid position to mm coordinates
-function gridPosToMm(gridCol, gridRow) {
-  const colWidth = PAGE_WIDTH_MM / GRID_COLUMNS
-  const rowHeight = PAGE_HEIGHT_MM / GRID_ROWS
-  const gutter = COLUMN_GUTTER_MM
-  return {
-    x: gridCol * (colWidth + gutter),
-    y: gridRow * rowHeight,
-  }
-}
 
 // Get expanded bounding box with safe margins (mm)
 // columns/rows default to the fallback grid constants but MUST be passed as the plan's
@@ -46,32 +21,18 @@ function gridPosToMm(gridCol, gridRow) {
 // mis-converted to mm using the hardcoded 6-column assumption, producing false collisions
 // between elements that don't actually overlap (confirmed 2026-07-09).
 function getExpandedBox(el, safeMarginMm = 1.5, columns = GRID_COLUMNS, rows = GRID_ROWS) {
-  const colWidth = PAGE_WIDTH_MM / columns
-  const rowHeight = PAGE_HEIGHT_MM / rows
-  const gutter = COLUMN_GUTTER_MM
-
-  // col_start/row_start are 1-indexed (col_start=1 is the first column), so position must be
-  // offset by (col_start - 1)/(row_start - 1) column-widths from the page edge. Using col_start
-  // directly (0-indexed math on a 1-indexed value) shifted every element one full column/row
-  // right/down, making adjacent-but-non-overlapping elements collide at grid boundaries
-  // (confirmed 2026-07-09: e.g. row_start=7 landed at the same y as a row_span=6 element's
-  // bottom edge that should have ended one full row-height earlier).
-  const x = (el.col_start - 1) * (colWidth + gutter)
-  const y = (el.row_start - 1) * rowHeight
-
-  // Width and height in mm (grid span)
-  const w = el.col_span * colWidth + (el.col_span - 1) * gutter
-  const h = el.row_span * rowHeight
+  // Use unified gridToMm conversion for consistency with renderer
+  const mmBox = gridToMm(el, { columns, rows })
 
   // For text boxes, add inner padding
   const innerPadding = el.type === 'text' ? TEXT_BOX_INNER_PADDING_MM : 0
 
   // Expanded box with safe margins
   return {
-    x: x - safeMarginMm,
-    y: y - safeMarginMm,
-    w: w + safeMarginMm * 2,
-    h: h + safeMarginMm * 2,
+    x: mmBox.xMm - safeMarginMm,
+    y: mmBox.yMm - safeMarginMm,
+    w: mmBox.wMm + safeMarginMm * 2,
+    h: mmBox.hMm + safeMarginMm * 2,
     innerPadding,
   }
 }
@@ -161,15 +122,13 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
 
   pages.forEach((page) => {
     const elements = Array.isArray(page.elements) ? page.elements : []
+    const pageNumber = page.page
 
     // Check all pairs for overlap/gap
     for (let i = 0; i < elements.length; i += 1) {
       for (let j = i + 1; j < elements.length; j += 1) {
         const a = elements[i]
         const b = elements[j]
-
-        // Skip if different pages
-        if (a.page !== b.page) continue
 
         // Check forbidden overlaps
         const aIsImage = a.type === 'image'
@@ -192,7 +151,7 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
               gapType = 'text_image'
               issues.push({
                 type: 'expanded_bbox_overlap_text_image',
-                page: a.page,
+                page: pageNumber,
                 element_a: a.id,
                 element_b: b.id,
                 severity: 'error',
@@ -204,7 +163,7 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
               gapType = 'text_text'
               issues.push({
                 type: 'expanded_bbox_overlap_text_text',
-                page: a.page,
+                page: pageNumber,
                 element_a: a.id,
                 element_b: b.id,
                 severity: 'error',
@@ -216,7 +175,7 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
               gapType = 'image_image'
               issues.push({
                 type: 'expanded_bbox_overlap_image_image',
-                page: a.page,
+                page: pageNumber,
                 element_a: a.id,
                 element_b: b.id,
                 severity: 'error',
@@ -232,7 +191,7 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
               if (gapMm < TEXT_IMAGE_MIN_GAP_MM && gapMm >= 0) {
                 issues.push({
                   type: 'insufficient_gap_text_image_mm',
-                  page: a.page,
+                  page: pageNumber,
                   element_a: a.id,
                   element_b: b.id,
                   severity: 'warning',
@@ -245,7 +204,7 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
               if (gapMm < TEXT_TEXT_MIN_GAP_MM && gapMm >= 0) {
                 issues.push({
                   type: 'insufficient_gap_text_text_mm',
-                  page: a.page,
+                  page: pageNumber,
                   element_a: a.id,
                   element_b: b.id,
                   severity: 'warning',
@@ -258,7 +217,7 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
               if (gapMm < IMAGE_IMAGE_MIN_GAP_MM && gapMm >= 0) {
                 issues.push({
                   type: 'insufficient_gap_image_image_mm',
-                  page: a.page,
+                  page: pageNumber,
                   element_a: a.id,
                   element_b: b.id,
                   severity: 'warning',
@@ -275,7 +234,7 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
             if ((aIsText && bIsImage) || (aIsImage && bIsText)) {
               issues.push({
                 type: 'text_image_overlap',
-                page: a.page,
+                page: pageNumber,
                 element_a: a.id,
                 element_b: b.id,
                 severity: 'error',
@@ -285,7 +244,7 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
             if (aIsImage && bIsImage) {
               issues.push({
                 type: 'image_image_overlap',
-                page: a.page,
+                page: pageNumber,
                 element_a: a.id,
                 element_b: b.id,
                 severity: 'error',
@@ -295,7 +254,7 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
             if (aIsText && bIsText) {
               issues.push({
                 type: 'text_text_overlap',
-                page: a.page,
+                page: pageNumber,
                 element_a: a.id,
                 element_b: b.id,
                 severity: 'error',
@@ -310,7 +269,7 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
               if (gap < minGap && gap >= 0) {
                 issues.push({
                   type: 'insufficient_gap_text_image',
-                  page: a.page,
+                  page: pageNumber,
                   element_a: a.id,
                   element_b: b.id,
                   severity: 'warning',

@@ -38,3 +38,4 @@ export const GRID_GUTTER_MM = 4
 export const TITLE_FONT_SIZE_PT = 28
 export const TITLE_LEADING_PT = 34
 export const TITLE_VERTICAL_POSITION_RATIO = 0.4 // title baseline sits 40% down the text box, not dead-center
+

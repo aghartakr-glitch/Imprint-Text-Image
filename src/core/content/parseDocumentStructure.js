@@ -1,7 +1,9 @@
 // Spec: Advanced document structure parsing with lightweight markers
 // Recognizes: blank lines, Markdown, separators, lists, quotes, labels, tags
 // Infers: document structure, block roles, text layout mode
+// CANONICAL: Uses parseMarkdownDocument for unified Markdown handling
 
+import { parseMarkdownDocument } from '../text/parseMarkdownDocument.js'
 import { detectStructureMarkers, hasLightweightMarkers, hasExplicitTags } from './detectStructureMarkers.js'
 import { inferBlockRole } from './inferBlockRole.js'
 
@@ -25,26 +27,45 @@ export function parseDocumentStructure({ title, text }) {
     }
   }
 
-  // Detect structure markers
+  // CANONICAL: Use unified Markdown parser (removes markers at input stage). The document title is
+  // metadata (document_structure.title below), not one of the body text_blocks/paragraphs -- only
+  // body paragraphs get counted/indexed here, matching the pre-existing paragraph_count contract.
+  const mdParsed = parseMarkdownDocument({ title: titleStr, text: textStr })
+
+  const LIST_LINE_PATTERN = /^\s*(?:\d+[.)]|[-•])\s+/
+
+  const blocks = mdParsed.text_blocks.map((block, index) => {
+    const isList = block.role === 'body' && LIST_LINE_PATTERN.test(block.text.split(/\r?\n/)[0])
+
+    // A markdown heading (## Section, ### Case) already carries an explicit role from the parser.
+    // Plain body text (no heading marker) still needs the original keyword-based role inference
+    // (intro_definition/protest_case/brand_case/etc) so downstream layout selection keeps working.
+    const role = isList ? 'list_item' : (block.role === 'body' ? inferBlockRole(block.text, index === 0) : block.role)
+    const type = isList ? 'list_item' : (block.role === 'body' ? 'paragraph' : 'heading')
+
+    return {
+      id: `p${index + 1}`,
+      type,
+      role,
+      text: block.text, // Already cleaned (no markdown markers)
+      char_count: block.text.length,
+      index,
+      markdown_level: block.markdown_level,
+      semantic_hint: analyzeSemanticContent(block.text),
+    }
+  })
+
+  // Detect structure markers (for backwards compatibility)
   const markers = detectStructureMarkers(textStr)
   const hasLightweight = hasLightweightMarkers(textStr)
   const hasExplicit = hasExplicitTags(textStr)
 
-  // Split by blank lines to get paragraphs
-  const paragraphs = textStr
-    .split(/\n\s*\n+/)
-    .map((p) => p.trim())
-    .filter(Boolean)
-
-  // Build blocks from paragraphs and markers
-  const blocks = buildBlocks(paragraphs, markers, textStr)
-
   // Infer layout mode
-  const textLayoutMode = inferTextLayoutMode(blocks, paragraphs.length)
+  const textLayoutMode = inferTextLayoutMode(blocks, blocks.length)
 
   return {
     document_structure: {
-      title: titleStr || null,
+      title: mdParsed.title || titleStr || null,
       sections: extractSections(blocks),
       blocks: blocks.map((b) => ({
         id: b.id,
@@ -55,98 +76,13 @@ export function parseDocumentStructure({ title, text }) {
         semantic_hint: b.semantic_hint,
       })),
     },
-    paragraph_count: paragraphs.length,
-    text_blocks: blocks,
+    paragraph_count: blocks.length,
+    text_blocks: blocks, // Canonical: from parseMarkdownDocument (no markers)
     text_layout_mode: textLayoutMode,
     has_lightweight_markers: hasLightweight,
     has_explicit_tags: hasExplicit,
-    merged_body_all: paragraphs.length === 1 || (hasLightweight && blocks.length === 1),
+    merged_body_all: blocks.length === 1,
   }
-}
-
-function buildBlocks(paragraphs, markers, fullText) {
-  const blocks = []
-  const markersByContent = indexMarkersByContent(markers, paragraphs, fullText)
-
-  paragraphs.forEach((paragraph, index) => {
-    const paraMarkers = markersByContent[index] || []
-
-    // Check for explicit tags
-    const explicitTag = paraMarkers.find((m) => m.type === 'explicit_tag')
-
-    // Check for structure types
-    const isHeading = paraMarkers.some((m) => m.type?.startsWith('heading_'))
-    const isList = paraMarkers.some((m) => m.type?.startsWith('list_'))
-    const isQuote = paraMarkers.some((m) => m.type === 'quote_block')
-    const isLabel = paraMarkers.some((m) => m.type === 'short_label')
-
-    let type = 'paragraph'
-    let role = 'body'
-
-    if (isHeading) {
-      type = 'heading'
-      role = paraMarkers.find((m) => m.type?.startsWith('heading_'))?.role || 'section_title'
-    } else if (isList) {
-      type = 'list_item'
-      role = 'list_item'
-    } else if (isQuote) {
-      type = 'quote'
-      role = 'quote'
-    } else if (isLabel) {
-      type = 'label'
-      role = 'label'
-    } else if (explicitTag) {
-      type = 'paragraph'
-      role = explicitTag.tag.toLowerCase()
-    } else {
-      // Infer role from content
-      role = inferBlockRole(paragraph, index === 0)
-    }
-
-    const block = {
-      id: `p${index + 1}`,
-      type,
-      role,
-      text: paragraph,
-      char_count: paragraph.length,
-      index,
-      semantic_hint: analyzeSemanticContent(paragraph),
-    }
-
-    blocks.push(block)
-  })
-
-  return blocks
-}
-
-function indexMarkersByContent(markers, paragraphs, fullText) {
-  const index = {}
-
-  markers.forEach((marker) => {
-    // Try to match marker line to paragraph index
-    const markerLine = marker.line
-    let charCount = 0
-    let paraIndex = 0
-
-    for (let i = 0; i < paragraphs.length; i++) {
-      const paraStartInFull = fullText.indexOf(paragraphs[i])
-      const paraLineCount = paragraphs[i].split('\n').length
-      const paraEndLine = fullText.substring(0, paraStartInFull + paragraphs[i].length).split('\n').length - 1
-
-      if (markerLine >= charCount && markerLine <= charCount + paraLineCount) {
-        paraIndex = i
-        break
-      }
-      charCount += paraLineCount + 1 // +1 for blank line
-    }
-
-    if (!index[paraIndex]) {
-      index[paraIndex] = []
-    }
-    index[paraIndex].push(marker)
-  })
-
-  return index
 }
 
 function extractSections(blocks) {

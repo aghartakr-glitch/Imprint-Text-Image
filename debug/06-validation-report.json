@@ -1,0 +1,62 @@
+{
+  "stage_counts": {
+    "raw": "see 01-raw-llm-candidate-summary.json",
+    "normalized": "see 02-normalized-candidate-summary.json",
+    "reconstructed": {
+      "stage": "reconstructed",
+      "page_count": 1,
+      "image_count": 0,
+      "text_block_count": 1,
+      "image_ids": [],
+      "text_block_ids": [
+        "body_overflow"
+      ]
+    },
+    "refined": {
+      "stage": "refined",
+      "page_count": 1,
+      "image_count": 0,
+      "text_block_count": 1,
+      "image_ids": [],
+      "text_block_ids": [
+        "body_overflow"
+      ]
+    },
+    "repaired": {
+      "stage": "repaired",
+      "page_count": 1,
+      "image_count": 0,
+      "text_block_count": 1,
+      "image_ids": [],
+      "text_block_ids": [
+        "body_overflow"
+      ]
+    }
+  },
+  "first_validation": {
+    "passed": true,
+    "issue_count": 0,
+    "issues": [],
+    "coordinate_table": [
+      {
+        "page": 1,
+        "type": "text",
+        "id": "body_overflow",
+        "x": 0,
+        "y": 0,
+        "w": 58,
+        "h": 176,
+        "right": 58,
+        "bottom": 176
+      }
+    ],
+    "overlaps": []
+  },
+  "repair": {
+    "actions_count": 0,
+    "actions": [],
+    "unresolved_count": 0,
+    "unresolved_issues": []
+  },
+  "second_validation": null
+}

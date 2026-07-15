@@ -117,11 +117,18 @@ function checkEnum(value, allowed, fieldName, issues, required = true) {
 // object_position, design_sequence) plus the grid-preset supplement fields (grid_spec,
 // reserved_regions, text_flow, layout_variation), all validated against designSpace.js's
 // vocabulary. "JSON parses" isn't checked here -- that's the caller's job via JSON.parse.
-export function validateLayoutPlan(plan, { imageCount } = {}) {
+export function validateLayoutPlan(plan, { imageCount, textBlocks } = {}) {
   const issues = []
+  // Design-quality observations that should NOT block rendering (a candidate with only warnings
+  // still has passed:true). Kept separate from `issues` so a real-but-fixable geometry/schema
+  // problem is never confused with a taste preference (confirmed 2026-07-10: "이미지 span 다양화
+  // 부족" and the already-⚠️-prefixed column_flow_grid notices were both being pushed into
+  // `issues`, so `passed: issues.length === 0` silently rejected the entire candidate over pure
+  // design variety, discarding an otherwise fully valid, already-paid-for LLM response).
+  const warnings = []
 
   if (!plan || typeof plan !== 'object') {
-    return { passed: false, issues: ['layout_plan이 객체가 아닙니다'] }
+    return { passed: false, issues: ['layout_plan이 객체가 아닙니다'], warnings: [] }
   }
 
   // Compute active grid dimensions: if plan has grid_spec, use it; otherwise fall back to defaults
@@ -307,20 +314,17 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
       issues.push(`❌ 모든 텍스트가 동일한(또는 1-column) 폭으로 강제 배치됨 (columns=${plan.grid_spec.columns}): grid는 이미지/텍스트의 span(1~${plan.grid_spec.columns}열)을 정하는 정렬 기준일 뿐, 모든 요소를 1열 폭으로 채우라는 뜻이 아닙니다. 문단마다 다른 col_span(2열, 3열 등)을 사용하세요.`)
     }
 
-    // Phase 5: Reject plans with insufficient text span variation (for 3+ column grids)
-    if (activeColumns >= 3 && !spanAnalysis.text_span_variation_used) {
-      issues.push(`❌ Phase 5: 텍스트 span 다양화 부족: 모든 텍스트가 동일한 폭(${spanAnalysis.text_span_patterns[0] || '1-column'})으로만 배치됨. 2-column, 3-column 등을 혼합하세요.`)
-    }
-
-    // Phase 5: Reject plans with no image span variation (when multiple images exist)
-    const imageCount = seenImageIndices.size
-    if (imageCount >= 2 && !spanAnalysis.image_span_variation_used) {
-      issues.push(`❌ Phase 5: 이미지 span 다양화 부족: ${imageCount}장의 이미지가 모두 같은 크기로 배치됨. 1-column, 2-column, 3-column 등을 혼합하세요.`)
+    // Design-quality observation, not a blocker: same-span images can be a deliberate editorial
+    // choice (equal comparison, before/after pair, a case series meant to read as one visual
+    // rhythm) rather than a mistake, so this is a warning rather than a rejection.
+    const imageCountSeen = seenImageIndices.size
+    if (imageCountSeen >= 2 && !spanAnalysis.image_span_variation_used) {
+      warnings.push(`⚠️ 이미지 span 다양화 부족: ${imageCountSeen}장의 이미지가 모두 같은 크기로 배치됨. 1-column, 2-column, 3-column 등을 혼합하면 더 좋습니다.`)
     }
 
     // Phase 5: Warn if column_flow_grid is used (fallback only)
     if (plan.composition_strategy === 'column_flow_grid') {
-      issues.push(`⚠️  Phase 5: column_flow_grid는 fallback입니다. flexible_modular_grid, image_text_case_blocks, asymmetrical 등을 우선 사용하세요.`)
+      warnings.push(`⚠️  Phase 5: column_flow_grid는 fallback입니다. image_text_case_blocks, asymmetrical 등을 우선 사용하세요.`)
     }
   }
 
@@ -331,11 +335,11 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
 
   // Phase 5-2: Strong warning for column_flow_grid (should be rare/fallback only)
   if (plan.composition_strategy === 'column_flow_grid' && imageCount >= 1) {
-    issues.push(`⚠️  Phase 5-2: column_flow_grid는 fallback입니다. flexible_modular_grid, image_text_case_blocks 등을 우선 사용하세요.`)
+    warnings.push(`⚠️  Phase 5-2: column_flow_grid는 fallback입니다. image_text_case_blocks 등을 우선 사용하세요.`)
   }
 
   // Phase 5-2: Text capacity validation (detect overflow)
-  const textCapacityIssues = validateLayoutTextCapacity(plan)
+  const textCapacityIssues = validateLayoutTextCapacity(plan, textBlocks)
   textCapacityIssues.forEach((issue) => {
     issues.push(`❌ 텍스트 오버플로우: ${issue.elementId} (page ${issue.page}): ${issue.reason}`)
   })
@@ -356,5 +360,7 @@ export function validateLayoutPlan(plan, { imageCount } = {}) {
   // but every check above pushes a *string* (no .severity), so that filter silently passed EVERY
   // plan — disabling the entire validation layer (bad enums, unplaced images, missing paragraphs,
   // forbidden composition strategies all sailed through as passed:true). Now string issues block.
-  return { passed: issues.length === 0, issues, layoutSignature: getLayoutSignature(plan) }
+  return {
+    passed: issues.length === 0, issues, warnings, layoutSignature: getLayoutSignature(plan),
+  }
 }

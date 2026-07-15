@@ -69,17 +69,49 @@ function buildOverflowPages(text) {
 export function paginateGridPlan(plan, text, textBlocks) {
   const textSourceMap = buildTextSourceMap(textBlocks)
   const blocks = Array.isArray(textBlocks) ? textBlocks.filter((b) => b.text) : []
+
+  // DEBUG: Check if textBlocks contain markdown markers
+  if (blocks.length > 0) {
+    const markerSamples = blocks
+      .filter((b) => b.text && b.text.match(/^\s*#+\s/))
+      .slice(0, 3)
+      .map((b) => b.text.substring(0, 50))
+    if (markerSamples.length > 0) {
+      console.warn('[paginateGridPlan DEBUG] ⚠️ textBlocks contain markdown markers:')
+      markerSamples.forEach((sample) => console.warn(`  - "${sample}..."'`))
+    }
+  }
+
   const hasModularLayout = blocks.length >= 2
+  console.log(`[paginateGridPlan] blocks.length=${blocks.length}, hasModularLayout=${hasModularLayout}`)
 
   if (hasModularLayout) {
     const referencedIndices = new Set()
+    const paragraphOverflow = {} // Track text that didn't fit in each referenced paragraph
     const planPages = plan.pages.map((page) => {
       const textSlicesByElementId = {}
       page.elements.forEach((el) => {
         if (el.type !== 'text') return
         let slice = null
         if (el.text_source && textSourceMap[el.text_source]) {
-          slice = textSourceMap[el.text_source] // full paragraph, never split
+          const fullText = textSourceMap[el.text_source]
+          const box = gridToMm(el)
+          const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
+
+          // Split paragraph at word boundary if it exceeds box capacity
+          const { slice: fitted, consumed } = sliceAtWordBoundary(fullText, Math.max(1, capacity))
+          slice = fitted
+
+          // Track overflow for this paragraph
+          if (consumed < fullText.length) {
+            const overflow = fullText.slice(consumed)
+            if (!paragraphOverflow[el.text_source]) {
+              paragraphOverflow[el.text_source] = overflow
+            } else {
+              paragraphOverflow[el.text_source] += overflow
+            }
+          }
+
           const m = /^paragraph_(\d+)$/.exec(el.text_source)
           if (m) referencedIndices.add(Number(m[1]) - 1)
           blocks.forEach((b, i) => { if (b.id === el.text_source) referencedIndices.add(i) })
@@ -89,8 +121,11 @@ export function paginateGridPlan(plan, text, textBlocks) {
       return { elements: page.elements, textSlicesByElementId }
     })
 
-    // Safety net: append every paragraph the plan never placed so it still reaches the PDF.
-    const leftover = blocks.filter((_, i) => !referencedIndices.has(i)).map((b) => b.text).join('\n\n')
+    // Collect leftover: unreferenced paragraphs + overflow from referenced ones
+    const unrefLeftover = blocks.filter((_, i) => !referencedIndices.has(i)).map((b) => b.text).join('\n\n')
+    const overflowLeftover = Object.values(paragraphOverflow).join('\n\n')
+    const leftover = [unrefLeftover, overflowLeftover].filter(Boolean).join('\n\n')
+
     return [...planPages, ...buildOverflowPages(leftover)]
   }
 
