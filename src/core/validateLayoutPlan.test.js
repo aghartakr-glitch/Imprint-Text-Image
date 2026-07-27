@@ -699,3 +699,97 @@ test('a plan where paragraphs stay in ascending order across pages passes the or
   const result = validateLayoutPlan(plan, { imageCount: 0 })
   assert.ok(!result.issues.some((i) => i.includes('문단 순서 위반')), `unexpected paragraph-order issue: ${JSON.stringify(result.issues)}`)
 })
+
+// -------------------------------------------------------------------------------------------
+// Content-group cohesion (gap analysis P0-1, added 2026-07-27). Group membership comes from the
+// server-side contentGroupModel, never from a field in the plan, so a candidate cannot dodge these
+// checks by omitting group_id.
+// -------------------------------------------------------------------------------------------
+
+function groupModel() {
+  return {
+    groupByTextSource: new Map([
+      ['paragraph_1', 0], ['paragraph_2', 0], ['paragraph_3', 1], ['paragraph_4', 1],
+    ]),
+    groupByImageId: new Map([['image_1', 0], ['image_2', 1]]),
+  }
+}
+
+const gmImg = (id, o) => ({
+  id, type: 'image', role: 'hero', fit: 'contain', object_position: 'center', ...o,
+})
+const gmTxt = (id, src, o) => ({
+  id, type: 'text', role: 'body', text_source: src, ...o,
+})
+
+test('content groups laid out as separate column bands pass cohesion', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        gmImg('image_1', { col_start: 1, col_span: 3, row_start: 1, row_span: 5 }),
+        gmTxt('t1', 'paragraph_1', { col_start: 1, col_span: 3, row_start: 6, row_span: 1 }),
+        gmTxt('t2', 'paragraph_2', { col_start: 1, col_span: 3, row_start: 7, row_span: 4 }),
+        gmImg('image_2', { col_start: 4, col_span: 3, row_start: 1, row_span: 5 }),
+        gmTxt('t3', 'paragraph_3', { col_start: 4, col_span: 3, row_start: 6, row_span: 1 }),
+        gmTxt('t4', 'paragraph_4', { col_start: 4, col_span: 3, row_start: 7, row_span: 4 }),
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, { imageCount: 2, contentGroupModel: groupModel() })
+  assert.ok(!result.issues.some((i) => i.includes('콘텐츠 그룹')), JSON.stringify(result.issues))
+})
+
+// The exact failure the feature exists to prevent: an image marooned from its own caption/heading.
+test('rejects an image placed on a different page from its own group text', () => {
+  const plan = validPlan({
+    pages: [
+      { page: 1, elements: [gmImg('image_1', { col_start: 1, col_span: 6, row_start: 1, row_span: 12 })] },
+      {
+        page: 2,
+        elements: [
+          gmTxt('t1', 'paragraph_1', { col_start: 1, col_span: 3, row_start: 1, row_span: 1 }),
+          gmTxt('t2', 'paragraph_2', { col_start: 1, col_span: 3, row_start: 2, row_span: 4 }),
+        ],
+      },
+    ],
+  })
+
+  const result = validateLayoutPlan(plan, { imageCount: 1, contentGroupModel: groupModel() })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('콘텐츠 그룹 분리')), JSON.stringify(result.issues))
+})
+
+test('rejects a foreign element landing inside a content group rectangle', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        gmImg('image_1', { col_start: 1, col_span: 3, row_start: 1, row_span: 4 }),
+        gmTxt('t1', 'paragraph_1', { col_start: 1, col_span: 3, row_start: 9, row_span: 1 }),
+        gmTxt('t2', 'paragraph_2', { col_start: 1, col_span: 3, row_start: 10, row_span: 3 }),
+        // group 1 image dropped into the gap inside group 0 span
+        gmImg('image_2', { col_start: 2, col_span: 2, row_start: 5, row_span: 3 }),
+        gmTxt('t3', 'paragraph_3', { col_start: 4, col_span: 3, row_start: 1, row_span: 1 }),
+        gmTxt('t4', 'paragraph_4', { col_start: 4, col_span: 3, row_start: 2, row_span: 4 }),
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, { imageCount: 2, contentGroupModel: groupModel() })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('콘텐츠 그룹 침범')), JSON.stringify(result.issues))
+})
+
+test('cohesion checks are skipped entirely when no contentGroupModel is supplied', () => {
+  const plan = validPlan({
+    pages: [
+      { page: 1, elements: [gmImg('image_1', { col_start: 1, col_span: 6, row_start: 1, row_span: 12 })] },
+      { page: 2, elements: [gmTxt('t1', 'paragraph_1', { col_start: 1, col_span: 6, row_start: 1, row_span: 6 })] },
+    ],
+  })
+
+  const result = validateLayoutPlan(plan, { imageCount: 1 })
+  assert.ok(!result.issues.some((i) => i.includes('콘텐츠 그룹')), JSON.stringify(result.issues))
+})

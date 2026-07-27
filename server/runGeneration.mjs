@@ -18,6 +18,7 @@ import { parseTextBlocksAdvanced } from '../src/core/content/parseTextBlocksAdva
 import { analyzeImages } from '../src/core/content/analyzeImages.js'
 import { inferImageTextRelations } from '../src/core/content/inferImageTextRelations.js'
 import { matchImageToTextBlocks } from '../src/core/content/matchImageToTextBlocks.js'
+import { buildContentGroups, summarizeContentGroupsForPrompt } from '../src/core/content/buildContentGroups.js'
 import { mapImageTextRelations } from '../src/core/content/mapImageTextRelations.js'
 import { validateCollisions } from '../src/core/validation/validateCollisions.js'
 import { validateResolvedLayout, assertResolvedPagesInsideBounds } from '../src/core/validation/validateResolvedLayout.js'
@@ -142,7 +143,16 @@ export async function runGeneration({
   // Also keep advanced text block parsing for multi-role analysis
   const textBlocksAnalysis = parseTextBlocksAdvanced({ title, text })
 
-  // Match images to text blocks based on semantic roles
+  // Authoritative content-group model (gap analysis P0-1): which images belong with which
+  // paragraphs, derived from the user's blank-line boundaries. Built from documentStructure's
+  // blocks because those carry group_id; textBlocksAnalysis splits on blank lines only and has no
+  // group information. Validation reads membership from this, never from the LLM's own output.
+  const contentGroupModel = buildContentGroups({
+    textBlocks: textBlocksAdvanced,
+    imageCount: analysis.imageCount,
+  })
+
+  // Match images to text blocks based on document structure
   const imageTextMatching = matchImageToTextBlocks({
     imageCount: analysis.imageCount,
     textBlocks: textBlocksAnalysis.text_blocks,
@@ -247,7 +257,8 @@ export async function runGeneration({
     textBlocks: textBlocksAdvanced, // Use advanced parser's blocks (with roles detected from structure)
     textLayoutMode: textLayoutMode, // continuous_flow, modular_blocks, or hybrid_flow
     imageAnalysis: image_analysis, // Visual characteristics of each image
-    inferredImageTextRelations: inferred_image_text_relations, // Semantic matching between text and images
+    inferredImageTextRelations: inferred_image_text_relations, // Structural matching between text and images
+    contentGroups: summarizeContentGroupsForPrompt(contentGroupModel.groups),
     imageTextMatching,
     textFlowMode: textFlowModeSelection.mode,
     imageTextRelation,
@@ -288,6 +299,7 @@ export async function runGeneration({
     ? validateLayoutPlan(specializedLayoutPlan, {
       imageCount: analysis.imageCount,
       textBlocks: textBlocksAdvanced,
+      contentGroupModel,
       forcedFullBleedImages: userLayoutSettings.forced_full_bleed_images ?? [],
       allowUnforcedFullBleed: userLayoutSettings.allow_unforced_full_bleed !== false,
     })
@@ -314,7 +326,9 @@ export async function runGeneration({
       candidates: [], rejectedCandidates: [], source: 'specialized-skip-llm', retryCount: 0, fallbackUsed: false,
       content_understanding: null, image_analysis: [], inferred_image_text_relations: [], reference_principles: null, layout_strategy_reasoning: null,
     }
-    : await callLayoutLLM({ promptContext, imageCount: analysis.imageCount, textBlocks: textBlocksAdvanced }, llmOptions)
+    : await callLayoutLLM({
+      promptContext, imageCount: analysis.imageCount, textBlocks: textBlocksAdvanced, contentGroupModel,
+    }, llmOptions)
 
   // LLM succeeded (or was skipped) - candidates available
   const candidatePool = llmResult.candidates || []

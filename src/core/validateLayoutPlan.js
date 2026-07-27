@@ -134,7 +134,7 @@ function placementOrder(placement) {
 // reserved_regions, text_flow, layout_variation), all validated against designSpace.js's
 // vocabulary. "JSON parses" isn't checked here -- that's the caller's job via JSON.parse.
 export function validateLayoutPlan(plan, {
-  imageCount, textBlocks, forcedFullBleedImages = [], allowUnforcedFullBleed = true,
+  imageCount, textBlocks, contentGroupModel, forcedFullBleedImages = [], allowUnforcedFullBleed = true,
 } = {}) {
   const issues = []
   // Design-quality observations that should NOT block rendering (a candidate with only warnings
@@ -445,6 +445,83 @@ export function validateLayoutPlan(plan, {
     }
     maxGroupFirstPage = Math.max(maxGroupFirstPage, firstPage)
   })
+
+  // ---------------------------------------------------------------------------------------------
+  // Content-group cohesion (gap analysis P0-1, added 2026-07-27).
+  //
+  // A content group is one editorial unit: an image plus the heading/body/caption the user wrote
+  // for it. Until now images were not part of any group at all -- the plan schema had no field
+  // linking an image to its text -- so nothing stopped the model from placing an image on one page
+  // and the passage it illustrates on another, or wedging an unrelated element between them. That
+  // is the "images and text never form a relationship" symptom.
+  //
+  // Group membership is read from contentGroupModel (derived server-side from the user's blank-line
+  // boundaries), NOT from any field in the plan, so a candidate cannot dodge this by omitting or
+  // mislabelling group_id.
+  //
+  // Two rules, both purely geometric so they carry no reading-order ambiguity:
+  //   1. every element of a group sits on the same page
+  //   2. no element of another group intrudes into a group's bounding box
+  // Rule 2 is what actually makes a group read as one object: it forbids a foreign image or
+  // paragraph from landing inside the rectangle the group occupies.
+  const groupByTextSource = contentGroupModel?.groupByTextSource
+  const groupByImageId = contentGroupModel?.groupByImageId
+  if (groupByTextSource && groupByImageId && (groupByTextSource.size > 0 || groupByImageId.size > 0)) {
+    const groupIdOfElement = (el) => {
+      if (el.type === 'image') return groupByImageId.get(el.id)
+      if (el.type === 'text' && el.text_source) return groupByTextSource.get(el.text_source)
+      return undefined
+    }
+
+    // Where each group's elements ended up, page by page.
+    const placementsByGroupId = new Map()
+    pages.forEach((page, pageIdx) => {
+      ;(page.elements || []).forEach((el) => {
+        const gid = groupIdOfElement(el)
+        if (gid == null) return
+        if (!placementsByGroupId.has(gid)) placementsByGroupId.set(gid, [])
+        placementsByGroupId.get(gid).push({ el, page: page.page ?? pageIdx + 1 })
+      })
+    })
+
+    placementsByGroupId.forEach((placements, gid) => {
+      if (placements.length <= 1) return
+
+      // Rule 1: one group, one page. A group split across pages is only reported when it actually
+      // contains an image -- text-only group splitting is already covered by the group_id checks
+      // above (and is downgraded there while its repair is rebuilt), whereas an image separated
+      // from its own caption/heading is the specific failure this section exists to catch.
+      const pagesUsed = [...new Set(placements.map((p) => p.page))]
+      const hasImage = placements.some((p) => p.el.type === 'image')
+      if (pagesUsed.length > 1 && hasImage) {
+        issues.push(`❌ 콘텐츠 그룹 분리: 그룹 ${gid}의 이미지와 관련 텍스트가 서로 다른 페이지(${pagesUsed.join(', ')})에 배치되었습니다. 이미지와 그 이미지에 대한 제목·본문·출처는 같은 페이지에 함께 두세요.`)
+      }
+
+      // Rule 2: nothing foreign inside the group's rectangle, evaluated per page.
+      pagesUsed.forEach((pageNo) => {
+        const onPage = placements.filter((p) => p.page === pageNo)
+        if (onPage.length <= 1) return
+        const box = {
+          col_start: Math.min(...onPage.map((p) => p.el.col_start)),
+          col_end: Math.max(...onPage.map((p) => p.el.col_start + p.el.col_span - 1)),
+          row_start: Math.min(...onPage.map((p) => p.el.row_start)),
+          row_end: Math.max(...onPage.map((p) => p.el.row_start + p.el.row_span - 1)),
+        }
+        const pageObj = pages.find((pg, i) => (pg.page ?? i + 1) === pageNo)
+        ;(pageObj?.elements || []).forEach((el) => {
+          const otherGid = groupIdOfElement(el)
+          if (otherGid == null || otherGid === gid) return
+          const overlaps = el.col_start <= box.col_end
+            && el.col_start + el.col_span - 1 >= box.col_start
+            && el.row_start <= box.row_end
+            && el.row_start + el.row_span - 1 >= box.row_start
+          if (overlaps) {
+            issues.push(`❌ 콘텐츠 그룹 침범: 그룹 ${otherGid}의 요소 ${el.id}가 그룹 ${gid}이 차지한 영역 안에 배치되었습니다 (page ${pageNo}). 서로 다른 콘텐츠 그룹은 영역이 겹치지 않게 분리하세요.`)
+          }
+        })
+      })
+    })
+  }
 
   if (!hasBodyText) {
     issues.push('본문 텍스트 영역(role: body)이 존재하지 않습니다')

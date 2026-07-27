@@ -167,10 +167,14 @@ const COMPACT_SCHEMA_EXAMPLE = JSON.stringify({
     pages: [{
       page: 1,
       elements: [
-        { id: 'image_1', type: 'image', role: 'hero', col_start: 1, col_span: 4, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center' },
-        { id: 'para_1', type: 'text', role: 'body', text_source: 'paragraph_1', col_start: 5, col_span: 2, row_start: 1, row_span: 5 },
-        { id: 'para_2', type: 'text', role: 'body', text_source: 'paragraph_2', col_start: 1, col_span: 3, row_start: 6, row_span: 4 },
-        { id: 'para_3', type: 'text', role: 'body', text_source: 'paragraph_3', col_start: 4, col_span: 3, row_start: 6, row_span: 4 },
+        // group 0: image + its heading + its body. Image and text share col_start 1 (a common
+        // alignment edge) and are directly stacked, so they read as one unit.
+        { id: 'image_1', type: 'image', role: 'hero', group_id: 0, col_start: 1, col_span: 3, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center' },
+        { id: 'para_1', type: 'text', role: 'section_label', group_id: 0, text_source: 'paragraph_1', col_start: 1, col_span: 3, row_start: 6, row_span: 1 },
+        { id: 'para_2', type: 'text', role: 'body', group_id: 0, text_source: 'paragraph_2', col_start: 1, col_span: 3, row_start: 7, row_span: 4 },
+        // group 1: a separate unit in its own column band -- no overlap with group 0's rectangle.
+        { id: 'image_2', type: 'image', role: 'support', group_id: 1, col_start: 4, col_span: 3, row_start: 1, row_span: 5, fit: 'contain', object_position: 'center' },
+        { id: 'para_3', type: 'text', role: 'body', group_id: 1, text_source: 'paragraph_3', col_start: 4, col_span: 3, row_start: 6, row_span: 5 },
       ],
     }],
     overflow_policy: { body_overflow: 'continue_to_next_page' },
@@ -204,6 +208,7 @@ export function buildUserPrompt({
   textLayoutMode,
   imageAnalysis,
   inferredImageTextRelations,
+  contentGroups,
   imageTextMatching,
   textFlowMode,
   imageMetadata,
@@ -253,6 +258,28 @@ longer intersect and keep the required mm gap (text-text 3mm, text-image 4mm, im
       relation: rel.relation,
       confidence: rel.confidence,
     })), null, 2)}\n\n⚠️ MUST KEEP HIGH-CONFIDENCE PAIRS (confidence >= 0.7) ON SAME PAGE OR ADJACENT PAGES. Splitting them 3+ pages apart will fail editorial review.` : undefined,
+    contentGroups && contentGroups.length > 0 ? `CONTENT GROUPS (🚨 THE MOST IMPORTANT INPUT -- this is the unit you are laying out):
+${JSON.stringify(contentGroups, null, 1)}
+
+Each entry is ONE editorial unit the user authored: an image (when present) together with the
+heading, body, and any short credit/source line written for it. These are derived from the blank
+lines in the user's own input, so they are facts about the document, not suggestions.
+
+HARD REQUIREMENTS (validation rejects the layout otherwise):
+- Every element of a group goes on the SAME page. An image on one page with its caption or heading
+  on another is the single worst failure this system can produce.
+- A group occupies one contiguous rectangle of the grid. No element belonging to a DIFFERENT group
+  may be placed inside that rectangle.
+
+DESIGN REQUIREMENTS (what makes it read as one object rather than two):
+- Give a group's image and its text a shared alignment edge -- the same col_start, or the same
+  right edge (col_start + col_span - 1).
+- Keep them adjacent: the text should touch the image's edge, not float several rows away, and the
+  gap inside a group must be visibly smaller than the gap between two different groups.
+- Size the image and the text box TOGETHER, from how much text the group actually carries. Never
+  place all the images first and then pour text into whatever space is left over.
+- Groups may differ from each other in size and shape -- that variation is what creates editorial
+  rhythm. What must stay constant is that each group reads as one unit.` : undefined,
     imageTextMatching && Object.keys(imageTextMatching).length > 0 ? `Image-text relationships (suggested pairings):\n${JSON.stringify(imageTextMatching)}` : undefined,
     suggestedLayoutFamily && Object.keys(suggestedLayoutFamily).length > 0 ? `Suggested layout family (based on image count and content structure):\n${JSON.stringify(suggestedLayoutFamily)}` : undefined,
     imageMetadata && imageMetadata.length > 0 ? `Image metadata (per-image facts; estimated_role is a starting hint, you may override it):\n${JSON.stringify(imageMetadata)}` : undefined,
@@ -301,9 +328,9 @@ longer intersect and keep the required mm gap (text-text 3mm, text-image 4mm, im
    → Text directly next to/below relevant images`,
     `**Candidate 2 (GROUPED CASES)**: composition_strategy = "image_above_text" (or "text_above_image")
    → layout_family: balanced, image_hierarchy: grid_gallery or hero_support
-   → Group image-text pairs as case studies (Dove image + Dove text together, SweetyBetty image + SweetyBetty text together)
-   → Use role: section_label for case-title text blocks as section dividers (text_source field required)
-   → CRITICAL: Keep a case's title and body blocks together, not separated by pages`,
+   → Lay out one content group per module: each group's image sits directly above (or below) that same group's text, as a repeating card
+   → Use role: section_label for a group's heading blocks as section dividers (text_source field required)
+   → CRITICAL: Keep every block of one content group together, never separated across pages`,
     `**Candidate 3 (DIVERSE ASYMMETRICAL)**: composition_strategy = "images_spread_across_pages" (or "grid_gallery")
    → layout_family: image-first, image_hierarchy: page_gallery or grid_gallery
    → Vary image sizes: mix 1-col + 2-col + 3-col images (NOT all same size)
