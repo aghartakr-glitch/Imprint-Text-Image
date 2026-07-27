@@ -1,104 +1,65 @@
-// Spec: Advanced semantic role inference for text blocks
-// Uses keyword analysis, position, structure, and length cues
+// Form-based role inference for body paragraphs.
+//
+// Rewritten 2026-07-27 (gap analysis P0-2). The previous implementation matched hardcoded keywords
+// from one specific trend report -- brand names ('도브'/'Dove', '스웨티 베티'/'Sweaty Betty'),
+// topic words ('초양극화', 'LGBTQ+', '카네기'), and audience terms ('Z세대', '밀레니얼') -- and
+// mapped them to content-specific roles (brand_case, protest_case, audience_value,
+// intro_definition). Any other document (a novel, an exhibition catalogue, a research report) matched
+// none of them, so every downstream consumer that keyed off those roles silently got nothing. In
+// particular matchImageToTextBlocks.js filtered exclusively on brand_case/protest_case/intro_*, so
+// image-text pairing produced ZERO pairs for all non-trend-report input -- the direct cause of the
+// "images and text never form a relationship" symptom.
+//
+// This version uses only FORM signals, never meaning: length, terminal punctuation, quotation
+// wrapping, and position. Markdown headings never reach here (parseMarkdownDocument already assigns
+// their role from the heading level); this only classifies the remaining body paragraphs.
 
-const KEYWORD_PATTERNS = {
-  overview: ['메가 트렌드', '매크로 트렌드', 'mega trend', 'macro trend', '의미합니다', '있습니다'],
-  context: ['초양극화', '대응하고', '전 세계적인', '움직임', '강화되고', '심각해지는'],
-  audience: ['Z세대', '밀레니얼', 'Gen Z', 'millennial', '세대'],
-  protest_case: ['카네기', '시위', 'LGBTQ+', 'protest', 'demonstration', '프라이드', 'pride'],
-  brand_case_dove: ['도브', 'Dove', '#NoDigitalDistortion', 'Turn Your Back', 'Bold Glamour'],
-  brand_case_sweaty_betty: ['스웨티 베티', 'Sweaty Betty', 'Wear The Damn Shorts'],
-  quote: ['"', '"', '\''],
-  call_to_action: ['해야합니다', '필요합니다', '중요합니다', 'must', 'should', 'need'],
-}
+// A label-like line is short AND does not read as a sentence. Both conditions are required: a short
+// but properly punctuated line ("그는 떠났다.") is a real one-sentence paragraph in a novel, not a
+// label, and must stay body so it is typeset as running text.
+const LABEL_MAX_LENGTH = 40
+
+// Terminal punctuation across the scripts this system targets (Latin + CJK full-width forms).
+const SENTENCE_TERMINATORS = /[.!?。！？…]\s*$/
+
+// A quotation-only paragraph (pull quote / epigraph). Requires the whole block to be wrapped, so an
+// ordinary paragraph that merely contains a quoted phrase is unaffected.
+const WRAPPED_IN_QUOTES = /^\s*["'"'«『「](.|\n)*["'"'»』」]\s*$/
 
 export function inferBlockRole(text, isFirstBlock = false) {
-  if (!text) return 'unknown'
+  if (!text) return 'body'
 
-  const lowerText = text.toLowerCase()
+  const trimmed = String(text).trim()
+  if (!trimmed) return 'body'
 
-  // First block heuristic: usually overview/intro
-  if (isFirstBlock) {
-    // But check if it's actually a case or other role
-    for (const [role, keywords] of Object.entries(KEYWORD_PATTERNS)) {
-      if (role === 'quote') continue
-      if (keywords.some((kw) => lowerText.includes(kw.toLowerCase()))) {
-        return mapPatternToRole(role)
-      }
-    }
-    return 'intro_definition'
+  if (WRAPPED_IN_QUOTES.test(trimmed) && trimmed.length <= 200) {
+    return 'quote'
   }
 
-  // Check keyword patterns
-  for (const [pattern, keywords] of Object.entries(KEYWORD_PATTERNS)) {
-    if (keywords.some((kw) => lowerText.includes(kw.toLowerCase()))) {
-      return mapPatternToRole(pattern)
-    }
-  }
-
-  // Check text structure cues
-  const charCount = text.length
-  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 0)
-  const avgSentenceLength = charCount / Math.max(sentences.length, 1)
-
-  // Long, flowing text without obvious role markers
-  if (charCount > 300 && avgSentenceLength > 50) {
-    return 'body'
-  }
-
-  // Short, focused text
-  if (charCount < 150) {
-    // Could be a label, case title, or conclusion
-    if (lowerText.includes('result') || lowerText.includes('conclusion') || lowerText.includes('결론')) {
-      return 'conclusion'
-    }
+  // Short, unpunctuated line -> a label/standfirst rather than running text. isFirstBlock is
+  // deliberately NOT special-cased into an "intro" role: whether the opening paragraph deserves
+  // visual emphasis is a genre/layout decision, not a property of the text, and the old
+  // intro_definition role existed only to feed the hardcoded matcher.
+  if (trimmed.length <= LABEL_MAX_LENGTH && !SENTENCE_TERMINATORS.test(trimmed)) {
     return 'section_label'
   }
 
   return 'body'
 }
 
-function mapPatternToRole(pattern) {
-  const roleMap = {
-    overview: 'intro_definition',
-    context: 'context',
-    audience: 'audience_value',
-    protest_case: 'protest_case',
-    brand_case_dove: 'brand_case',
-    brand_case_sweaty_betty: 'brand_case',
-    quote: 'quote',
-    call_to_action: 'call_to_action',
-  }
-
-  return roleMap[pattern] || 'body'
-}
-
-export function extractBrandFromRole(text, role) {
-  if (role !== 'brand_case') return null
-
-  const lowerText = text.toLowerCase()
-
-  if (KEYWORD_PATTERNS.brand_case_dove.some((kw) => lowerText.includes(kw.toLowerCase()))) {
-    return 'Dove'
-  }
-  if (KEYWORD_PATTERNS.brand_case_sweaty_betty.some((kw) => lowerText.includes(kw.toLowerCase()))) {
-    return 'Sweaty Betty'
-  }
-
-  return null
-}
-
+// Style hints keyed by the form-based role vocabulary this module now emits, plus the heading roles
+// parseMarkdownDocument assigns. Unknown roles fall back to body styling rather than throwing, so a
+// new role added upstream degrades gracefully instead of breaking rendering.
 export function getBlockStylingHints(role) {
   const hints = {
-    intro_definition: { style: 'intro_text', emphasis: 'high' },
-    context: { style: 'body_text', emphasis: 'medium' },
-    audience_value: { style: 'body_text', emphasis: 'medium' },
-    protest_case: { style: 'case_body_text', emphasis: 'high' },
-    brand_case: { style: 'case_body_text', emphasis: 'high' },
-    conclusion: { style: 'conclusion_text', emphasis: 'high' },
-    quote: { style: 'quote_text', emphasis: 'high' },
-    body: { style: 'body_text', emphasis: 'low' },
+    title: { style: 'title_text', emphasis: 'high' },
     section_label: { style: 'label_text', emphasis: 'high' },
+    case_title_ko: { style: 'case_title_text', emphasis: 'high' },
+    label: { style: 'label_text', emphasis: 'medium' },
+    quote: { style: 'quote_text', emphasis: 'high' },
+    caption: { style: 'caption_text', emphasis: 'low' },
+    list_item: { style: 'body_text', emphasis: 'low' },
+    body: { style: 'body_text', emphasis: 'low' },
   }
 
   return hints[role] || { style: 'body_text', emphasis: 'low' }

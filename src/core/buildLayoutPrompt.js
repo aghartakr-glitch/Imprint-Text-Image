@@ -68,25 +68,22 @@ Fixed constraints:
   - 🔴 FORBIDDEN: text_source: "body_all" (will fail validation and reject entire layout)
   - 🔴 FORBIDDEN: omitting text_source (will fail validation)
   - 🔴 FORBIDDEN: role values other than title/subtitle/body/section_label/page_number/continuation_body
-  - WHY: User separated paragraphs by blank lines on purpose. Each paragraph has a detected content role (overview, brand_case, section_title, etc.) supplied to you below as CONTEXT ONLY -- use it to decide layout/placement/grouping, but the output "role" field must still be one of the 6 values above (section headers and case titles both use role: "section_label"; ordinary paragraphs use role: "body").
+  - WHY: User separated paragraphs by blank lines on purpose. Each paragraph carries a structural role derived from its Markdown level and length, supplied below as CONTEXT ONLY -- use it to decide layout/placement/grouping, but the output "role" field must still be one of the 6 values above (headings of any level use role: "section_label"; ordinary paragraphs use role: "body").
 
-  Placement Guidance (paragraph content roles are pre-detected and provided as context, not as output role values):
-  * "overview" paragraphs (メガトレンド, 意味) → place at page top or intro area for context
-  * "context" paragraphs (初期化, 전 세계, 움직임) → near hero image or after overview
-  * "brand_case_dove" paragraphs → place near Dove image OR on same page/adjacent page
-  * "brand_case_sweaty_betty" paragraphs → place near Sweaty Betty image OR same page
-  * "case_title_ko" or "case_title_en" (커뮤니티 액티비즘, COMMUNITY ACTIVISM) → use as section header (role: section_label), prominent placement
-  * "protest_case" paragraphs (카네기, 시위, LGBTQ+) → place near crowd/protest image
-  * "section_title" (DESIGN CASE STUDIES) → separate visual element (role: section_label), NOT merged with body text
-  * "credit" (Sweaty Betty, Deepti Khatri) → small text (role: body), typically below case study
+  Placement Guidance (structural, applies to any subject matter -- never assume what the text or images are ABOUT):
+  * Heading blocks (short, from a Markdown heading level) → prominent placement as a section header (role: section_label), never merged into a body box
+  * The shallowest heading level present acts as the strongest break: give it the most surrounding space
+  * A short trailing line at the end of a content group that has an image → treat as a caption-like credit (role: body), small, placed directly against that image's edge
+  * Long prose paragraphs → give them a readable measure; prefer fewer, wider columns over many narrow ones
+  * The opening content group of the document may be given extra space as an opener, if the layout benefits
 
   Image-Text Proximity (CRITICAL for editorial quality):
-  * IF inferred_image_text_relations has high-confidence match (confidence >= 0.7):
-    - MUST place text block and related image on same page OR within 1 page distance
-    - MUST NOT place them 3+ pages apart (reader loses context)
-    - BONUS: same page or adjacent spread is preferred
-  * Dove text + Dove image = high confidence → same page or spread
-  * Protest text + crowd image = high confidence → same page or spread
+  * Images and text are NOT independent boxes competing for grid space. Every image belongs to the content group named in inferred_image_text_relations / image_text_matching below.
+  * IF a relation has confidence >= 0.7:
+    - MUST place the text block and its related image on the SAME page (or at worst within 1 page)
+    - MUST NOT place them 3+ pages apart (the reader loses the connection)
+  * An image and the text of its own content group should share an alignment edge (same col_start, or same col_end) and sit adjacent, so they read as one unit rather than two unrelated objects.
+  * Do NOT position images first and then pour text into whatever space is left. Decide the size of an image together with how much text its group carries.
 
   CONSEQUENCE: If you ignore this, the layout will be rejected and fallback deterministic layout used instead.
 
@@ -243,13 +240,13 @@ longer intersect and keep the required mm gap (text-text 3mm, text-image 4mm, im
       char_count: b.char_count,
       group_id: b.group_id,
     })))}\n\n🚨 group_id (CRITICAL): the user wrote these paragraphs with NO blank line between some of\nthem on purpose -- blocks sharing the same group_id were glued together deliberately (e.g. a\nKorean heading + English heading + its body paragraph, with no blank line separating any of\nthem) and MUST be placed on the SAME page, adjacent to each other with no other element between\nthem. Treat each group_id as one content card: paragraph_N references are sub-blocks inside\nthat card, not independent objects. Never place only the headings of a group while leaving its\nbody to overflow later. If the whole group cannot fit, move the whole group together. Never split\na group across pages, never insert an unrelated element between two blocks of the same group_id.\nA blank line (different group_id) is the only place a group boundary exists.` : undefined,
-    imageAnalysis && imageAnalysis.length > 0 ? `IMAGE VISUAL ANALYSIS (pre-analyzed for you):\n${JSON.stringify(imageAnalysis.map((img) => ({
+    imageAnalysis && imageAnalysis.length > 0 ? `IMAGE PROPORTIONS (measured from the files -- nothing here describes what the images depict):\n${JSON.stringify(imageAnalysis.map((img) => ({
       id: img.id,
       orientation: img.orientation,
       aspect_ratio: img.aspect_ratio,
-      visual_type: img.visual_type,
-      possible_role: img.possible_role,
-    })), null, 2)}\n\nUse this to make informed placement decisions (e.g., place crowd_or_protest image near protest_case text).` : undefined,
+      shape_extremity: img.shape_extremity,
+      order_index: img.order_index,
+    })), null, 2)}\n\nUse this for SHAPE fitting only: give landscape images wide slots, portrait images tall slots, and avoid forcing a shape_extremity of "extreme" into a slot of the opposite proportion. Which image goes with which text is determined by the content-group relations below, not by these proportions.` : undefined,
     inferredImageTextRelations && inferredImageTextRelations.length > 0 ? `INFERRED IMAGE-TEXT SEMANTIC RELATIONSHIPS (high-confidence matches):\n${JSON.stringify(inferredImageTextRelations.map((rel) => ({
       text_block_id: rel.text_block_id,
       image_id: rel.image_id,

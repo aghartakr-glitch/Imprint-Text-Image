@@ -1,8 +1,6 @@
 // Deterministic, API-free paragraph-order repair. If the LLM places later paragraphs on
 // earlier pages than prior paragraphs, validation must fail because the user-authored reading
-// sequence was inverted. Text-only layouts can be rebuilt into source order, but image layouts
-// are left invalid so fallback can choose a candidate that still keeps images and related text
-// together. It never edits or fabricates text; it only changes layout placement.
+// sequence was inverted. It never edits or fabricates text; it only changes layout placement.
 
 function paragraphIndex(textSource) {
   const match = /^paragraph_(\d+)$/.exec(textSource || '')
@@ -35,20 +33,75 @@ function hasImageElement(plan) {
     Array.isArray(page.elements) && page.elements.some((el) => el.type === 'image')
   ))
 }
+
 function renumberPages(pages) {
   pages.forEach((page, i) => { page.page = i + 1 })
 }
 
+// Whole-page reordering: each page's own elements (image + any co-located text) are never
+// separated or edited -- only the ORDER of pages is changed, by sorting on each page's earliest
+// paragraph reference. A page with no text reference of its own (a pure-image page) has no
+// paragraph key to sort by; it is anchored to the nearest preceding text-bearing page's key (or,
+// if it's before any text-bearing page, to the nearest following one) so it stays next to the
+// same neighbor it started next to, rather than drifting to an arbitrary position.
+function reorderPagesByParagraphOrder(plan) {
+  const workingPlan = JSON.parse(JSON.stringify(plan))
+  const pages = workingPlan.pages
+
+  const rawKeys = pages.map((page) => {
+    const indices = (page.elements || [])
+      .map((el) => paragraphIndex(el.text_source))
+      .filter((n) => n != null)
+    return indices.length > 0 ? Math.min(...indices) : null
+  })
+
+  const keys = rawKeys.slice()
+  for (let i = 0; i < keys.length; i += 1) {
+    if (keys[i] != null) continue
+    const prevKey = [...keys.slice(0, i)].reverse().find((k) => k != null)
+    const nextIdx = keys.findIndex((k, j) => j > i && k != null)
+    const nextKey = nextIdx === -1 ? null : keys[nextIdx]
+    if (prevKey != null) {
+      keys[i] = prevKey + 0.5
+    } else if (nextKey != null) {
+      keys[i] = nextKey - 0.5
+    } else {
+      keys[i] = i // no text anywhere in the plan -- keep original order
+    }
+  }
+
+  const order = pages.map((_, i) => i).sort((a, b) => (keys[a] - keys[b]) || (a - b))
+  workingPlan.pages = order.map((i) => pages[i])
+  renumberPages(workingPlan.pages)
+  return workingPlan
+}
+
 export function repairParagraphOrder(plan) {
   if (!hasParagraphOrderViolation(plan)) return { plan, repaired: false, actions: [] }
+
   if (hasImageElement(plan)) {
+    const reordered = reorderPagesByParagraphOrder(plan)
+    if (hasParagraphOrderViolation(reordered)) {
+      // Some elements are split across multiple pages under the same paragraph index (e.g. an
+      // overflowed body continuing onto a later page) in a way whole-page reordering can't
+      // resolve without separating an image from its co-located text -- leave the plan
+      // untouched so the caller's fallback path can pick a different candidate instead.
+      return {
+        plan,
+        repaired: false,
+        skipped: true,
+        actions: [{
+          action: 'skip_paragraph_order_repair_for_image_layout',
+          reason: 'whole-page reordering did not fully resolve the violation without separating an image from its co-located text',
+        }],
+      }
+    }
     return {
-      plan,
-      repaired: false,
-      skipped: true,
+      plan: reordered,
+      repaired: true,
       actions: [{
-        action: 'skip_paragraph_order_repair_for_image_layout',
-        reason: 'rebuilding text pages would separate images from their related text',
+        action: 'reorder_pages_by_paragraph_order',
+        reason: 'pages were reordered as whole units (images stay with their co-located text) to match paragraph_N reading order',
       }],
     }
   }

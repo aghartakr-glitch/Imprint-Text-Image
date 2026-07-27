@@ -316,12 +316,26 @@ export async function runGeneration({
     }
     : await callLayoutLLM({ promptContext, imageCount: analysis.imageCount, textBlocks: textBlocksAdvanced }, llmOptions)
 
-  // CRITICAL: best-effort rendering is banned (user directive). If no candidate reached a clean
-  // validation pass, fail hard -- do NOT fabricate output from a plan that failed raw validation.
-  // (Not reached when skipLlmWhenSpecializedPasses is true, since llmResult.fallbackUsed is false
-  // and specializedCandidate below guarantees at least one candidate in the pool.)
+  // LLM succeeded (or was skipped) - candidates available
+  const candidatePool = llmResult.candidates || []
+  const recentLayouts = loadRecentLayouts(diversityHistoryPath)
+
+  // Add the specialized layout as a candidate (already built/validated above, at zero extra API
+  // cost). This must happen BEFORE the fallbackUsed hard-fail check below: specializedCandidate
+  // already passed the exact same validateLayoutPlan check the LLM's own candidates go through --
+  // it is not a "best-effort"/unvalidated render, so there is no reason to discard it and force a
+  // paid retry just because the LLM's candidate separately failed (confirmed 2026-07-27: a real
+  // generation had a valid specializedCandidate available but still hard-failed here, wasting the
+  // API spend that had already happened for a document that could have rendered for free).
+  if (specializedCandidate) {
+    candidatePool.push(specializedCandidate)
+  }
+
+  // CRITICAL: best-effort rendering is banned (user directive) -- if NEITHER the LLM NOR the
+  // deterministic specialized builder produced a validated candidate, fail hard rather than
+  // fabricate output from a plan that failed raw validation.
   const bestEffortUsed = false
-  if (llmResult.fallbackUsed) {
+  if (llmResult.fallbackUsed && candidatePool.length === 0) {
     const errorMsg = `LLM-based layout reasoning failed: ${llmResult.fallbackReason || 'no candidate passed validation'}. Best-effort rendering is disabled; layout generation requires a fully validated candidate.`
     console.error(`[GENERATION FAILED] ${errorMsg}`)
     return {
@@ -332,15 +346,6 @@ export async function runGeneration({
       llm_reasoning_available: false,
       suggested_action: 'Check LLM API, cost budget, or schema parsing. Best-effort/rule-based fallback is disabled.',
     }
-  }
-
-  // LLM succeeded (or was skipped) - candidates available
-  const candidatePool = llmResult.candidates || []
-  const recentLayouts = loadRecentLayouts(diversityHistoryPath)
-
-  // Add the specialized layout as a candidate (already built/validated above).
-  if (specializedCandidate) {
-    candidatePool.push(specializedCandidate)
   }
 
   // Validate candidates are available (should not happen if LLM succeeded above)

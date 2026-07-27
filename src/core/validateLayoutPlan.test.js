@@ -169,6 +169,100 @@ test('rejects interleaving another content group inside a group', () => {
   assert.ok(result.issues.some((i) => i.includes('interleaved')), JSON.stringify(result.issues))
 })
 
+// Regression: confirmed 2026-07-27 -- a real 2-column case-studies generation failed with groups
+// 3/4/5/6 all reported pairwise "interleaved" because the old check linearized the page row-major:
+// side-by-side columns alternate row by row under that ordering, so legitimate multi-column
+// layouts (group A filling the left column, group B the right column) could never pass. Groups in
+// disjoint column bands must not be considered interleaved or out of order.
+test('accepts side-by-side content groups in separate columns of the same page', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        { id: 'g1_title', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 3, row_start: 1, row_span: 1, text_source: 'paragraph_1' },
+        { id: 'g1_body', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 3, row_start: 2, row_span: 4, text_source: 'paragraph_2' },
+        { id: 'g2_title', type: 'text', role: 'section_label', page: 1, col_start: 4, col_span: 3, row_start: 1, row_span: 1, text_source: 'paragraph_3' },
+        { id: 'g2_body', type: 'text', role: 'body', page: 1, col_start: 4, col_span: 3, row_start: 2, row_span: 4, text_source: 'paragraph_4' },
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 0,
+    textBlocks: [
+      { id: 'p1', role: 'section_label', text: 'Case A', char_count: 6, group_id: 1 },
+      { id: 'p2', role: 'body', text: 'Body A.', char_count: 7, group_id: 1 },
+      { id: 'p3', role: 'section_label', text: 'Case B', char_count: 6, group_id: 2 },
+      { id: 'p4', role: 'body', text: 'Body B.', char_count: 7, group_id: 2 },
+    ],
+  })
+  assert.equal(result.passed, true, JSON.stringify(result.issues))
+  assert.ok(!result.issues.some((i) => i.includes('interleaved')), JSON.stringify(result.issues))
+})
+
+// Regression (second pass): the first fix grouped a page's blocks into reading flows by TRANSITIVE
+// column-range overlap, which collapses back into one flow as soon as a block is slightly too
+// wide. Taken verbatim from the real failing plan of 2026-07-27: left-column blocks at col 1-2 and
+// col 1-3, right-column blocks at col 3-4. col 1-3 and col 3-4 share column 3, so transitivity
+// chained the whole page together and reproduced the row-major false positives. Reading order here
+// is left column (16,17,18,19) then right column (20,21) -- entirely correct, no violation.
+test('accepts a page whose left-column blocks are wider than the right column (overlapping but distinct bands)', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        { id: 'p16', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 2, row_start: 1, row_span: 1, text_source: 'paragraph_1' },
+        { id: 'p17', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 2, row_start: 3, row_span: 2, text_source: 'paragraph_2' },
+        { id: 'p18', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 3, row_start: 7, row_span: 1, text_source: 'paragraph_3' },
+        { id: 'p19', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 3, row_start: 9, row_span: 2, text_source: 'paragraph_4' },
+        { id: 'p20', type: 'text', role: 'section_label', page: 1, col_start: 3, col_span: 2, row_start: 1, row_span: 1, text_source: 'paragraph_5' },
+        { id: 'p21', type: 'text', role: 'body', page: 1, col_start: 3, col_span: 2, row_start: 3, row_span: 2, text_source: 'paragraph_6' },
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 0,
+    textBlocks: [
+      { id: 'p1', role: 'section_label', text: 'A', char_count: 1, group_id: 8 },
+      { id: 'p2', role: 'body', text: 'Body A.', char_count: 7, group_id: 8 },
+      { id: 'p3', role: 'section_label', text: 'B', char_count: 1, group_id: 9 },
+      { id: 'p4', role: 'body', text: 'Body B.', char_count: 7, group_id: 9 },
+      { id: 'p5', role: 'section_label', text: 'C', char_count: 1, group_id: 10 },
+      { id: 'p6', role: 'body', text: 'Body C.', char_count: 7, group_id: 10 },
+    ],
+  })
+  assert.ok(!result.issues.some((i) => i.includes('interleaved')), JSON.stringify(result.issues))
+  assert.ok(!result.issues.some((i) => i.includes('order violation')), JSON.stringify(result.issues))
+  assert.ok(!result.issues.some((i) => i.includes('order is inverted')), JSON.stringify(result.issues))
+})
+
+// Companion regression: a single group continuing from the bottom of the left column to the top
+// of the right column has a LOWER row number in its continuation -- the old row-major order check
+// flagged that legitimate column flow as "order is inverted".
+test('accepts a group whose body continues from the left column into the right column', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        { id: 'g1_title', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 3, row_start: 1, row_span: 1, text_source: 'paragraph_1' },
+        { id: 'g1_body_left', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 3, row_start: 2, row_span: 10, text_source: 'paragraph_2' },
+        { id: 'g1_body_right', type: 'text', role: 'body', page: 1, col_start: 4, col_span: 3, row_start: 1, row_span: 11, text_source: 'paragraph_3' },
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 0,
+    textBlocks: [
+      { id: 'p1', role: 'section_label', text: 'Case A', char_count: 6, group_id: 1 },
+      { id: 'p2', role: 'body', text: 'Body A part one.', char_count: 16, group_id: 1 },
+      { id: 'p3', role: 'body', text: 'Body A part two.', char_count: 16, group_id: 1 },
+    ],
+  })
+  assert.ok(!result.issues.some((i) => i.includes('order is inverted')), JSON.stringify(result.issues))
+})
+
 test('accepts contiguous content groups in markdown order', () => {
   const plan = validPlan({
     pages: [{

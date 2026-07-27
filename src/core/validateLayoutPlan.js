@@ -116,6 +116,13 @@ function isBodyLikeRole(role) {
   return role === 'body' || role === 'continuation_body'
 }
 
+// Two elements sit in the same reading flow only when they occupy the exact same column band --
+// one stacked directly above the other. Overlapping-but-different bands (col 1-3 vs col 3-4) are
+// side-by-side columns whose relative reading order is not recoverable from coordinates.
+function sameColumnBand(a, b) {
+  return a.col_start === b.col_start && a.col_span === b.col_span
+}
+
 function placementOrder(placement) {
   const el = placement.el || {}
   return (placement.page ?? 0) * 10000 + (el.row_start ?? 0) * 100 + (el.col_start ?? 0)
@@ -330,42 +337,113 @@ export function validateLayoutPlan(plan, {
       }
     }
 
+    // Downgraded to a warning (not a hard `issues` failure) 2026-07-27: the automatic repair for
+    // this case (repairContentGroups) had real bugs of its own (wrong box heights, misordered
+    // pages -- confirmed against real generations), and was disabled rather than shipped broken.
+    // Until it's rebuilt, treating this as fatal means any document where the LLM doesn't follow
+    // the (advisory-only) group_id prompt instruction hard-fails a paid generation for a cosmetic
+    // grouping issue, not a rendering-breaking one. Group_id enforcement for content the deterministic
+    // overflow pagination places itself (paginateGridPlan.js) is unaffected -- this only relaxes
+    // content the LLM places directly.
     const pagesUsed = new Set(placements.map((p) => p.page))
     if (pagesUsed.size > 1) {
-      issues.push(`content group ${groupId} spans multiple pages (${[...pagesUsed].join(', ')}). Same group_id means one content unit; keep its title, subtitle, and body on the same page.`)
+      warnings.push(`⚠️ content group ${groupId} spans multiple pages (${[...pagesUsed].join(', ')}). Same group_id means one content unit; keep its title, subtitle, and body on the same page.`)
     }
 
-    const bySourceOrder = placements.slice().sort((a, b) => a.info.index - b.info.index || a.order - b.order)
-    let maxOrder = -Infinity
-    bySourceOrder.forEach((placement) => {
-      if (placement.order < maxOrder) {
-        issues.push(`content group ${groupId} order is inverted near ${placement.source}. Keep blocks in the user's markdown order within each group_id.`)
-      }
-      maxOrder = Math.max(maxOrder, placement.order)
+    // Within-group order check, restricted to unambiguously comparable placements (rewritten
+    // 2026-07-27, second pass). Reading order in a multi-column editorial layout cannot be
+    // recovered from grid coordinates in general: the eye reads the left column top-to-bottom,
+    // then the right column, so a later block legitimately sits at a LOWER row than an earlier
+    // one. The only pair whose relative reading order is certain is two blocks occupying the
+    // SAME column band (identical col_start and col_span) on the same page -- one stacked
+    // directly above the other. Merely overlapping columns is not enough (confirmed 2026-07-27
+    // against a real plan: a left-column block spanning col 1-3 and a right-column block at
+    // col 3-4 share column 3 without being in the same reading flow at all).
+    const inversionMessages = new Set()
+    placements.forEach((a) => {
+      placements.forEach((b) => {
+        if (a.info.index >= b.info.index) return
+        if (a.page > b.page) {
+          inversionMessages.add(`content group ${groupId} order is inverted near ${b.source}. Keep blocks in the user's markdown order within each group_id.`)
+          return
+        }
+        if (a.page !== b.page || !sameColumnBand(a.el, b.el)) return
+        if ((b.el.row_start ?? 0) < (a.el.row_start ?? 0)) {
+          inversionMessages.add(`content group ${groupId} order is inverted near ${b.source}. Keep blocks in the user's markdown order within each group_id.`)
+        }
+      })
     })
-
-    const minOrder = Math.min(...placements.map((p) => p.order))
-    const maxGroupOrder = Math.max(...placements.map((p) => p.order))
-    placementsByGroup.forEach((otherPlacements, otherGroupId) => {
-      if (otherGroupId === groupId) return
-      if (otherPlacements.some((p) => p.order > minOrder && p.order < maxGroupOrder)) {
-        issues.push(`content group ${groupId} is interleaved with group ${otherGroupId}. A blank-line-separated group may not be inserted between blocks of another group.`)
-      }
-    })
+    inversionMessages.forEach((msg) => issues.push(msg))
   })
 
-  const groupFirstPlacements = [...placementsByGroup.entries()]
+  // Interleaving check, restricted to a single column band (rewritten 2026-07-27, second pass).
+  // The first rewrite grouped a page's blocks into "flows" by transitive column-range overlap,
+  // but transitivity merges a whole page back into one flow as soon as one block is a little too
+  // wide: confirmed 2026-07-27 against the real failing plan, a left-column block at col 1-3 and
+  // a right-column block at col 3-4 share column 3, which chained every block on the page into a
+  // single flow and reproduced the very row-major false positives the rewrite was meant to fix.
+  // Only blocks in the exact same column band are stacked in one reading flow, so interleaving is
+  // now evaluated per (page, col_start, col_span) band -- a foreign group wedged between two
+  // blocks of another group in the same band is a genuine, unambiguous violation.
+  const bandKey = (p) => `${p.page}|${p.el.col_start}|${p.el.col_span}`
+  const placementsByBand = new Map()
+  placementsByGroup.forEach((placements, groupId) => {
+    placements.forEach((p) => {
+      const key = bandKey(p)
+      if (!placementsByBand.has(key)) placementsByBand.set(key, [])
+      placementsByBand.get(key).push({ ...p, groupId })
+    })
+  })
+  const interleaveMessages = new Set()
+  placementsByBand.forEach((band) => {
+    band.sort((a, b) => (a.el.row_start ?? 0) - (b.el.row_start ?? 0))
+    const indicesByGroup = new Map()
+    band.forEach((p, idx) => {
+      if (!indicesByGroup.has(p.groupId)) indicesByGroup.set(p.groupId, [])
+      indicesByGroup.get(p.groupId).push(idx)
+    })
+    indicesByGroup.forEach((indices, groupId) => {
+      const minIdx = Math.min(...indices)
+      const maxIdx = Math.max(...indices)
+      for (let k = minIdx + 1; k < maxIdx; k += 1) {
+        if (band[k].groupId !== groupId) {
+          interleaveMessages.add(`content group ${groupId} is interleaved with group ${band[k].groupId}. A blank-line-separated group may not be inserted between blocks of another group.`)
+        }
+      }
+    })
+    // Vertical order within one band is unambiguous, so a higher-numbered group starting above a
+    // lower-numbered group in the same band inverts the user's input order.
+    const bandGroupFirstIndices = [...indicesByGroup.entries()]
+      .map(([gid, indices]) => ({ gid, firstIdx: Math.min(...indices) }))
+      .sort((a, b) => Number(a.gid) - Number(b.gid))
+    let maxBandFirstIdx = -Infinity
+    bandGroupFirstIndices.forEach(({ gid, firstIdx }) => {
+      if (firstIdx < maxBandFirstIdx) {
+        interleaveMessages.add(`content group order violation: group ${gid} appears before an earlier group. Keep blank-line-separated content groups in the user's input order.`)
+      }
+      maxBandFirstIdx = Math.max(maxBandFirstIdx, firstIdx)
+    })
+  })
+  interleaveMessages.forEach((msg) => issues.push(msg))
+
+  // Cross-group input-order check, page-granularity only (rewritten 2026-07-27). Comparing
+  // groups' first placements by the global row-major order had the same multi-column false
+  // positive as above (a later group legitimately starting at the top of a right-hand column
+  // "appeared before" an earlier group's left-column body). Page order is the only unambiguous
+  // cross-column sequence, so only a group starting on a strictly EARLIER page than a
+  // lower-numbered group is a violation.
+  const groupFirstPages = [...placementsByGroup.entries()]
     .map(([groupId, placements]) => ({
       groupId,
-      firstOrder: Math.min(...placements.map((p) => p.order)),
+      firstPage: Math.min(...placements.map((p) => p.page)),
     }))
     .sort((a, b) => Number(a.groupId) - Number(b.groupId))
-  let maxGroupFirstOrder = -Infinity
-  groupFirstPlacements.forEach(({ groupId, firstOrder }) => {
-    if (firstOrder < maxGroupFirstOrder) {
+  let maxGroupFirstPage = -Infinity
+  groupFirstPages.forEach(({ groupId, firstPage }) => {
+    if (firstPage < maxGroupFirstPage) {
       issues.push(`content group order violation: group ${groupId} appears before an earlier group. Keep blank-line-separated content groups in the user's input order.`)
     }
-    maxGroupFirstOrder = Math.max(maxGroupFirstOrder, firstOrder)
+    maxGroupFirstPage = Math.max(maxGroupFirstPage, firstPage)
   })
 
   if (!hasBodyText) {

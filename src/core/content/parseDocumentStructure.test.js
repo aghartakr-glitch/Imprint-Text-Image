@@ -36,23 +36,38 @@ Third paragraph below.`,
   assert.equal(result.text_blocks.length, 3)
 })
 
-test('parseDocumentStructure: infers roles from keywords', () => {
-  const result = parseDocumentStructure({
+// Replaces 'infers roles from keywords' (2026-07-27, gap analysis P0-2). Roles must come from form,
+// never from subject matter, so this asserts the same document shape produces the same roles
+// whatever the words are -- the property the brand-keyword version could not satisfy.
+test('parseDocumentStructure: infers roles from form, identically across unrelated subject matter', () => {
+  const shape = (a, b, c) => `${a}\n\n${b}\n\n${c}`
+
+  const trendReport = parseDocumentStructure({
     title: 'Test',
-    text: `메가 트렌드에 대해 이야기합니다.
-
-Z세대는 다릅니다.
-
-카네기 홀에서의 시위.
-
-도브의 캠페인입니다.`,
+    text: shape(
+      '커뮤니티 액티비즘',
+      '스웨티 베티는 스포츠 액티비스트와 협업하여 새로운 스포츠 히잡을 선보였습니다. 활동적인 움직임에도 흐트러지지 않도록 설계했습니다.',
+      '기호 문양',
+    ),
+  })
+  const novel = parseDocumentStructure({
+    title: 'Test',
+    text: shape(
+      '첫 번째 밤',
+      '그는 오래된 계단을 천천히 내려갔다. 아래층에서 들려오는 소리는 점점 또렷해지고 있었다. 문 앞에서 잠시 멈춰 섰다.',
+      '두 번째 밤',
+    ),
   })
 
-  const roles = result.text_blocks.map((b) => b.role)
-  assert.ok(roles.includes('intro_definition') || roles.includes('context'))
-  assert.ok(roles.includes('audience_value'))
-  assert.ok(roles.includes('protest_case'))
-  assert.ok(roles.includes('brand_case'))
+  assert.deepEqual(
+    trendReport.text_blocks.map((b) => b.role),
+    novel.text_blocks.map((b) => b.role),
+    '같은 형식이면 내용과 무관하게 같은 역할이 나와야 함',
+  )
+  // A short unpunctuated line is a label; the multi-sentence paragraph is body.
+  assert.equal(novel.text_blocks[0].role, 'section_label')
+  assert.equal(novel.text_blocks[1].role, 'body')
+  assert.equal(novel.text_blocks[2].role, 'section_label')
 })
 
 test('parseDocumentStructure: does not merge body_all by default', () => {

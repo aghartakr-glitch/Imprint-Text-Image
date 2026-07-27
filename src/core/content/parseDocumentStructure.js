@@ -119,18 +119,15 @@ function inferTextLayoutMode(blocks, paragraphCount) {
   const hasHeadings = blocks.some((b) => b.type === 'heading')
   const hasList = blocks.some((b) => b.type === 'list_item')
   const hasQuotes = blocks.some((b) => b.type === 'quote')
-  const hasCases = blocks.some((b) => b.role === 'case_body' || b.role === 'protest_case' || b.role === 'brand_case')
-  const hasLabels = blocks.some((b) => b.type === 'label')
+  // A repeating entry structure shows up as two or more short label blocks (headings or
+  // label-like paragraphs), regardless of what those labels say -- replaced the old
+  // case_body/protest_case/brand_case role check, which only ever matched one trend report.
+  const labelLikeCount = blocks.filter((b) => b.role === 'section_label' || b.role === 'label' || b.type === 'label').length
+  const hasRepeatingEntries = labelLikeCount >= 2
 
-  // Modular: many distinct sections or cases
-  if (hasCases || hasLabels || (hasHeadings && paragraphCount > 4) || hasList) {
+  // Modular: many distinct sections or repeated entries
+  if (hasRepeatingEntries || (hasHeadings && paragraphCount > 4) || hasList) {
     return 'modular_blocks'
-  }
-
-  // Hybrid: intro + cases
-  const hasIntro = blocks.some((b) => b.role === 'intro_definition' || b.role === 'overview')
-  if (hasIntro && hasCases) {
-    return 'hybrid_flow'
   }
 
   // Hybrid: mixed structure with multiple sections
@@ -142,19 +139,22 @@ function inferTextLayoutMode(blocks, paragraphCount) {
   return 'continuous_flow'
 }
 
+// Structural shape of a block, surfaced to the layout stage as a hint.
+//
+// Replaced 2026-07-27 (gap analysis P0-2): this used to scan for 'Dove', 'Sweaty Betty', 'LGBTQ+',
+// 'feminism', 'activism' and report "detected: ..." -- a description of one specific document's
+// subject matter that was meaningless (always empty) for every other input. The hint now describes
+// the block's FORM, which is what a layout engine can actually act on.
 function analyzeSemanticContent(text) {
-  const keywords = [
-    'trend', 'context', 'audience', 'case', 'protest', 'brand',
-    'Dove', 'Sweaty Betty', 'LGBTQ+', 'feminism', 'activism',
-  ]
+  const trimmed = String(text || '').trim()
+  if (!trimmed) return ''
 
-  const foundKeywords = keywords.filter((kw) =>
-    text.toLowerCase().includes(kw.toLowerCase())
-  )
+  const charCount = trimmed.length
+  const lineCount = trimmed.split(/\r?\n/).length
+  const sentenceCount = trimmed.split(/[.!?。！？…]+/).filter((s) => s.trim().length > 0).length
 
-  if (foundKeywords.length > 0) {
-    return `detected: ${foundKeywords.join(', ')}`
-  }
-
-  return ''
+  if (lineCount === 1 && charCount <= 60 && sentenceCount <= 1) return 'short_label_line'
+  if (charCount >= 400) return 'long_prose'
+  if (sentenceCount >= 2) return 'multi_sentence_prose'
+  return 'single_sentence'
 }

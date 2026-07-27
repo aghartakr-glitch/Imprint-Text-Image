@@ -1,5 +1,33 @@
 // Image analysis for editorial layout planning.
-// Infers visual characteristics, likely role, and matching hints from image metadata.
+//
+// Rewritten 2026-07-27 (gap analysis P0-2c). The previous version inferred SUBJECT MATTER from
+// aspect ratio alone -- a landscape image wider than 1.5 was labelled 'crowd_or_protest', a portrait
+// became 'portrait_or_person', a square became 'abstract_or_mood'. Those labels were then handed to
+// the LLM as if they described the picture. For anything but the one trend report they were simply
+// wrong: an exhibition catalogue's wide artwork shot and a product catalogue's wide packshot were
+// both announced to the model as protest photography.
+//
+// Nothing here can actually see the image, so this module now reports only what the file genuinely
+// tells us -- proportions and order -- and stops guessing content. Placement decisions that used to
+// key off the invented visual_type come from the image's content group instead (see
+// matchImageToTextBlocks.js).
+
+// Shape affects layout (a tall image cannot fill a wide slot without heavy cropping), so orientation
+// is retained -- it is measured, not inferred.
+function orientationOf(aspectRatio) {
+  if (aspectRatio > 1.2) return 'landscape'
+  if (aspectRatio < 0.8) return 'portrait'
+  return 'square'
+}
+
+// How far from square, used downstream to judge how much a slot's proportions may deviate before the
+// image has to be cropped hard. Purely geometric.
+function extremityOf(aspectRatio) {
+  const ratio = aspectRatio >= 1 ? aspectRatio : 1 / aspectRatio
+  if (ratio >= 2.2) return 'extreme'
+  if (ratio >= 1.5) return 'strong'
+  return 'moderate'
+}
 
 export function analyzeImages({ imageMetadata = [] }) {
   if (!Array.isArray(imageMetadata) || imageMetadata.length === 0) {
@@ -8,39 +36,17 @@ export function analyzeImages({ imageMetadata = [] }) {
 
   const image_analysis = imageMetadata.map((img, idx) => {
     const aspectRatio = img.aspectRatio || 1.0
-    const orientation = aspectRatio > 1.2 ? 'landscape' : aspectRatio < 0.8 ? 'portrait' : 'square'
-
-    // Heuristic visual type detection (in real app, would use ML/vision API)
-    let visual_type = 'unknown'
-    if (orientation === 'landscape' && aspectRatio > 1.5) {
-      // Wide landscape often used for crowds, protests, broad scenes
-      visual_type = 'crowd_or_protest'
-    } else if (orientation === 'portrait') {
-      visual_type = 'portrait_or_person'
-    } else if (orientation === 'square') {
-      // Square could be product, mood, installation
-      visual_type = 'abstract_or_mood'
-    }
-
-    // Infer possible role based on image characteristics
-    let possible_role = 'support_image'
-    if (idx === 0) {
-      possible_role = 'hero_image' // First image is often hero
-    } else if (imageMetadata.length <= 2) {
-      possible_role = 'mood_image'
-    } else if (visual_type === 'crowd_or_protest') {
-      possible_role = 'case_image'
-    }
 
     return {
       id: img.id || `image_${idx + 1}`,
-      orientation,
+      orientation: orientationOf(aspectRatio),
       aspect_ratio: aspectRatio,
-      visual_type,
-      possible_role,
-      detected_keywords: [], // Would be populated by actual analysis
-      filename_hints: img.filename ? [img.filename] : [],
+      shape_extremity: extremityOf(aspectRatio),
+      // Position in the user's upload order -- the only ordering signal that actually exists. A
+      // caller may choose to treat the first image as the lead image, but that is a layout
+      // convention applied downstream, not a claim about what the image depicts.
       order_index: idx + 1,
+      filename_hints: img.filename ? [img.filename] : [],
     }
   })
 

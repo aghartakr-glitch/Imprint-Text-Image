@@ -65,11 +65,52 @@ test('repairs paragraph first-page inversions by rebuilding text pages in source
   assert.ok(actions.some((action) => action.action === 'rebuild_text_pages_in_paragraph_order'))
 })
 
-test('skips paragraph-order rebuilding when images are present because it would separate image-text pairs', () => {
+// Regression: this case used to bail out entirely (repaired: false) just because an image was
+// present anywhere in the plan, even though the violation here is purely a page-ORDERING problem
+// -- no element needs to move relative to the page it's already on. Confirmed 2026-07-27: this was
+// the exact recurring "문단 순서 위반" failure on real image+text generations, with no repair ever
+// applied for them.
+test('reorders whole pages (images stay with their co-located text) to fix a paragraph-order violation in an image layout', () => {
+  const imageEl = {
+    id: 'image_1', type: 'image', role: 'hero', col_start: 1, col_span: 4, row_start: 1, row_span: 6, fit: 'contain', object_position: 'center', bleed: 'full',
+  }
   const plan = planWithParagraphs([
-    { page: 1, elements: [{ id: 'image_1', type: 'image', role: 'hero', col_start: 1, col_span: 4, row_start: 1, row_span: 12, fit: 'contain', object_position: 'center', bleed: 'full' }] },
-    { page: 2, elements: [text('p2_a', 'paragraph_2', 2)] },
-    { page: 3, elements: [text('p1', 'paragraph_1', 3), text('p2_b', 'paragraph_2', 3, 3)] },
+    { page: 1, elements: [imageEl, text('p3', 'paragraph_3', 1, 7)] },
+    { page: 2, elements: [text('p1', 'paragraph_1', 2)] },
+    { page: 3, elements: [text('p2', 'paragraph_2', 3)] },
+  ])
+
+  const { plan: repaired, repaired: didRepair, actions } = repairParagraphOrder(plan)
+
+  assert.equal(didRepair, true)
+  assert.ok(actions.some((action) => action.action === 'reorder_pages_by_paragraph_order'))
+  // Page 1 (image + paragraph_3) must stay intact as one unit -- moved as a whole, not split.
+  const pageWithImage = repaired.pages.find((p) => p.elements.some((el) => el.id === 'image_1'))
+  assert.ok(pageWithImage.elements.some((el) => el.text_source === 'paragraph_3'))
+
+  const after = validateLayoutPlan(repaired, {
+    imageCount: 1,
+    textBlocks: [
+      { id: 'p1', text: 'one', char_count: 3 },
+      { id: 'p2', text: 'two', char_count: 3 },
+      { id: 'p3', text: 'three', char_count: 5 },
+    ],
+  })
+  assert.ok(!after.issues.some((issue) => issue.includes('문단 순서 위반')), JSON.stringify(after.issues))
+})
+
+// A page-order permutation can't fix every violation: if one page mixes a non-contiguous spread of
+// paragraph indices (here {1, 4}) that interleaves with another page's range ({2, 3}), no ordering
+// of whole pages produces a globally non-decreasing sequence without splitting a page's elements
+// apart -- which this repair must never do for image layouts. This case is expected to remain
+// unrepaired so the caller's fallback path can pick a different candidate instead.
+test('still skips when whole-page reordering cannot resolve an interleaved-range violation', () => {
+  const imageEl = {
+    id: 'image_1', type: 'image', role: 'hero', col_start: 1, col_span: 4, row_start: 1, row_span: 6, fit: 'contain', object_position: 'center', bleed: 'full',
+  }
+  const plan = planWithParagraphs([
+    { page: 1, elements: [imageEl, text('p1', 'paragraph_1', 1, 7), text('p4', 'paragraph_4', 1, 8)] },
+    { page: 2, elements: [text('p2', 'paragraph_2', 2), text('p3', 'paragraph_3', 2, 3)] },
   ])
 
   const result = repairParagraphOrder(plan)

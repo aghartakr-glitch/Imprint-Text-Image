@@ -319,7 +319,10 @@ test('a paragraph-order inversion is repaired locally, with zero retries', async
   )
 })
 
-test('paragraph-order inversion is not locally rebuilt for image layouts', async () => {
+// Regression: this used to bail out (fallbackUsed: true) purely because an image was anywhere in
+// the plan. repairParagraphOrder now reorders whole pages (never splitting an image from its
+// co-located text) when that alone resolves the violation, so this case is repaired for free.
+test('a paragraph-order inversion in an image layout is repaired via whole-page reordering, with zero retries', async () => {
   const plan = {
     candidate_id: 'candidate_1',
     style: 'Editorial',
@@ -349,9 +352,10 @@ test('paragraph-order inversion is not locally rebuilt for image layouts', async
     { apiKey: 'sk-fake', mockMode: false, client },
   )
 
-  assert.equal(result.fallbackUsed, true)
-  assert.equal(result.candidates.length, 0)
-  assert.ok(result.rejectedCandidates[0].validation.issues.some((issue) => issue.includes('문단 순서 위반')))
+  assert.equal(result.fallbackUsed, false)
+  assert.equal(result.candidates.length, 1)
+  assert.equal(result.retryCount, 0)
+  assert.equal(result.candidates[0].validation.passed, true)
 })
 // Regression: when every candidate keeps failing validation even after repair + retry, the caller
 // used to get zero candidates and had to hard-fail with no output -- wasting the API spend that

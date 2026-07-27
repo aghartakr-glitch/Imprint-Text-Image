@@ -1,53 +1,32 @@
-// Spec: Advanced text block parsing with paragraph-level roles and metadata
-// Converts flat text into modular, identifiable text blocks with semantic roles
+// Paragraph-level blocks with structural roles and metadata.
+//
+// Rewritten 2026-07-27 (gap analysis P0-2). Roles were previously assigned by matching hardcoded
+// brand and topic keywords from one trend report ('도브'/'Dove', '스웨티 베티'/'Sweaty Betty',
+// '카네기', '시위', 'LGBTQ+', 'Z세대'), and blocks even carried an extracted `brand` field that
+// could only ever be "Dove" or "Sweaty Betty". For any other document every paragraph after the
+// first fell through to 'body', so has_case_like_paragraphs / has_modular_blocks were always false
+// and the layout stage lost the signal that the document has a repeating entry structure.
+//
+// Roles are now derived from FORM only: position, length, and whether the line reads as a sentence.
 
-const KEYWORD_PATTERNS = {
-  trend_context: ['메가 트렌드', '매크로 트렌드', 'mega trend', 'macro trend'],
-  audience_value: ['Z세대', '밀레니얼', 'Gen Z', 'millennial'],
-  protest_case: ['카네기', '시위', 'LGBTQ+', 'protest', 'demonstration'],
-  brand_case_dove: ['도브', 'Dove', '#NoDigitalDistortion', 'Turn Your Back'],
-  brand_case_sweaty_betty: ['스웨티 베티', 'Sweaty Betty', 'Wear The Damn Shorts'],
-}
+// A short, unpunctuated single line is a label introducing what follows, not running prose.
+const LABEL_MAX_CHARS = 60
+const SENTENCE_TERMINATORS = /[.!?。！？…]\s*$/
 
-function detectParagraphRole(text, index, totalParagraphs) {
-  // First paragraph → intro_definition or overview
-  if (index === 0) {
-    return 'intro_definition'
+function detectParagraphRole(text, index) {
+  const trimmed = String(text || '').trim()
+  if (!trimmed) return 'body'
+
+  const isSingleLine = trimmed.split('\n').length === 1
+  if (isSingleLine && trimmed.length <= LABEL_MAX_CHARS && !SENTENCE_TERMINATORS.test(trimmed)) {
+    return 'entry_label'
   }
 
-  // Check keyword patterns
-  const lowerText = text.toLowerCase()
-
-  if (KEYWORD_PATTERNS.trend_context.some(kw => lowerText.includes(kw.toLowerCase()))) {
-    return 'trend_context'
-  }
-  if (KEYWORD_PATTERNS.audience_value.some(kw => lowerText.includes(kw.toLowerCase()))) {
-    return 'audience_value'
-  }
-  if (KEYWORD_PATTERNS.protest_case.some(kw => lowerText.includes(kw.toLowerCase()))) {
-    return 'protest_case'
-  }
-  if (KEYWORD_PATTERNS.brand_case_dove.some(kw => lowerText.includes(kw.toLowerCase()))) {
-    return 'brand_case'
-  }
-  if (KEYWORD_PATTERNS.brand_case_sweaty_betty.some(kw => lowerText.includes(kw.toLowerCase()))) {
-    return 'brand_case'
-  }
+  // The opening paragraph of a document conventionally carries introductory weight. This is a
+  // position fact, not a claim about the text's meaning, so it is safe for any genre.
+  if (index === 0) return 'lead'
 
   return 'body'
-}
-
-function extractBrandName(text) {
-  const lowerText = text.toLowerCase()
-
-  if (KEYWORD_PATTERNS.brand_case_dove.some(kw => lowerText.includes(kw.toLowerCase()))) {
-    return 'Dove'
-  }
-  if (KEYWORD_PATTERNS.brand_case_sweaty_betty.some(kw => lowerText.includes(kw.toLowerCase()))) {
-    return 'Sweaty Betty'
-  }
-
-  return null
 }
 
 export function parseTextBlocksAdvanced({ title, text }) {
@@ -70,35 +49,19 @@ export function parseTextBlocksAdvanced({ title, text }) {
     }
   }
 
-  // Convert paragraphs to text blocks with roles
-  const textBlocks = paragraphs.map((paragraph, index) => {
-    const role = detectParagraphRole(paragraph, index, paragraphs.length)
-    const blockId = `paragraph_${index + 1}`
-    const charCount = paragraph.length
+  const textBlocks = paragraphs.map((paragraph, index) => ({
+    id: `paragraph_${index + 1}`,
+    role: detectParagraphRole(paragraph, index),
+    text: paragraph,
+    char_count: paragraph.length,
+    index,
+  }))
 
-    const block = {
-      id: blockId,
-      role,
-      text: paragraph,
-      char_count: charCount,
-      index,
-    }
-
-    // Add brand name for brand_case blocks
-    if (role === 'brand_case') {
-      const brand = extractBrandName(paragraph)
-      if (brand) {
-        block.brand = brand
-      }
-    }
-
-    return block
-  })
-
-  // Check for modular structure
-  const hasCaseLikeParagraphs = textBlocks.some((b) =>
-    ['brand_case', 'protest_case'].includes(b.role)
-  )
+  // A document with two or more short label blocks has a repeating entry structure (case studies,
+  // catalogue entries, numbered items, chapter headers) -- the structural signature that used to be
+  // detected by brand keywords, now detected by shape.
+  const labelCount = textBlocks.filter((b) => b.role === 'entry_label').length
+  const hasCaseLikeParagraphs = labelCount >= 2
   const hasModularBlocks = textBlocks.length >= 3 && hasCaseLikeParagraphs
 
   const totalChars = textBlocks.reduce((sum, b) => sum + b.char_count, 0)

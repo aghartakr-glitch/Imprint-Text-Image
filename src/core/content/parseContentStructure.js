@@ -1,62 +1,51 @@
-// Spec section 5.3 + Revision: Rich content structure parsing for editorial layouts.
-// NOW: Generates modular text_blocks instead of merging into body_all.
-// Identifies meaningful content groups with semantic roles so LLM can create better grid layouts.
+// Structural summary of the body text, used by layout-family selection and text-flow mode.
+//
+// Rewritten 2026-07-27 (gap analysis P0-2). Roles used to come from keyword regexes tied to one
+// trend report (도브/Dove, 스웨티 베티, 카네기/시위/LGBTQ, Z세대, and literally /^DESIGN CASE
+// STUDIES$/ plus a credit list of "Nike N7|Deepti Khatri|Lippa Nessa"). Any other document matched
+// none of them and fell through to 'unknown', so every consumer keyed on those roles silently got
+// nothing.
+//
+// Roles here are now derived from FORM only: line count, character length, capitalisation, and
+// script. The vocabulary is deliberately kept compatible with what downstream code already reads
+// (case_title_*, credit, body) so this is a behaviour fix rather than a schema change.
 
-// Keyword patterns for automatic role detection
-const ROLE_PATTERNS = {
-  overview: [/메가트렌드|매크로트렌드|의미합니다|의미하|정의|반응|나타나/i],
-  context: [/초양극화|전 세계|글로벌|움직임|행동주의|트렌드|사회적|환경|정치적/i],
-  audience_value: [/Z세대|밀레니얼|세대|소비자|개인|사용자|선호/i],
-  protest_case: [/카네기|시위|LGBTQ|프라이드|Pride|social movement|목소리|연대/i],
-  brand_case_dove: [/도브|Dove|NoDigitalDistortion|Turn Your Back|Bold Glamour/i],
-  brand_case_sweaty_betty: [/스웨티 베티|Sweaty Betty|Wear The Damn Shorts/i],
-  case_section_title: [/^DESIGN CASE STUDIES$/i],
-  case_title_en: [/^[A-Z\s]{5,}$/],
-  case_title_ko: [/액티비즘|페미니즘|기념|운동|캠페인|상품/i],
-  credit: [/^([\w\s]+|[가-힣]+)$/, /Nike N7|Deepti Khatri|Lippa Nessa/i], // short line or known credit
-}
+// A single short line is a label of some kind, not running prose.
+const SHORT_LINE_MAX_CHARS = 60
+// Korean headings run shorter than Latin ones at the same visual weight.
+const KOREAN_HEADING_MAX_CHARS = 40
+// A credit/caption line is shorter still and carries no sentence punctuation.
+const CREDIT_MAX_CHARS = 30
+
+const SENTENCE_TERMINATORS = /[.!?。！？…]\s*$/
+const CONTAINS_HANGUL = /[가-힣]/
+// Latin text with no lowercase letters -- an all-caps line reads as a display heading in editorial
+// typography regardless of what it says.
+const LATIN_ALL_CAPS = /^[^a-z]*$/
 
 function inferParagraphRole(text) {
   const trimmed = text.trim()
+  if (!trimmed) return 'body'
 
-  // Check case_section_title first (exact match)
-  if (ROLE_PATTERNS.case_section_title[0].test(trimmed)) {
-    return 'case_section_title'
-  }
-
-  // Short line heuristics (credit or case title)
-  const lineCount = trimmed.split('\n').length
+  const isSingleLine = trimmed.split('\n').length === 1
   const charCount = trimmed.length
-  if (lineCount === 1 && charCount < 60) {
-    // Could be case_title_en (all caps, short)
-    if (ROLE_PATTERNS.case_title_en[0].test(trimmed)) {
-      return 'case_title_en'
-    }
-    // Could be case_title_ko (Korean, short)
-    if (/[가-힣]/.test(trimmed) && charCount < 40) {
-      return 'case_title_ko'
-    }
-    // Check for known credits
-    if (ROLE_PATTERNS.credit[1].test(trimmed)) {
+
+  if (isSingleLine && charCount <= SHORT_LINE_MAX_CHARS && !SENTENCE_TERMINATORS.test(trimmed)) {
+    // Very short, unpunctuated, no Hangul -> a source/credit line ("Nike N7", "Patagonia").
+    // Detected by shape alone, so it works for any brand, artist, or institution name.
+    if (charCount <= CREDIT_MAX_CHARS && !CONTAINS_HANGUL.test(trimmed) && /[A-Za-z0-9]/.test(trimmed)) {
       return 'credit'
     }
-    // Default short line
+    if (!CONTAINS_HANGUL.test(trimmed) && LATIN_ALL_CAPS.test(trimmed) && /[A-Z]/.test(trimmed)) {
+      return 'case_title_en'
+    }
+    if (CONTAINS_HANGUL.test(trimmed) && charCount <= KOREAN_HEADING_MAX_CHARS) {
+      return 'case_title_ko'
+    }
     return 'case_title_ko'
   }
 
-  // Check longer paragraphs against patterns (in order of specificity)
-  for (const [role, patterns] of Object.entries(ROLE_PATTERNS)) {
-    if (role === 'case_section_title' || role === 'case_title_en' || role === 'credit') {
-      continue // Already checked
-    }
-    for (const pattern of patterns) {
-      if (pattern.test(trimmed)) {
-        return role
-      }
-    }
-  }
-
-  return 'unknown'
+  return 'body'
 }
 
 export function parseContentStructure({ title, text }) {
@@ -71,25 +60,20 @@ export function parseContentStructure({ title, text }) {
 
   const paragraph_count = rawParagraphs.length
 
-  // Build text_blocks array: each paragraph becomes an independent block
-  const text_blocks = rawParagraphs.map((para, idx) => {
-    const role = inferParagraphRole(para)
-    return {
-      id: `paragraph_${idx + 1}`,
-      type: 'paragraph',
-      role,
-      text: para,
-      char_count: para.length,
-    }
-  })
+  const text_blocks = rawParagraphs.map((para, idx) => ({
+    id: `paragraph_${idx + 1}`,
+    type: 'paragraph',
+    role: inferParagraphRole(para),
+    text: para,
+    char_count: para.length,
+  }))
 
-  // Determine text layout mode based on content signals
+  // Layout mode from structural density: a document with several distinct short-label blocks, or
+  // simply many blocks, is modular; a handful of blocks is hybrid; one or two is continuous.
   let text_layout_mode = 'continuous_flow'
   if (paragraph_count >= 2) {
-    // Multiple paragraphs → modular_blocks or hybrid_flow
-    const hasCaseTitle = text_blocks.some((b) => b.role?.includes('case_title') || b.role === 'case_section_title')
-    const hasBrandCase = text_blocks.some((b) => b.role?.includes('brand_case'))
-    if (hasCaseTitle || hasBrandCase || paragraph_count >= 5) {
+    const labelBlockCount = text_blocks.filter((b) => b.role !== 'body').length
+    if (labelBlockCount >= 2 || paragraph_count >= 5) {
       text_layout_mode = 'modular_blocks'
     } else if (paragraph_count >= 3) {
       text_layout_mode = 'hybrid_flow'
@@ -118,7 +102,9 @@ export function parseContentStructure({ title, text }) {
     body_paragraphs: bodyParagraphs,
     has_intro: !!introBody,
     has_body: bodyParagraphs.length > 0,
-    has_case_like_paragraphs: text_blocks.some((b) => b.role?.includes('case') || b.role?.includes('brand')),
+    // "Case-like" now means: repeated short-label blocks introducing longer prose -- the structural
+    // signature of a case-study/catalogue-entry document, with no dependence on subject matter.
+    has_case_like_paragraphs: text_blocks.filter((b) => b.role === 'case_title_ko' || b.role === 'case_title_en').length >= 2,
     total_paragraphs: paragraph_count,
   }
 }

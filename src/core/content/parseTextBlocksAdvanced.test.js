@@ -33,21 +33,22 @@ Sweaty Betty의 'Wear The Damn Shorts' 캠페인은 여성의 자유로움을 �
     assert.equal(block.id, `paragraph_${i + 1}`, `ID는 paragraph_${i + 1}이어야 함`)
   })
 
-  // Check roles
-  assert.equal(result.text_blocks[0].role, 'intro_definition', '첫 문단은 intro_definition')
-  assert.equal(result.text_blocks[1].role, 'trend_context', '메가 트렌드 포함 문단은 trend_context')
-  assert.equal(result.text_blocks[2].role, 'audience_value', 'Z세대 포함 문단은 audience_value')
-  assert.equal(result.text_blocks[3].role, 'protest_case', '시위 포함 문단은 protest_case')
-  assert.equal(result.text_blocks[4].role, 'brand_case', 'Dove 포함 문단은 brand_case')
-  assert.equal(result.text_blocks[5].role, 'brand_case', 'Sweaty Betty 포함 문단은 brand_case')
+  // Roles are now structural (2026-07-27, gap analysis P0-2): the first paragraph is the lead by
+  // POSITION, and every other full-sentence paragraph is body. Brand/topic keyword roles
+  // (trend_context / audience_value / protest_case / brand_case) and the extracted `brand` field
+  // are gone -- they only ever matched this one document.
+  assert.equal(result.text_blocks[0].role, 'lead', '첫 문단은 위치상 lead')
+  result.text_blocks.slice(1).forEach((block, i) => {
+    assert.equal(block.role, 'body', `${i + 2}번째 문단은 body (키워드로 역할을 추측하지 않음)`)
+  })
+  result.text_blocks.forEach((block) => {
+    assert.equal(block.brand, undefined, 'brand 필드는 더 이상 존재하지 않아야 함')
+  })
 
-  // Check brand names
-  assert.equal(result.text_blocks[4].brand, 'Dove', 'Dove 문단에 brand 속성 있어야 함')
-  assert.equal(result.text_blocks[5].brand, 'Sweaty Betty', 'Sweaty Betty 문단에 brand 속성 있어야 함')
-
-  // Check modular detection
-  assert.equal(result.has_modular_blocks, true, '모듈식 블록 감지되어야 함')
-  assert.equal(result.has_case_like_paragraphs, true, '케이스 같은 문단 감지되어야 함')
+  // These are full-sentence prose paragraphs with no short label lines, so there is no repeating
+  // entry structure to detect -- correctly false now, where the old keyword matcher said true.
+  assert.equal(result.has_case_like_paragraphs, false)
+  assert.equal(result.has_modular_blocks, false)
 
   // Check char counts
   result.text_blocks.forEach((block) => {
@@ -57,24 +58,32 @@ Sweaty Betty의 'Wear The Damn Shorts' 캠페인은 여성의 자유로움을 �
   assert.ok(result.total_chars > 0, 'total_chars는 양수여야 함')
 })
 
-test('parseTextBlocksAdvanced: role detection works with keyword variations', () => {
+// Replaces the old keyword-variation test. The point of the rewrite is that role detection is
+// content-independent, so this now checks that a document from a completely different genre (an
+// exhibition catalogue: short entry labels followed by prose) gets a usable structure -- which the
+// brand-keyword version could never do.
+test('detects a repeating entry structure from short label lines, in any genre', () => {
   const result = parseTextBlocksAdvanced({
     title: 'Test',
-    text: `Introduction paragraph.
+    text: `이 도록은 2026년 봄 전시의 출품작을 수록한다. 각 작품은 재료와 제작 연도를 함께 기재했다.
 
-매크로 트렌드에 대해 말하자면.
+기호 문양
 
-Gen Z is different.
+조각가는 석회암 표면에 고대 문양을 새겨 넣었다. 표면의 결을 살리기 위해 연마를 최소화했다.
 
-LGBTQ+ rights matter.
+영적 형태
 
-Dove is amazing.`,
+브라질 출신 디자이너가 화강암과 목재를 결합해 만든 연작이다. 전통적인 석조 기법을 현대적으로 재해석했다.`,
   })
 
-  assert.equal(result.text_blocks[1].role, 'trend_context', '매크로 트렌드 감지')
-  assert.equal(result.text_blocks[2].role, 'audience_value', 'Gen Z 감지')
-  assert.equal(result.text_blocks[3].role, 'protest_case', 'LGBTQ+ 감지')
-  assert.equal(result.text_blocks[4].role, 'brand_case', 'Dove 감지')
+  assert.equal(result.text_blocks[0].role, 'lead', '첫 문단은 lead')
+  assert.equal(result.text_blocks[1].role, 'entry_label', '짧은 무구두점 한 줄은 entry_label')
+  assert.equal(result.text_blocks[2].role, 'body')
+  assert.equal(result.text_blocks[3].role, 'entry_label')
+  assert.equal(result.text_blocks[4].role, 'body')
+
+  assert.equal(result.has_case_like_paragraphs, true, '반복 항목 구조가 감지되어야 함')
+  assert.equal(result.has_modular_blocks, true)
 })
 
 test('parseTextBlocksAdvanced: empty text returns empty blocks', () => {
