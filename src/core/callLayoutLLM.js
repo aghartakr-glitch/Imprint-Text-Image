@@ -83,7 +83,9 @@ function processCandidate(rawPlan, index, validationOpts) {
   }
 
   if (!candidateResult.passed) {
-    const { plan: defaultsRepaired, repaired: didRepairDefaults } = repairLayoutPlan(candidatePlan)
+    const { plan: defaultsRepaired, repaired: didRepairDefaults } = repairLayoutPlan(candidatePlan, {
+      forcedFullBleedImages: validationOpts.forcedFullBleedImages,
+    })
     if (didRepairDefaults) candidatePlan = defaultsRepaired
 
     const { plan: overflowRepaired, repaired: didRepairOverflow } = repairTextOverflow(candidatePlan, textBlocks)

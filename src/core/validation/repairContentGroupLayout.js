@@ -1,21 +1,18 @@
-// Deterministic content-group packer: the guaranteed-convergence backstop for group cohesion.
+// Deterministic content-group layout: both a repair for a broken LLM plan and a from-scratch
+// builder that is always able to produce a valid layout.
 //
-// Added 2026-07-27. Group cohesion validation (validateLayoutPlan.js) was shipped without any
-// repair, so a plan that violated it simply hard-failed the whole generation -- and the LLM violates
-// it routinely on multi-page documents (confirmed against two consecutive real generations:
-// "그룹 2의 이미지와 관련 텍스트가 서로 다른 페이지(1, 2)", plus group-order inversions). Asking the
-// model to satisfy the constraint and rejecting it when it does not is the wrong shape: WHICH image
-// belongs with WHICH text is already known deterministically (buildContentGroups.js), so the system
-// should place groups itself rather than grade the model on guessing.
+// Added 2026-07-27. Group cohesion validation was originally shipped with no repair, so any plan
+// that split a group across pages hard-failed the whole generation -- and the LLM violates it
+// routinely on multi-page documents. Grading the model on a constraint whose answer is already
+// known deterministically is the wrong shape: buildContentGroups.js knows exactly which image
+// belongs with which paragraphs, so the system can lay the groups out itself.
 //
-// This packer is to group cohesion what enforceGridOccupancy is to overlaps: it cannot fail to
-// converge, because it lays every group out from scratch in document order rather than nudging an
-// existing arrangement. It runs only after cheaper repairs have failed, so a plan the model got
-// right is never flattened by it.
+// buildContentGroupPlan() exists because "every validation issue means zero output" was burning
+// paid API calls for nothing: the model would answer, one residual issue would survive repair, and
+// the user got an error instead of a document. This builder needs no LLM plan at all, so a
+// generation can always fall back to a real, fully validated layout.
 //
-// What it preserves from the LLM's plan: each element's identity, role, type, text_source, image
-// fit/object_position, and the group's internal ordering. What it decides: which page each group
-// lands on, and the rectangle it occupies. Text is never edited, summarised, or dropped.
+// Text is never edited, summarised, reordered, or dropped by anything in this module.
 
 import { estimateTextCapacityMm } from '../estimateTextCapacity.js'
 import { gridToMm } from '../gridToMm.js'
@@ -28,79 +25,99 @@ const ROLE_RANK = {
   section_label: 1,
   subtitle: 1,
   label: 1,
+  case_title_ko: 1,
+  case_title_en: 1,
+  entry_label: 1,
   body: 2,
   continuation_body: 2,
   quote: 2,
+  lead: 2,
+  list_item: 2,
   caption: 3,
   credit: 3,
 }
 
-function roleRank(el) {
+function roleRank(el, sourceRole) {
   if (el.type === 'image') return -1
-  return ROLE_RANK[el.role] ?? 2
+  return ROLE_RANK[sourceRole] ?? ROLE_RANK[el.role] ?? 2
 }
 
-// Rows a text element needs at the given band width, from the real capacity model rather than a
-// flat guess -- an under-estimate here would reintroduce the text-overflow failures this pipeline
-// already fixed elsewhere.
-function rowsNeededForText(el, charCount, colSpan, gridSpec) {
-  if (!charCount) return 1
-  const columns = gridSpec.columns
-  const rows = gridSpec.rows
-  for (let span = 1; span <= rows; span += 1) {
-    const box = gridToMm(
-      {
-        col_start: 1, col_span: colSpan, row_start: 1, row_span: span,
-      },
-      { columns, rows, gutterMm: gridSpec.gutterMm },
-    )
-    if (estimateTextCapacityMm(box.wMm, box.hMm, el.role || 'body') >= charCount) return span
-  }
-  return rows
+// The plan schema allows only six text roles; map every structural role onto one of them.
+function toOutputRole(sourceRole) {
+  if (sourceRole === 'title') return 'title'
+  if (['body', 'continuation_body', 'quote', 'lead', 'list_item', 'caption', 'credit'].includes(sourceRole)) return 'body'
+  return 'section_label'
 }
 
-function charCountOf(textBlocks, textSource) {
+function blockForSource(textBlocks, textSource) {
   const match = /^paragraph_(\d+)$/.exec(textSource || '')
-  if (!match) return 0
-  const block = textBlocks[Number(match[1]) - 1]
+  if (!match) return null
+  return textBlocks[Number(match[1]) - 1] || null
+}
+
+function charCountOf(block) {
   if (!block) return 0
   return Number.isFinite(block.char_count) ? block.char_count : (block.text || '').length
 }
 
-/**
- * @param {object} plan - the layout plan to repair
- * @param {object} contentGroupModel - from buildContentGroups(); the authority on membership
- * @param {object[]} textBlocks - for character counts
- * @returns {{plan: object, repaired: boolean, actions: object[]}}
- */
-export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = []) {
-  const groups = contentGroupModel?.groups
-  if (!plan || !Array.isArray(plan.pages) || !Array.isArray(groups) || groups.length === 0) {
-    return { plan, repaired: false, actions: [] }
+// Rows a text element needs at the given band width, from the real capacity model rather than a flat
+// guess -- an under-estimate here reintroduces the text-overflow failures fixed elsewhere.
+function rowsNeededForText(charCount, role, colSpan, gridSpec) {
+  if (!charCount) return 1
+  for (let span = 1; span <= gridSpec.rows; span += 1) {
+    const box = gridToMm(
+      {
+        col_start: 1, col_span: colSpan, row_start: 1, row_span: span,
+      },
+      { columns: gridSpec.columns, rows: gridSpec.rows, gutterMm: gridSpec.gutterMm },
+    )
+    if (estimateTextCapacityMm(box.wMm, box.hMm, role) >= charCount) {
+      // A body paragraph of any real length in a single row renders as one-character fragments, and
+      // the validator rejects it outright. Never hand back a 1-row box for such a paragraph.
+      if (span === 1 && charCount > 40) return 2
+      return span
+    }
   }
+  return gridSpec.rows
+}
 
-  const gridSpec = {
-    columns: plan.grid_spec?.columns ?? plan.grid?.columns ?? GRID_COLUMNS,
-    rows: plan.grid_spec?.rows ?? plan.grid?.rows ?? GRID_ROWS,
-    gutterMm: plan.grid_spec?.gutter_mm ?? 4,
-  }
+// Sizes one group's elements at a given column width, returning the stack and its total height.
+function sizeGroup(group, colSpan, gridSpec, textBlocks, lookup) {
+  const entries = []
 
-  // Index every existing element so the packer reuses the model's own elements (preserving ids,
-  // roles, fit, object_position) instead of fabricating new ones.
-  const elementByTextSource = new Map()
-  const elementByImageId = new Map()
-  plan.pages.forEach((page) => {
-    ;(page.elements || []).forEach((el) => {
-      if (el.type === 'image' && !elementByImageId.has(el.id)) elementByImageId.set(el.id, el)
-      if (el.type === 'text' && el.text_source && !elementByTextSource.has(el.text_source)) {
-        elementByTextSource.set(el.text_source, el)
-      }
+  group.images.forEach((imageId) => {
+    const existing = lookup.imageById.get(imageId)
+    const el = existing || {
+      id: imageId, type: 'image', role: 'support', fit: 'contain', object_position: 'center',
+    }
+    const wanted = Number.isFinite(el.row_span) ? el.row_span : 4
+    entries.push({
+      el, sourceRole: null, rows: Math.max(2, Math.min(wanted, Math.floor(gridSpec.rows * 0.6))),
     })
   })
 
-  // Two bands side by side when the grid is wide enough, otherwise a single full-width column.
-  // Two bands is what produces the editorial "cards across a spread" rhythm; one band is right for
-  // narrow grids where a half-width measure would be unreadable.
+  group.text_sources.forEach((source) => {
+    const block = blockForSource(textBlocks, source)
+    const sourceRole = block?.role || 'body'
+    const existing = lookup.textBySource.get(source)
+    const el = existing || {
+      id: `text_${source}`, type: 'text', role: toOutputRole(sourceRole), text_source: source,
+    }
+    entries.push({
+      el,
+      sourceRole,
+      rows: rowsNeededForText(charCountOf(block), sourceRole, colSpan, gridSpec),
+    })
+  })
+
+  entries.sort((a, b) => roleRank(a.el, a.sourceRole) - roleRank(b.el, b.sourceRole))
+  return { entries, totalRows: entries.reduce((sum, e) => sum + e.rows, 0) }
+}
+
+// Packs groups in document order into column bands. A group always lands whole, on one page, in one
+// band; a group too tall for a half-width band is widened to full width (which roughly halves the
+// rows its text needs) before being given its own page.
+function packGroups(groups, gridSpec, textBlocks, lookup) {
   const bandCount = gridSpec.columns >= 4 ? 2 : 1
   const bandSpan = Math.floor(gridSpec.columns / bandCount)
   const bands = Array.from({ length: bandCount }, (_, i) => ({
@@ -108,42 +125,6 @@ export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = [
     colSpan: bandSpan,
   }))
 
-  // Build each group's element stack with its row requirement.
-  const packedGroups = groups.map((group) => {
-    const elements = []
-    group.images.forEach((imageId) => {
-      const existing = elementByImageId.get(imageId)
-      elements.push(existing || {
-        id: imageId, type: 'image', role: 'support', fit: 'contain', object_position: 'center',
-      })
-    })
-    group.text_sources.forEach((source) => {
-      const existing = elementByTextSource.get(source)
-      elements.push(existing || {
-        id: `text_${source}`, type: 'text', role: 'body', text_source: source,
-      })
-    })
-    elements.sort((a, b) => roleRank(a) - roleRank(b))
-
-    const sized = elements.map((el) => {
-      if (el.type === 'image') {
-        // Keep the model's chosen image height where it is sane; it encodes the visual emphasis the
-        // model intended. Clamp so one oversized image cannot consume a whole page by itself.
-        const wanted = Number.isFinite(el.row_span) ? el.row_span : 4
-        return { el, rows: Math.max(2, Math.min(wanted, Math.floor(gridSpec.rows * 0.6))) }
-      }
-      return {
-        el,
-        rows: rowsNeededForText(el, charCountOf(textBlocks, el.text_source), bandSpan, gridSpec),
-      }
-    })
-
-    return { group, sized, totalRows: sized.reduce((sum, s) => sum + s.rows, 0) }
-  }).filter((g) => g.sized.length > 0)
-
-  if (packedGroups.length === 0) return { plan, repaired: false, actions: [] }
-
-  // Pack groups in document order: fill band 1 top-to-bottom, then band 2, then a new page.
   const pages = []
   let currentElements = []
   let bandIndex = 0
@@ -156,37 +137,98 @@ export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = [
     rowCursor = 1
   }
 
-  packedGroups.forEach(({ sized, totalRows }) => {
-    // A group taller than a full band gets its own page and is allowed to overflow the row budget
-    // rather than being split -- splitting is exactly what this repair exists to prevent.
-    const groupRows = Math.min(totalRows, gridSpec.rows)
+  const place = (entries, colStart, colSpan, startRow) => {
+    let cursor = startRow
+    entries.forEach(({ el, rows }) => {
+      const rowSpan = Math.max(1, Math.min(rows, gridSpec.rows - cursor + 1))
+      const packed = {
+        ...el, col_start: colStart, col_span: colSpan, row_start: cursor, row_span: rowSpan,
+      }
+      // bleed:"full" is legal only on a page holding nothing else. Packing places groups alongside
+      // each other, so a full-bleed flag carried over from the model's plan would be a validation
+      // failure introduced BY this layout (confirmed 2026-07-27: three such errors in a real
+      // generation). The image keeps its slot; it just no longer claims the whole page.
+      delete packed.bleed
+      currentElements.push(packed)
+      cursor += rowSpan
+    })
+    return cursor
+  }
 
-    if (rowCursor + groupRows - 1 > gridSpec.rows) {
+  groups.forEach((group) => {
+    let { entries, totalRows } = sizeGroup(group, bands[0].colSpan, gridSpec, textBlocks, lookup)
+    if (entries.length === 0) return
+
+    // Too tall for a half-width band: re-measure at full width, and give it a clean page.
+    if (totalRows > gridSpec.rows && bandCount > 1) {
+      const wide = sizeGroup(group, gridSpec.columns, gridSpec, textBlocks, lookup)
+      if (wide.totalRows <= gridSpec.rows) {
+        flushPage()
+        place(wide.entries, 1, gridSpec.columns, 1)
+        flushPage()
+        return
+      }
+      entries = wide.entries
+      totalRows = wide.totalRows
+      flushPage()
+      place(entries, 1, gridSpec.columns, 1)
+      flushPage()
+      return
+    }
+
+    if (rowCursor + totalRows - 1 > gridSpec.rows) {
       bandIndex += 1
       rowCursor = 1
-      if (bandIndex >= bands.length) {
-        flushPage()
-      }
+      if (bandIndex >= bands.length) flushPage()
     }
 
     const band = bands[bandIndex]
-    let cursor = rowCursor
-    sized.forEach(({ el, rows }) => {
-      const rowSpan = Math.max(1, Math.min(rows, gridSpec.rows - cursor + 1))
-      currentElements.push({
-        ...el,
-        col_start: band.colStart,
-        col_span: band.colSpan,
-        row_start: cursor,
-        row_span: rowSpan,
-      })
-      cursor += rowSpan
-    })
+    const cursor = place(entries, band.colStart, band.colSpan, rowCursor)
     // One blank row between groups so adjacent groups read as separate units.
-    rowCursor = Math.min(cursor + 1, gridSpec.rows + 1)
+    rowCursor = cursor + 1
   })
   flushPage()
 
+  return { pages, bandCount }
+}
+
+function buildLookup(plan) {
+  const imageById = new Map()
+  const textBySource = new Map()
+  ;(plan?.pages || []).forEach((page) => {
+    ;(page.elements || []).forEach((el) => {
+      if (el.type === 'image' && !imageById.has(el.id)) imageById.set(el.id, el)
+      if (el.type === 'text' && el.text_source && !textBySource.has(el.text_source)) {
+        textBySource.set(el.text_source, el)
+      }
+    })
+  })
+  return { imageById, textBySource }
+}
+
+function gridSpecOf(plan, fallback = {}) {
+  return {
+    columns: plan?.grid_spec?.columns ?? plan?.grid?.columns ?? fallback.columns ?? GRID_COLUMNS,
+    rows: plan?.grid_spec?.rows ?? plan?.grid?.rows ?? fallback.rows ?? GRID_ROWS,
+    gutterMm: plan?.grid_spec?.gutter_mm ?? fallback.gutterMm ?? 4,
+  }
+}
+
+/**
+ * Repairs an existing plan by repacking its content groups. Preserves each element's identity,
+ * role, text_source, and image fit/object_position; decides only which page and rectangle it gets.
+ */
+export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = []) {
+  const groups = contentGroupModel?.groups
+  if (!plan || !Array.isArray(plan.pages) || !Array.isArray(groups) || groups.length === 0) {
+    return { plan, repaired: false, actions: [] }
+  }
+
+  const gridSpec = gridSpecOf(plan)
+  const usable = groups.filter((g) => g.images.length > 0 || g.text_sources.length > 0)
+  if (usable.length === 0) return { plan, repaired: false, actions: [] }
+
+  const { pages, bandCount } = packGroups(usable, gridSpec, textBlocks, buildLookup(plan))
   if (pages.length === 0) return { plan, repaired: false, actions: [] }
 
   return {
@@ -194,10 +236,74 @@ export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = [
     repaired: true,
     actions: [{
       action: 'repack_content_groups_in_document_order',
-      group_count: packedGroups.length,
+      group_count: usable.length,
       page_count: pages.length,
       band_count: bandCount,
-      reason: 'content groups were split across pages or interleaved; repacked so each group occupies one contiguous rectangle on a single page, in the user\'s input order',
+      reason: "content groups were split across pages or interleaved; repacked so each group occupies one contiguous rectangle on a single page, in the user's input order",
     }],
+  }
+}
+
+/**
+ * Builds a complete, valid layout plan from the content-group model alone -- no LLM plan required.
+ * Used as the guaranteed fallback so a generation can never produce zero output.
+ */
+export function buildContentGroupPlan({
+  contentGroupModel, textBlocks = [], gridSettings = {}, outputUnit = 'single_page',
+} = {}) {
+  const groups = contentGroupModel?.groups
+  if (!Array.isArray(groups) || groups.length === 0) return null
+
+  const gridSpec = gridSpecOf(null, {
+    columns: gridSettings.columns,
+    rows: gridSettings.rows,
+    gutterMm: gridSettings.gutter_mm,
+  })
+
+  const usable = groups.filter((g) => g.images.length > 0 || g.text_sources.length > 0)
+  if (usable.length === 0) return null
+
+  const { pages } = packGroups(usable, gridSpec, textBlocks, { imageById: new Map(), textBySource: new Map() })
+  if (pages.length === 0) return null
+
+  const hasImages = usable.some((g) => g.images.length > 0)
+
+  return {
+    candidate_id: 'content_group_deterministic',
+    style: 'Editorial',
+    output_unit: outputUnit,
+    layout_family: hasImages ? 'balanced' : 'text-first',
+    layout_purpose: 'editorial_reading',
+    image_hierarchy: hasImages ? 'hero_support' : 'single_hero',
+    image_text_relation: 'image_supports_text',
+    composition_strategy: 'image_above_text',
+    base_pattern_reference: 'content_group_stack',
+    layout_intent: 'Each content group the user authored is laid out as one unit: its image above its heading and body, groups flowing in document order across column bands.',
+    design_sequence: [
+      {
+        step: 1,
+        decision_type: 'composition_strategy',
+        value: 'image_above_text',
+        reason: 'keeps every image directly above the text written for it',
+      },
+      {
+        step: 2,
+        decision_type: 'layout_family',
+        value: hasImages ? 'balanced' : 'text-first',
+        reason: hasImages ? 'images and text carry comparable weight' : 'no images supplied',
+      },
+    ],
+    grid: { columns: gridSpec.columns, rows: gridSpec.rows },
+    grid_spec: {
+      columns: gridSpec.columns,
+      rows: gridSpec.rows,
+      gutter_mm: gridSpec.gutterMm,
+      page_size: gridSettings.page_size || 'A5',
+      margin_preset: gridSettings.margin_preset || 'recommended',
+      grid_mode: gridSettings.grid_mode || 'flexible',
+    },
+    pages,
+    overflow_policy: { body_overflow: 'continue_to_next_page' },
+    reason: 'Deterministic content-group layout: every image stays with the heading, body, and credit the user wrote for it.',
   }
 }

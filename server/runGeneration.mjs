@@ -19,6 +19,7 @@ import { analyzeImages } from '../src/core/content/analyzeImages.js'
 import { inferImageTextRelations } from '../src/core/content/inferImageTextRelations.js'
 import { matchImageToTextBlocks } from '../src/core/content/matchImageToTextBlocks.js'
 import { buildContentGroups, summarizeContentGroupsForPrompt } from '../src/core/content/buildContentGroups.js'
+import { buildContentGroupPlan } from '../src/core/validation/repairContentGroupLayout.js'
 import { mapImageTextRelations } from '../src/core/content/mapImageTextRelations.js'
 import { validateCollisions } from '../src/core/validation/validateCollisions.js'
 import { validateResolvedLayout, assertResolvedPagesInsideBounds } from '../src/core/validation/validateResolvedLayout.js'
@@ -345,9 +346,47 @@ export async function runGeneration({
     candidatePool.push(specializedCandidate)
   }
 
-  // CRITICAL: best-effort rendering is banned (user directive) -- if NEITHER the LLM NOR the
-  // deterministic specialized builder produced a validated candidate, fail hard rather than
-  // fabricate output from a plan that failed raw validation.
+  // Guaranteed deterministic fallback (added 2026-07-27). Built from the content-group model alone,
+  // with no LLM plan involved, and admitted ONLY if it passes the exact same validateLayoutPlan
+  // check every other candidate must pass -- so this is not best-effort rendering of a failed plan,
+  // it is a different, fully valid plan. Added only when nothing else survived, so it never competes
+  // with a working LLM layout.
+  //
+  // Why this exists: "any surviving validation issue means zero output" was returning an error
+  // message for API calls the user had already paid for, repeatedly. A document that can be laid out
+  // deterministically must never come back as nothing.
+  if (candidatePool.length === 0) {
+    const deterministicPlan = buildContentGroupPlan({
+      contentGroupModel,
+      textBlocks: textBlocksAdvanced,
+      gridSettings: gridSettings.resolved_grid_settings,
+      outputUnit,
+    })
+    const deterministicValidation = deterministicPlan
+      ? validateLayoutPlan(deterministicPlan, {
+        imageCount: analysis.imageCount,
+        textBlocks: textBlocksAdvanced,
+        contentGroupModel,
+        forcedFullBleedImages: userLayoutSettings.forced_full_bleed_images ?? [],
+        allowUnforcedFullBleed: userLayoutSettings.allow_unforced_full_bleed !== false,
+      })
+      : null
+    if (deterministicPlan && deterministicValidation?.passed) {
+      console.warn('[FALLBACK] LLM produced no valid candidate; using the deterministic content-group layout.')
+      candidatePool.push({
+        candidateId: deterministicPlan.candidate_id,
+        plan: deterministicPlan,
+        validation: deterministicValidation,
+        repaired: false,
+      })
+    } else if (deterministicValidation) {
+      console.error('[FALLBACK] deterministic content-group layout also failed validation:', deterministicValidation.issues.slice(0, 5))
+    }
+  }
+
+  // CRITICAL: best-effort rendering is banned (user directive) -- if NEITHER the LLM NOR either
+  // deterministic builder produced a validated candidate, fail hard rather than fabricate output
+  // from a plan that failed raw validation.
   const bestEffortUsed = false
   if (llmResult.fallbackUsed && candidatePool.length === 0) {
     const errorMsg = `LLM-based layout reasoning failed: ${llmResult.fallbackReason || 'no candidate passed validation'}. Best-effort rendering is disabled; layout generation requires a fully validated candidate.`
