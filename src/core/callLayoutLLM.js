@@ -7,6 +7,7 @@ import { repairTextOverflow } from './validation/repairTextOverflow.js'
 import { repairParagraphOrder } from './validation/repairParagraphOrder.js'
 import { compactOversizedTextSpans } from './validation/compactOversizedTextSpans.js'
 import { repairDuplicateHeadingSources } from './validation/repairDuplicateHeadingSources.js'
+import { repairContentGroupLayout } from './validation/repairContentGroupLayout.js'
 import { repairCollisions } from './validation/repairCollisions.js'
 import { enforceGridOccupancy } from './validation/enforceGridOccupancy.js'
 import { validateAndFixLayoutMm } from './validation/validateAndFixLayoutMm.js'
@@ -147,6 +148,32 @@ function processCandidate(rawPlan, index, validationOpts) {
         const revalidated = validateLayoutPlan(orderRepaired, validationOpts)
         if (revalidated.issues.length < candidateResult.issues.length) {
           candidatePlan = orderRepaired
+          candidateResult = revalidated
+        }
+        repaired = true
+      }
+    }
+
+    // Content-group backstop, and the last one that can still change the page structure. Group
+    // membership (which image belongs with which paragraphs) is known deterministically, so a plan
+    // that still splits a group across pages or interleaves groups at this point does not need
+    // another nudge -- it needs the groups laid out from scratch in document order, which is what
+    // this does. Like enforceGridOccupancy it cannot fail to converge. It runs only after every
+    // cheaper repair has been tried, so a plan the model got right is never flattened by it
+    // (confirmed 2026-07-27: cohesion validation shipped without a repair, so two consecutive real
+    // generations hard-failed on 그룹 분리 with no way to recover).
+    if (!candidateResult.passed && validationOpts.contentGroupModel) {
+      const { plan: regrouped, repaired: didRegroup } = repairContentGroupLayout(
+        candidatePlan, validationOpts.contentGroupModel, textBlocks,
+      )
+      if (didRegroup) {
+        const revalidated = validateLayoutPlan(regrouped, validationOpts)
+        // Judge on the categories this repair guarantees: group cohesion and group ordering.
+        // Repacking legitimately changes pagination, which can shift unrelated counts around.
+        const groupIssueCount = (result) => result.issues.filter((i) => i.includes('콘텐츠 그룹') || i.includes('content group')).length
+        if (groupIssueCount(revalidated) < groupIssueCount(candidateResult)
+          || revalidated.issues.length < candidateResult.issues.length) {
+          candidatePlan = regrouped
           candidateResult = revalidated
         }
         repaired = true
