@@ -2,8 +2,14 @@
 // Repairs invalid resolved mm-coordinates before final validation
 // Handles: out-of-bounds, overlaps, invalid dimensions
 
-const DEFAULT_CONTENT_WIDTH_MM = 116
-const DEFAULT_CONTENT_HEIGHT_MM = 176
+import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM } from '../layoutConstants.js'
+
+// Previously hardcoded (116/176) instead of importing -- see validateResolvedLayout.js's identical
+// fix for why a hardcoded duplicate of these values silently drifts out of sync with real margin
+// changes (confirmed 2026-07-27: MARGIN_BOTTOM_MM 18mm->16mm changed the real content height to
+// 178mm while this file's copy stayed at 176mm).
+const DEFAULT_CONTENT_WIDTH_MM = TEXT_BOX_WIDTH_MM
+const DEFAULT_CONTENT_HEIGHT_MM = TEXT_BOX_HEIGHT_MM
 
 export function repairResolvedLayout({
   resolvedPages,
@@ -24,6 +30,39 @@ export function repairResolvedLayout({
   const repairedPages = []
   const actions = []
   const unresolvedIssues = []
+  const continuationPages = []
+
+  function moveTextBlockToContinuationPage(tb, fromPage, reason) {
+    if (!tb.zone) return
+    if (tb.zone.wMm > contentWidthMm || tb.zone.hMm > contentHeightMm) {
+      unresolvedIssues.push(`Page ${fromPage}: textBlock ${tb.id || 'textblock'} is too large for a continuation page (w=${tb.zone.wMm.toFixed(1)}, h=${tb.zone.hMm.toFixed(1)})`)
+      return
+    }
+
+    const moved = {
+      ...tb,
+      zone: {
+        ...tb.zone,
+        xMm: 0,
+        yMm: 0,
+      },
+    }
+    continuationPages.push({
+      type: 'layout-plan-page',
+      images: [],
+      textZone: moved.zone,
+      textSlice: moved.slice ?? null,
+      textBlocks: [moved],
+    })
+    actions.push({
+      type: 'move_textblock_to_continuation_page',
+      page: fromPage,
+      element_id: tb.id || 'textblock',
+      from: { xMm: tb.zone.xMm, yMm: tb.zone.yMm },
+      to: { xMm: 0, yMm: 0, page: 'new-continuation' },
+      reason,
+    })
+  }
 
   resolvedPages.forEach((page, pageIdx) => {
     const repairedPage = {
@@ -58,8 +97,11 @@ export function repairResolvedLayout({
       return true
     })
 
-    // Phase B: Clamp out-of-bounds elements
+    // Phase B: Clamp out-of-bounds elements (full-bleed images are intentionally outside the
+    // content box -- spanning the literal physical page -- so clamping them back in would undo
+    // the whole point of bleed:"full")
     repairedPage.images.forEach((img) => {
+      if (img.fullBleed) return
       const originalX = img.xMm
       const originalY = img.yMm
 
@@ -133,8 +175,11 @@ export function repairResolvedLayout({
     // page height, it's reported as unresolved rather than silently overlapping.
     const fixedBoxes = []
 
-    // Step 1: Reposition images to resolve image-image overlaps
+    // Step 1: Reposition images to resolve image-image overlaps (full-bleed images are exempt --
+    // by contract they're the only image on their page, and shouldn't be nudged or used as a
+    // collision reference for anything else)
     repairedPage.images.forEach((img, imgIdx) => {
+      if (img.fullBleed) return
       const overlapping = fixedBoxes.filter((box) => boxesOverlap(
         { xMm: img.xMm, yMm: img.yMm, wMm: img.wMm, hMm: img.hMm },
         box
@@ -164,6 +209,8 @@ export function repairResolvedLayout({
 
     // Step 2: Reposition text blocks to resolve text-image and text-text overlaps
 
+    const keptTextBlocks = []
+
     repairedPage.textBlocks.forEach((tb) => {
       if (!tb.zone) return
 
@@ -176,6 +223,7 @@ export function repairResolvedLayout({
         fixedBoxes.push({
           xMm: tb.zone.xMm, yMm: tb.zone.yMm, wMm: tb.zone.wMm, hMm: tb.zone.hMm,
         })
+        keptTextBlocks.push(tb)
         return
       }
 
@@ -186,7 +234,12 @@ export function repairResolvedLayout({
       const newY = Math.max(...overlapping.map((box) => box.yMm + box.hMm)) + requiredGap
 
       if (newY + tb.zone.hMm > contentHeightMm) {
-        unresolvedIssues.push(`Page ${pageIdx + 1}: textBlock ${tb.id || 'textblock'} cannot be repositioned without exceeding page height (would need y=${newY.toFixed(1)}, h=${tb.zone.hMm.toFixed(1)})`)
+        moveTextBlockToContinuationPage(
+          tb,
+          pageIdx + 1,
+          `Cannot push below overlaps within page height (would need y=${newY.toFixed(1)}, h=${tb.zone.hMm.toFixed(1)})`,
+        )
+        return
       } else {
         tb.zone.yMm = newY
         actions.push({
@@ -201,13 +254,16 @@ export function repairResolvedLayout({
       fixedBoxes.push({
         xMm: tb.zone.xMm, yMm: tb.zone.yMm, wMm: tb.zone.wMm, hMm: tb.zone.hMm,
       })
+      keptTextBlocks.push(tb)
     })
+
+    repairedPage.textBlocks = keptTextBlocks
 
     repairedPages.push(repairedPage)
   })
 
   return {
-    pages: repairedPages,
+    pages: [...repairedPages, ...continuationPages],
     actions,
     unresolvedIssues
   }

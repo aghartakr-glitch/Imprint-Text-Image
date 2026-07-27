@@ -10,8 +10,8 @@
 // Any new overlap this creates is left for repairCollisions to shift apart afterward (it runs
 // after this step in callLayoutLLM.js's repair chain). Never touches the text itself -- text is
 // never shrunk, summarized, or dropped.
-import { CHAR_WIDTH_MM, LINE_HEIGHT_MM } from '../layoutConstants.js'
 import { gridToMm } from '../gridToMm.js'
+import { estimateTextCapacityMm } from '../estimateTextCapacity.js'
 
 const OVERFLOW_TOLERANCE = 1.05 // must match validateLayoutTextCapacity's ratio threshold
 
@@ -29,9 +29,7 @@ function buildCharCountMap(textBlocks) {
 
 function capacityFor(el, colSpan, rowSpan, gridOptions) {
   const box = gridToMm({ ...el, col_span: colSpan, row_span: rowSpan }, gridOptions)
-  const charsPerLine = Math.floor(box.wMm / CHAR_WIDTH_MM)
-  const lines = Math.floor(box.hMm / LINE_HEIGHT_MM)
-  return Math.max(0, charsPerLine * lines)
+  return estimateTextCapacityMm(box.wMm, box.hMm, el.role)
 }
 
 // Searches col_span x row_span combinations reachable from the element's current position,

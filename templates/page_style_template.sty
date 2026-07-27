@@ -2,17 +2,33 @@
 \ProvidesPackage{page_style}[2026/07/06 Imprint Image+Text Page Style]
 
 \RequirePackage{fontspec}
-\RequirePackage{xeCJK}
+% xeCJK breaks a line between ANY two CJK characters by default, including inside a single Korean
+% word (어절) -- e.g. "대담한" could split into "대담" / "한" across two lines. That's normal/expected
+% for Chinese/Japanese (no word concept at the character level) but wrong for Korean, which only
+% breaks at spaces between 어절. kotex (loading xetexko under XeTeX) implements Korean-specific
+% line-breaking that only breaks at 어절 boundaries, never inside one -- confirmed via a real
+% side-by-side XeLaTeX compile 2026-07-27 (plain xeCJK: "제품에 대담" / "한 색상과..." split
+% mid-word; kotex: "대담한 색상과..." stays whole, only wraps at the next space). Only the raggedright
+% (unjustified) case matters for this project (all body text is raggedright), and kotex's own
+% ragged-right handling never needs to fill lines by hyphenating, so no separate justify/ragged
+% branching is needed here -- \NoHyphenRaggedRight below still applies unconditionally.
+\RequirePackage{kotex}
 \RequirePackage{geometry}
 \RequirePackage[absolute,overlay]{textpos}
 \RequirePackage{graphicx}
-
-% 한국어는 어절 단위 공백이 의미를 가지므로 xeCJK의 공백 무시 기본값을 꺼야 한다.
-\xeCJKsetup{CJKspace = true}
+\RequirePackage[none]{hyphenat}
 
 % 전역 문단 들여쓰기 및 간격 제거 (textblock 정렬 보장)
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0pt}
+
+% 왼쪽 정렬(\raggedright)에서는 단어를 늘려 채울 필요가 없으므로, 굳이 단어를 하이픈으로 잘라
+% 다음 줄로 넘길 이유가 없다 -- 오히려 편집 가독성을 해친다(단어가 끊겨 보임). 하이픈 분리를
+% 사실상 비활성화하여 항상 단어 전체가 다음 줄로 넘어가도록 한다.
+\hyphenpenalty=10000
+\exhyphenpenalty=10000
+\lefthyphenmin=64
+\righthyphenmin=64
 
 \geometry{
   paperwidth={{PAGE_WIDTH}}mm,
@@ -33,30 +49,42 @@
 \setmainfont{{{BODY_FONT_FILE_EN}}}[
   Path = {{{FONTS_DIR}}/}, Extension = .{{BODY_FONT_FILE_EXT}}, BoldFont = {{{BODY_FONT_FILE_BOLD}}},
 ]
-\setCJKmainfont{{{BODY_FONT_FILE_KR}}}[
+\setmainhangulfont{{{BODY_FONT_FILE_KR}}}[
   Path = {{{FONTS_DIR}}/}, Extension = .{{BODY_FONT_FILE_EXT}}, BoldFont = {{{BODY_FONT_FILE_KR_BOLD}}},
 ]
 
-\newcommand{\BodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont #1\par}
+% Body roles are set ragged-right (not fully justified). Narrow columns mixing CJK (which has no
+% inter-word spaces to stretch) with occasional Latin words/brand names produce large, uneven gaps
+% under full justification because TeX has only a handful of justifiable spaces per line to work
+% with. Ragged-right avoids that stretching entirely; line-break quality is otherwise unaffected.
+\newcommand{\NoHyphenRaggedRight}{\raggedright\hyphenpenalty=10000\exhyphenpenalty=10000\lefthyphenmin=64\righthyphenmin=64}
+\newcommand{\BodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont\NoHyphenRaggedRight #1\par}
 
 % Role-based text styles for modular paragraph layouts
 % Enables different visual emphasis for section titles, case studies, body text, and credits
-\newcommand{\SectionTitleText}[1]{\fontsize{14pt}{16pt}\selectfont\bfseries #1\par}
-\newcommand{\CaseTitleKoText}[1]{\fontsize{11pt}{13pt}\selectfont\bfseries #1\par}
-\newcommand{\CaseTitleEnText}[1]{\fontsize{10pt}{12pt}\selectfont\bfseries\MakeUppercase{#1}\par}
-\newcommand{\CaseBodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont #1\par}
+% Leading (2nd \fontsize argument) kept at >=1.25x the font size for every bold heading role --
+% confirmed 2026-07-27: SectionTitleText's old 14pt/16pt (1.14x) and CaseTitle*'s old ~1.18-1.2x
+% read as visibly cramped once a heading needs more than one line (bold CJK glyphs are visually
+% denser than regular-weight body text, so headings need MORE headroom than body text's 1.56x
+% ratio, not less). Bumped to a consistent >=1.25x floor across every heading-style role.
+\newcommand{\SectionTitleText}[1]{\fontsize{14pt}{18pt}\selectfont\bfseries\NoHyphenRaggedRight #1\par}
+\newcommand{\CaseTitleKoText}[1]{\fontsize{11pt}{14pt}\selectfont\bfseries\NoHyphenRaggedRight #1\par}
+\newcommand{\CaseTitleEnText}[1]{\fontsize{10pt}{13pt}\selectfont\bfseries\NoHyphenRaggedRight\MakeUppercase{#1}\par}
+\newcommand{\CaseBodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont\NoHyphenRaggedRight #1\par}
 \newcommand{\CreditText}[1]{\fontsize{7pt}{9pt}\selectfont\itshape #1\par}
+\newcommand{\PageNumberText}[1]{\fontsize{9pt}{11pt}\selectfont #1}
+\newcommand{\RunningHeadText}[1]{\fontsize{8pt}{10pt}\selectfont #1}
 
 % 제목(섹션 오프너) 전용 서체: PRD 4.5의 제목/구조용 산세리프인 Noto Sans KR을
 % 본문 세리프(IBM Plex Serif)와는 별도의 폰트 패밀리로 선언한다.
 \newfontfamily\HeadingENFace{{{HEADING_FONT_FILE_EN}}}[
   Path = {{{FONTS_DIR}}/}, Extension = .{{HEADING_FONT_FILE_EXT}}, BoldFont = {{{HEADING_FONT_FILE_BOLD}}},
 ]
-\newCJKfontfamily\HeadingKRFace{{{HEADING_FONT_FILE_KR}}}[
+\newhangulfontfamily\HeadingKRFace{{{HEADING_FONT_FILE_KR}}}[
   Path = {{{FONTS_DIR}}/}, Extension = .{{HEADING_FONT_FILE_EXT}}, BoldFont = {{{HEADING_FONT_FILE_KR_BOLD}}},
 ]
 \newcommand{\HeadingFontSet}{\HeadingENFace\HeadingKRFace}
-\newcommand{\TitleText}[1]{{\HeadingFontSet\bfseries\fontsize{{{TITLE_FONT_SIZE}}pt}{{{TITLE_LEADING}}pt}\selectfont #1\par}}
+\newcommand{\TitleText}[1]{{\HeadingFontSet\bfseries\fontsize{{{TITLE_FONT_SIZE}}pt}{{{TITLE_LEADING}}pt}\selectfont\NoHyphenRaggedRight #1\par}}
 
 \pagestyle{empty}
 \endinput

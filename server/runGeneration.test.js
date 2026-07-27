@@ -6,8 +6,51 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { runGeneration } from './runGeneration.mjs'
+import {
+  runGeneration, shouldSkipLlmForSpecializedLayout, estimateRequiredOutputTokens, LARGE_DOCUMENT_TOKEN_WARNING_THRESHOLD,
+} from './runGeneration.mjs'
 import { FONTS_DIR } from './env.mjs'
+
+// Truncation early-warning: unit coverage for the estimate formula itself.
+test('estimateRequiredOutputTokens scales with image and paragraph count', () => {
+  const small = estimateRequiredOutputTokens({ imageCount: 1, paragraphCount: 2 })
+  const large = estimateRequiredOutputTokens({ imageCount: 9, paragraphCount: 40 })
+  assert.ok(large > small)
+  assert.ok(small < LARGE_DOCUMENT_TOKEN_WARNING_THRESHOLD, 'a small document should stay under the warning threshold')
+  assert.ok(large > LARGE_DOCUMENT_TOKEN_WARNING_THRESHOLD, 'a large document (9 images, 40 paragraphs) should cross the warning threshold')
+})
+
+// Cost reduction: unit-level coverage for the LLM-skip decision, independent of coaxing a real
+// specialized builder to fire through the full pipeline (see server/runGeneration.mjs's
+// shouldSkipLlmForSpecializedLayout comment for why this is a standalone pure function).
+test('shouldSkipLlmForSpecializedLayout: skips only when a specialized candidate exists AND cost-saving mode is explicitly on', () => {
+  assert.equal(
+    shouldSkipLlmForSpecializedLayout({ hasSpecializedCandidate: true, userLayoutSettings: { cost_saving_mode: true }, env: {} }),
+    true,
+  )
+  assert.equal(
+    shouldSkipLlmForSpecializedLayout({ hasSpecializedCandidate: true, userLayoutSettings: {}, env: { LAYOUT_SKIP_LLM_ON_SPECIALIZED: 'true' } }),
+    true,
+  )
+})
+
+test('shouldSkipLlmForSpecializedLayout: default (no opt-in) never skips, even with a specialized candidate available', () => {
+  assert.equal(
+    shouldSkipLlmForSpecializedLayout({ hasSpecializedCandidate: true, userLayoutSettings: {}, env: {} }),
+    false,
+  )
+  assert.equal(
+    shouldSkipLlmForSpecializedLayout({ hasSpecializedCandidate: true, userLayoutSettings: undefined, env: {} }),
+    false,
+  )
+})
+
+test('shouldSkipLlmForSpecializedLayout: cost-saving mode with NO specialized candidate still calls the LLM (fallback path)', () => {
+  assert.equal(
+    shouldSkipLlmForSpecializedLayout({ hasSpecializedCandidate: false, userLayoutSettings: { cost_saving_mode: true }, env: {} }),
+    false,
+  )
+})
 
 
 const runFile = promisify(execFile)
@@ -31,6 +74,44 @@ function isolatedLogPaths() {
     dir,
   }
 }
+
+// Truncation early-warning: a document large enough to cross LARGE_DOCUMENT_TOKEN_WARNING_THRESHOLD
+// must bail out BEFORE any LLM call is attempted -- verified by NOT passing llmOptions.mockMode at
+// all (if the code path reached callLayoutLLM, it would need real credentials/a client and this
+// test would fail/hang instead of returning cleanly), confirming zero API cost is incurred.
+test('a large document (many images, many paragraphs) is rejected with a pre-flight warning, never reaching the LLM call', async () => {
+  const srcDir = mkdtempSync(join(tmpdir(), 'imprint-it-src-'))
+  const outputsRoot = mkdtempSync(join(tmpdir(), 'imprint-it-outputs-'))
+  const { diversityHistoryPath, userFeedbackPath, dir: logsDir } = isolatedLogPaths()
+  const imagePaths = Array.from({ length: 9 }, (_, i) => {
+    const p = join(srcDir, `photo${i}.png`)
+    writeFileSync(p, Buffer.from(TINY_PNG_BASE64, 'base64'))
+    return p
+  })
+  const manyParagraphs = Array.from({ length: 40 }, (_, i) => `문단 ${i + 1} 입니다. 내용이 조금 있습니다.`).join('\n\n')
+
+  const result = await runGeneration({
+    imagePaths,
+    text: manyParagraphs,
+    outputsRoot,
+    fontsDir: FONTS_DIR,
+    date: new Date(2026, 6, 27, 12, 0),
+    seq: 1,
+    diversityHistoryPath,
+    userFeedbackPath,
+    // Deliberately NOT passing llmOptions -- if this reached callLayoutLLM it would attempt a real
+    // API call with no key and fail differently (or hang), not return this specific warning shape.
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.large_document_warning, true)
+  assert.ok(result.estimated_output_tokens > result.threshold)
+  assert.match(result.error, /잘릴 가능성이 높습니다/)
+
+  rmSync(srcDir, { recursive: true, force: true })
+  rmSync(outputsRoot, { recursive: true, force: true })
+  rmSync(logsDir, { recursive: true, force: true })
+})
 
 test('runGeneration produces exactly ONE real, compiled best-layout result via the v0.4 pipeline (mock mode = deterministic fallback)', async () => {
   const srcDir = mkdtempSync(join(tmpdir(), 'imprint-it-src-'))

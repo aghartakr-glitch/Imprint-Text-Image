@@ -70,6 +70,38 @@ function loadPatternLibrarySummary() {
   return cachedPatternLibrary
 }
 
+// Truncation early-warning: rough token-per-element estimate, calibrated against the one real
+// failure this project has actually observed (a 15-page, multi-image document whose response was
+// cut off by max_tokens=8000 at JSON position ~19000/line 713). Deliberately simple and
+// conservative -- this is a heuristic pre-flight estimate, not a token-accurate count (getting an
+// exact count would require calling the API's own count_tokens endpoint on a full simulated
+// response, which doesn't exist before generation). Exported so the threshold/formula can be
+// unit-tested and recalibrated independently as more real generations are observed.
+export const ESTIMATED_TOKENS_PER_IMAGE_ELEMENT = 120
+export const ESTIMATED_TOKENS_PER_TEXT_ELEMENT = 150
+export const ESTIMATED_TOKENS_BASE = 800
+// Leaves headroom below the real 8000-token ceiling (generateLayoutCandidates.js's
+// MAX_OUTPUT_TOKENS) -- this is a WARNING threshold, not the hard cap itself, so it fires before
+// the request is even sent rather than after paying for a truncated response.
+export const LARGE_DOCUMENT_TOKEN_WARNING_THRESHOLD = 7000
+
+export function estimateRequiredOutputTokens({ imageCount = 0, paragraphCount = 0 }) {
+  return ESTIMATED_TOKENS_BASE
+    + imageCount * ESTIMATED_TOKENS_PER_IMAGE_ELEMENT
+    + paragraphCount * ESTIMATED_TOKENS_PER_TEXT_ELEMENT
+}
+
+// Cost reduction: whether to skip the LLM call entirely because the deterministic specialized
+// builder already produced a validated candidate. Pulled out as a small pure function (no access to
+// module state) so the decision logic can be unit-tested directly, without needing to coax the full
+// runGeneration pipeline into triggering one of the specialized builders end-to-end. Conservative by
+// default: only skips when the caller explicitly opts in via userLayoutSettings.cost_saving_mode or
+// the LAYOUT_SKIP_LLM_ON_SPECIALIZED env var, AND a specialized candidate actually exists.
+export function shouldSkipLlmForSpecializedLayout({ hasSpecializedCandidate, userLayoutSettings, env = {} }) {
+  if (!hasSpecializedCandidate) return false
+  return userLayoutSettings?.cost_saving_mode === true || env.LAYOUT_SKIP_LLM_ON_SPECIALIZED === 'true'
+}
+
 // Spec v0.4 section 22 full pipeline: Input Analyzer -> Design Space Mapper -> Reference
 // Retriever -> LLM Layout Candidate Generator -> Layout Validator (inside callLayoutLLM) ->
 // Layout Reconstructor -> Layout Refiner -> Layout Estimator -> Best Layout Selector -> LaTeX
@@ -152,6 +184,25 @@ export async function runGeneration({
     textDensity, paragraphCount, imageCount: analysis.imageCount,
   })
 
+  // Truncation early-warning (confirmed 2026-07-27: a real 15-page, multi-image generation was cut
+  // off mid-response by the 8000-token output ceiling). Estimate the likely required output size
+  // BEFORE spending an API call -- if it's predicted to exceed the real ceiling, fail fast with an
+  // actionable message instead of paying for a call that's very likely to truncate anyway (per this
+  // session's cost-protection directive: never spend on a call already known likely to fail).
+  const estimatedOutputTokens = estimateRequiredOutputTokens({ imageCount: analysis.imageCount, paragraphCount })
+  if (estimatedOutputTokens > LARGE_DOCUMENT_TOKEN_WARNING_THRESHOLD) {
+    const warningMsg = `문서가 너무 커서 LLM 응답이 도중에 잘릴 가능성이 높습니다 (예상 출력 ${estimatedOutputTokens}토큰 > 안전 기준 ${LARGE_DOCUMENT_TOKEN_WARNING_THRESHOLD}토큰, 이미지 ${analysis.imageCount}장 / 문단 ${paragraphCount}개). API 호출 전에 미리 감지되어 비용이 청구되지 않았습니다.`
+    console.warn(`[GENERATION SKIPPED] ${warningMsg}`)
+    return {
+      ok: false,
+      error: warningMsg,
+      large_document_warning: true,
+      estimated_output_tokens: estimatedOutputTokens,
+      threshold: LARGE_DOCUMENT_TOKEN_WARNING_THRESHOLD,
+      suggested_action: '이미지 수를 줄이거나 본문을 여러 번에 나눠 생성해 주세요. (또는 사용자 설정으로 이 검사를 조정할 수 있습니다.)',
+    }
+  }
+
   const imageMetadataRaw = buildImageMetadata(analysis.images)
   const { imageMetadata, imageHierarchy: estimatedImageHierarchy } = estimateImageHierarchy(imageMetadataRaw)
 
@@ -217,11 +268,58 @@ export async function runGeneration({
     internalCandidateCount: Number(process.env.LAYOUT_CANDIDATE_COUNT) || 1,
   }
 
-  // 7-10. LLM Layout Candidate Generator + Layout Validator (validate/repair/retry inside)
-  const llmResult = await callLayoutLLM({ promptContext, imageCount: analysis.imageCount, textBlocks: textBlocksAdvanced }, llmOptions)
+  // Cost reduction: try the deterministic specialized builder BEFORE spending an LLM call, not
+  // after. If it produces a validated layout and cost-saving mode is on, skip the LLM call
+  // entirely -- there's no reason to pay for a Claude call whose output would just be compared
+  // against (and possibly discarded in favor of) a plan the deterministic builder already produced
+  // for free. Default policy is conservative: unless the user explicitly opts in
+  // (userLayoutSettings.cost_saving_mode or LAYOUT_SKIP_LLM_ON_SPECIALIZED=true), behavior is
+  // unchanged -- the specialized plan is still built early, but the LLM is still called and both
+  // are compared as before.
+  const specializedLayoutPlan = tryBuildSpecializedLayout({
+    suggestedLayoutFamily,
+    imageCount: analysis.imageCount,
+    textDensity,
+    hasTitle,
+    contentStructure,
+    userGridSettings: gridSettings.resolved_grid_settings,
+  })
+  const specializedValidation = specializedLayoutPlan
+    ? validateLayoutPlan(specializedLayoutPlan, {
+      imageCount: analysis.imageCount,
+      textBlocks: textBlocksAdvanced,
+      forcedFullBleedImages: userLayoutSettings.forced_full_bleed_images ?? [],
+      allowUnforcedFullBleed: userLayoutSettings.allow_unforced_full_bleed !== false,
+    })
+    : null
+  const specializedCandidate = (specializedLayoutPlan && specializedValidation?.passed)
+    ? {
+      candidateId: specializedLayoutPlan.candidate_id,
+      plan: specializedLayoutPlan,
+      validation: specializedValidation,
+      repaired: false,
+    }
+    : null
+
+  const skipLlmWhenSpecializedPasses = shouldSkipLlmForSpecializedLayout({
+    hasSpecializedCandidate: Boolean(specializedCandidate),
+    userLayoutSettings,
+    env: process.env,
+  })
+
+  // 7-10. LLM Layout Candidate Generator + Layout Validator (validate/repair/retry inside) --
+  // skipped entirely when cost-saving mode already has a validated deterministic candidate.
+  const llmResult = skipLlmWhenSpecializedPasses
+    ? {
+      candidates: [], rejectedCandidates: [], source: 'specialized-skip-llm', retryCount: 0, fallbackUsed: false,
+      content_understanding: null, image_analysis: [], inferred_image_text_relations: [], reference_principles: null, layout_strategy_reasoning: null,
+    }
+    : await callLayoutLLM({ promptContext, imageCount: analysis.imageCount, textBlocks: textBlocksAdvanced }, llmOptions)
 
   // CRITICAL: best-effort rendering is banned (user directive). If no candidate reached a clean
   // validation pass, fail hard -- do NOT fabricate output from a plan that failed raw validation.
+  // (Not reached when skipLlmWhenSpecializedPasses is true, since llmResult.fallbackUsed is false
+  // and specializedCandidate below guarantees at least one candidate in the pool.)
   const bestEffortUsed = false
   if (llmResult.fallbackUsed) {
     const errorMsg = `LLM-based layout reasoning failed: ${llmResult.fallbackReason || 'no candidate passed validation'}. Best-effort rendering is disabled; layout generation requires a fully validated candidate.`
@@ -236,31 +334,13 @@ export async function runGeneration({
     }
   }
 
-  // LLM succeeded - candidates available
+  // LLM succeeded (or was skipped) - candidates available
   const candidatePool = llmResult.candidates || []
   const recentLayouts = loadRecentLayouts(diversityHistoryPath)
 
-  // Try to build a specialized layout if the suggested family matches a builder
-  const specializedLayoutPlan = tryBuildSpecializedLayout({
-    suggestedLayoutFamily,
-    imageCount: analysis.imageCount,
-    textDensity,
-    hasTitle,
-    contentStructure,
-    userGridSettings: gridSettings.resolved_grid_settings,
-  })
-
-  // Add specialized layout as a candidate if it was successfully built
-  if (specializedLayoutPlan) {
-    const specializedValidation = validateLayoutPlan(specializedLayoutPlan, { imageCount: analysis.imageCount, textBlocks: textBlocksAdvanced })
-    if (specializedValidation.passed) {
-      candidatePool.push({
-        candidateId: specializedLayoutPlan.candidate_id,
-        plan: specializedLayoutPlan,
-        validation: specializedValidation,
-        repaired: false,
-      })
-    }
+  // Add the specialized layout as a candidate (already built/validated above).
+  if (specializedCandidate) {
+    candidatePool.push(specializedCandidate)
   }
 
   // Validate candidates are available (should not happen if LLM succeeded above)
@@ -350,8 +430,6 @@ export async function runGeneration({
       // Try to repair
       const repairResult = repairResolvedLayout({
         resolvedPages: finalResolvedPages,
-        contentWidthMm: 116,
-        contentHeightMm: 176,
       })
 
       console.log(`[STEP] repair actions: ${repairResult.actions.length}`)
@@ -508,7 +586,7 @@ export async function runGeneration({
     }
   }
 
-  const mainTex = buildMainTex({ resolvedPages: finalPages })
+  const mainTex = buildMainTex({ resolvedPages: finalPages, runningHeadText: userLayoutSettings.running_head_text })
   const styleTex = buildStyleTex({ fontsDir })
 
   const bestLayoutDir = writeBestLayoutSources(runDir, {

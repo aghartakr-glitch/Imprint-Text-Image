@@ -37,10 +37,10 @@ export function parseDocumentStructure({ title, text }) {
   const blocks = mdParsed.text_blocks.map((block, index) => {
     const isList = block.role === 'body' && LIST_LINE_PATTERN.test(block.text.split(/\r?\n/)[0])
 
-    // A markdown heading (## Section, ### Case) already carries an explicit role from the parser.
-    // Plain body text (no heading marker) still needs the original keyword-based role inference
-    // (intro_definition/protest_case/brand_case/etc) so downstream layout selection keeps working.
-    const role = isList ? 'list_item' : (block.role === 'body' ? inferBlockRole(block.text, index === 0) : block.role)
+    // A markdown heading already carries an explicit role. If a marked line was downgraded because
+    // it is too long to be a heading, keep it as body instead of re-promoting it by keyword/length.
+    const isDowngradedHeadingBody = block.role === 'body' && block.downgraded_heading_level != null
+    const role = isList ? 'list_item' : (block.role === 'body' && !isDowngradedHeadingBody ? inferBlockRole(block.text, index === 0) : block.role)
     const type = isList ? 'list_item' : (block.role === 'body' ? 'paragraph' : 'heading')
 
     return {
@@ -51,6 +51,8 @@ export function parseDocumentStructure({ title, text }) {
       char_count: block.text.length,
       index,
       markdown_level: block.markdown_level,
+      downgraded_heading_level: block.downgraded_heading_level ?? null,
+      group_id: block.group_id,
       semantic_hint: analyzeSemanticContent(block.text),
     }
   })
@@ -73,6 +75,7 @@ export function parseDocumentStructure({ title, text }) {
         role: b.role,
         text: b.text.substring(0, 100) + (b.text.length > 100 ? '...' : ''),
         char_count: b.char_count,
+        group_id: b.group_id,
         semantic_hint: b.semantic_hint,
       })),
     },

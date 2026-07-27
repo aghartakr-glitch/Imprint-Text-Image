@@ -4,6 +4,8 @@ import { validateLayoutPlan } from './validateLayoutPlan.js'
 import { normalizeLayoutPlan } from './normalizeLayoutPlan.js'
 import { repairLayoutPlan } from './repairLayoutPlan.js'
 import { repairTextOverflow } from './validation/repairTextOverflow.js'
+import { repairParagraphOrder } from './validation/repairParagraphOrder.js'
+import { compactOversizedTextSpans } from './validation/compactOversizedTextSpans.js'
 import { repairCollisions } from './validation/repairCollisions.js'
 import { enforceGridOccupancy } from './validation/enforceGridOccupancy.js'
 import { validateAndFixLayoutMm } from './validation/validateAndFixLayoutMm.js'
@@ -40,13 +42,22 @@ function summarizeFailedPlan(plan) {
 // Steps 1 and 2 are applied unconditionally (they only ever make the plan more correct); step 3 is
 // kept only if the final plan actually passes validation. This lets the LLM be imperfect about box
 // sizing/positioning -- the common, deterministic geometry failures get fixed here with no API call.
-function processCandidate(rawPlan, index, imageCount, textBlocks) {
+function processCandidate(rawPlan, index, imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed) {
   const candidateId = rawPlan?.candidate_id || `candidate_${index + 1}`
   // CRITICAL: normalize enum aliases (e.g. margin_preset "default" -> "recommended") BEFORE the
   // first validation pass, so a schema-legal-in-spirit value never triggers a rejection/retry.
   let candidatePlan = normalizeLayoutPlan(rawPlan)
-  let candidateResult = validateLayoutPlan(candidatePlan, { imageCount, textBlocks })
-  let repaired = false
+
+  // Runs unconditionally, before validation, not gated behind "!candidateResult.passed" like the
+  // rest of this chain -- a plan with wastefully oversized text boxes (a single 9-character
+  // heading given a 70mm-tall box, confirmed 2026-07-16) passes validation just fine, since nothing
+  // there flags a box as too generous, only too small. Only ever shrinks, so it's safe to always
+  // attempt: it can't turn a fitting plan into a broken one.
+  const { plan: compactedPlan, repaired: didCompact } = compactOversizedTextSpans(candidatePlan, textBlocks)
+  if (didCompact) candidatePlan = compactedPlan
+
+  let candidateResult = validateLayoutPlan(candidatePlan, { imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed })
+  let repaired = didCompact
 
   // Debug instrumentation (first candidate only): capture exactly what the LLM returned, and what
   // normalization changed, before any repair touches it. Pure logging -- no effect on the pipeline.
@@ -64,15 +75,18 @@ function processCandidate(rawPlan, index, imageCount, textBlocks) {
     const { plan: overflowRepaired, repaired: didRepairOverflow } = repairTextOverflow(candidatePlan, textBlocks)
     if (didRepairOverflow) candidatePlan = overflowRepaired
 
-    if (didRepairDefaults || didRepairOverflow) {
-      candidateResult = validateLayoutPlan(candidatePlan, { imageCount, textBlocks })
+    const { plan: orderRepaired, repaired: didRepairOrder } = repairParagraphOrder(candidatePlan)
+    if (didRepairOrder) candidatePlan = orderRepaired
+
+    if (didRepairDefaults || didRepairOverflow || didRepairOrder) {
+      candidateResult = validateLayoutPlan(candidatePlan, { imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed })
       repaired = true
     }
 
     if (!candidateResult.passed) {
       const { plan: collisionsRepaired, repaired: didRepairCollisions } = repairCollisions(candidatePlan)
       if (didRepairCollisions) {
-        const revalidated = validateLayoutPlan(collisionsRepaired, { imageCount, textBlocks })
+        const revalidated = validateLayoutPlan(collisionsRepaired, { imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed })
         // Keep the collision-repaired plan/result whenever it strictly reduces the outstanding
         // issue count, even if it doesn't fully pass -- the plan/result this function returns must
         // always reflect the best state actually achieved, never revert to a stale pre-repair
@@ -93,9 +107,33 @@ function processCandidate(rawPlan, index, imageCount, textBlocks) {
     if (!candidateResult.passed) {
       const { plan: occupancyRepaired, repaired: didEnforceOccupancy } = enforceGridOccupancy(candidatePlan)
       if (didEnforceOccupancy) {
-        const revalidated = validateLayoutPlan(occupancyRepaired, { imageCount, textBlocks })
-        if (revalidated.issues.length < candidateResult.issues.length) {
+        const revalidated = validateLayoutPlan(occupancyRepaired, { imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed })
+        // Compare on collision-issue count specifically, not the raw total. enforceGridOccupancy
+        // can push an element onto a new page to free up its cell, which can shift a paragraph's
+        // first-appearance page and trip the (unrelated) paragraph-order check -- if that pushes
+        // the raw total issue count back up to a tie or worse, the old strict "total issues
+        // strictly fewer" comparison discarded a repair that had, in fact, eliminated every
+        // overlap it guarantees to eliminate (confirmed 2026-07-27: intermittent hard-fail
+        // generations reporting only 겹칩니다/collision messages, on documents complex enough that
+        // this backstop should have resolved them). Collisions are the one category this repair
+        // step is guaranteed to fix, so judge it on that category.
+        const collisionCount = (result) => result.issues.filter((i) => i.includes('겹칩니다')).length
+        const oldCollisions = collisionCount(candidateResult)
+        const newCollisions = collisionCount(revalidated)
+        if (newCollisions < oldCollisions || revalidated.issues.length < candidateResult.issues.length) {
           candidatePlan = occupancyRepaired
+          candidateResult = revalidated
+        }
+        repaired = true
+      }
+    }
+
+    if (!candidateResult.passed) {
+      const { plan: orderRepaired, repaired: didRepairOrder } = repairParagraphOrder(candidatePlan)
+      if (didRepairOrder) {
+        const revalidated = validateLayoutPlan(orderRepaired, { imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed })
+        if (revalidated.issues.length < candidateResult.issues.length) {
+          candidatePlan = orderRepaired
           candidateResult = revalidated
         }
         repaired = true
@@ -107,7 +145,7 @@ function processCandidate(rawPlan, index, imageCount, textBlocks) {
     // This direct mm-level check detects and fixes those cases by moving text blocks.
     const { plan: mmFixed, fixed: didFixMm } = validateAndFixLayoutMm(candidatePlan)
     if (didFixMm) {
-      const revalidated = validateLayoutPlan(mmFixed, { imageCount, textBlocks })
+      const revalidated = validateLayoutPlan(mmFixed, { imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed })
       if (revalidated.issues.length < candidateResult.issues.length) {
         candidatePlan = mmFixed
         candidateResult = revalidated
@@ -130,6 +168,8 @@ function processCandidate(rawPlan, index, imageCount, textBlocks) {
 // -- this returns fallbackUsed=true and leaves the deterministic fallback plan to the caller
 // (runGeneration.mjs). Never throws.
 export async function callLayoutLLM({ promptContext, imageCount, textBlocks }, options = {}) {
+  const forcedFullBleedImages = promptContext?.userLayoutSettings?.forced_full_bleed_images ?? []
+  const allowUnforcedFullBleed = promptContext?.userLayoutSettings?.allow_unforced_full_bleed !== false
   const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY
   const mockMode = options.mockMode ?? process.env.MOCK_MODE === 'true'
 
@@ -182,9 +222,19 @@ export async function callLayoutLLM({ promptContext, imageCount, textBlocks }, o
   try {
     llmOutput = await generateLayoutCandidates(promptContext, { client, costBudget })
   } catch (err) {
-    const fallbackReason = err instanceof LayoutCostBudgetExceeded
-      ? err.message
-      : `LLM 요청/JSON 파싱 실패: ${String(err?.message ?? err)}`
+    // Distinct message for genuine output-token truncation (JsonTruncatedError) vs. a cost-budget
+    // refusal vs. an actually-malformed response -- these need different fixes (raise max_tokens /
+    // shrink the document, wait for budget, or a real parsing bug) and were previously all folded
+    // into one generic "JSON 파싱 실패" message that misdiagnosed truncation as a parsing bug
+    // (confirmed 2026-07-27: two separate real generations hit this exact confusion).
+    let fallbackReason
+    if (err instanceof LayoutCostBudgetExceeded) {
+      fallbackReason = err.message
+    } else if (err?.name === 'JsonTruncatedError') {
+      fallbackReason = `LLM 응답 잘림: ${err.message}`
+    } else {
+      fallbackReason = `LLM 요청/JSON 파싱 실패: ${String(err?.message ?? err)}`
+    }
     return {
       candidates: [], rejectedCandidates: [], source: 'fallback', retryCount: 0, fallbackUsed: true, fallbackReason, costBudget: costBudget.summary(),
       // Phase 5-3: Include empty content understanding fields for consistency
@@ -198,7 +248,7 @@ export async function callLayoutLLM({ promptContext, imageCount, textBlocks }, o
 
   // Extract candidates from llmOutput
   const rawCandidates = llmOutput.candidates || []
-  let processed = rawCandidates.map((rawPlan, i) => processCandidate(rawPlan, i, imageCount, textBlocks))
+  let processed = rawCandidates.map((rawPlan, i) => processCandidate(rawPlan, i, imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed))
   let validCandidates = processed.filter((c) => c.validation.passed)
   let rejectedCandidates = processed.filter((c) => !c.validation.passed)
   let retryCount = 0
@@ -228,7 +278,7 @@ export async function callLayoutLLM({ promptContext, imageCount, textBlocks }, o
       }
       const retryOutput = await generateLayoutCandidates(retryContext, { client, costBudget })
       const retryProcessed = (retryOutput.candidates || [])
-        .map((rawPlan, i) => processCandidate(rawPlan, i, imageCount, textBlocks))
+        .map((rawPlan, i) => processCandidate(rawPlan, i, imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed))
       const retryValid = retryProcessed.filter((c) => c.validation.passed)
 
       if (retryValid.length > 0) {

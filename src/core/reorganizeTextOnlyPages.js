@@ -1,67 +1,169 @@
 import {
-  TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM,
-  COLUMN_GUTTER_MM,
+  TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM, COLUMN_GUTTER_MM, CHAR_WIDTH_MM, LINE_HEIGHT_MM,
+  MIN_READABLE_COLUMN_WIDTH_MM,
 } from './layoutConstants.js'
+import { sliceAtWordBoundary } from './paginateGridPlan.js'
 
-// Reorganize text-only pages into multi-column layouts
+const BLOCK_GAP_MM = 3
+
+// Reorganize text-only pages into multi-column layouts. May return MORE pages than it was given
+// (a single page can spill into several once its text is re-fit into narrower columns), so callers
+// must treat the return value as the full replacement page list, not a 1:1 map.
 export function reorganizeTextOnlyPages(resolvedPages, userLayoutSettings = {}) {
-  return resolvedPages.map((page) => {
-    // Only process pages with no images
+  return resolvedPages.flatMap((page) => {
     if (Array.isArray(page.images) && page.images.length === 0 && Array.isArray(page.textBlocks) && page.textBlocks.length > 0) {
       return createMultiColumnTextLayout(page, userLayoutSettings)
     }
-    return page
+    return [page]
   })
 }
 
+// Only role: 'body' blocks are re-flowed into columns here. This function's character-capacity
+// math (CHAR_WIDTH_MM/LINE_HEIGHT_MM) assumes 9pt body text; heading-style roles (section_label,
+// case_title_ko, etc.) render much larger and bold via buildLatex.js's styleCommandForRole, so
+// a box sized by this function's math is too narrow for them and the text visually overflows into
+// the next column (confirmed 2026-07-16: a 20mm column sized for 9pt text held bold 14pt
+// "COMMUNITY ACTIVISM", which doesn't fit and spilled into the neighboring column). Heading blocks
+// keep whatever position/size the LLM's own grid placement already gave them.
+function isReflowableBody(block) {
+  return (block.role || 'body') === 'body'
+}
+
+// Inverse of estimateTextCapacityMm: how tall a box at this column width needs to be to hold N
+// characters (rounded up to a whole number of lines).
+function heightForChars(charCount, columnWidthMm) {
+  const charsPerLine = Math.max(1, Math.floor(columnWidthMm / CHAR_WIDTH_MM))
+  const lines = Math.max(1, Math.ceil(charCount / charsPerLine))
+  return lines * LINE_HEIGHT_MM
+}
+
+// How many characters fit in this much vertical space at this column width.
+function charsForHeight(heightMm, columnWidthMm) {
+  const charsPerLine = Math.max(1, Math.floor(columnWidthMm / CHAR_WIDTH_MM))
+  const lines = Math.max(0, Math.floor(heightMm / LINE_HEIGHT_MM))
+  return charsPerLine * lines
+}
+
 function createMultiColumnTextLayout(page, userLayoutSettings = {}) {
+  // Heading-style roles (section_label, case_title_ko, title, etc.) keep whatever position/size
+  // the LLM's own grid placement already gave them -- only body text gets re-flowed here.
+  const nonBodyBlocks = page.textBlocks.filter((b) => !isReflowableBody(b))
+  const bodyBlocks = page.textBlocks.filter(isReflowableBody)
+
+  if (bodyBlocks.length === 0) {
+    return [page]
+  }
+
+  // Mixed heading/body overflow pages already carry deliberate source order from
+  // paginateGridPlan. Reflowing only the body blocks into columns while leaving headings behind
+  // separates a heading from its paragraph and can create orphan fragments like "제품입니다.".
+  // Keep these pages as a vertical reading sequence; reserve this reflow pass for pure body pages.
+  if (nonBodyBlocks.length > 0) {
+    return [page]
+  }
+
+  // Body text starts below the lowest untouched heading, not at yMm=0 -- otherwise a reflowed
+  // body column can land directly on top of a heading block occupying the same column (confirmed
+  // 2026-07-16: a body block reflowed to column 0 collided with a "DESIGN CASE STUDIES" heading
+  // already sitting at column 0). Only the first output page carries the headings, so later spill
+  // pages (pure continued body text) start at the top as normal.
+  const headingBottomMm = nonBodyBlocks.length > 0
+    ? Math.max(...nonBodyBlocks.map((b) => b.zone.yMm + b.zone.hMm)) + BLOCK_GAP_MM
+    : 0
+
   // Determine column count: use user setting, or auto-detect based on text density
   let columnCount = userLayoutSettings.columns || 2
-
-  // Validate column count
   if (columnCount < 1) columnCount = 1
   if (columnCount > 6) columnCount = 6
 
-  const columnWidth = TEXT_BOX_WIDTH_MM / columnCount
   const gutter = COLUMN_GUTTER_MM
 
-  const newTextBlocks = []
+  // The grid column count is an alignment guide for images/headings, not a mandate that body text
+  // must flow that narrow -- cap it so no column drops below MIN_READABLE_COLUMN_WIDTH_MM. A high
+  // grid setting (e.g. 5-6, chosen for image layout) still yields full-width or half-width body
+  // text when that's all the readable-width budget allows; a low setting (1-2) passes through
+  // unchanged since it was never going to be too narrow.
+  const maxReadableColumns = Math.max(
+    1,
+    Math.floor((TEXT_BOX_WIDTH_MM + gutter) / (MIN_READABLE_COLUMN_WIDTH_MM + gutter)),
+  )
+  columnCount = Math.min(columnCount, maxReadableColumns)
 
-  // Distribute text blocks across columns
-  const blockPerColumn = Math.ceil(page.textBlocks.length / columnCount)
+  // Gutter-aware: columnCount columns plus (columnCount-1) gutters must fit inside
+  // TEXT_BOX_WIDTH_MM, otherwise the last column's right edge sails past the margin (confirmed
+  // 2026-07-16: columns=5 put column 4's right edge at 132mm against a 116mm content box).
+  const columnWidth = (TEXT_BOX_WIDTH_MM - gutter * (columnCount - 1)) / columnCount
+  const pageHeight = TEXT_BOX_HEIGHT_MM
+  const blockPerColumn = Math.ceil(bodyBlocks.length / columnCount)
 
-  for (let col = 0; col < columnCount; col++) {
-    const startIdx = col * blockPerColumn
-    const endIdx = Math.min(startIdx + blockPerColumn, page.textBlocks.length)
+  const outputPages = []
+  // The untouched heading blocks belong on the original page only -- the first page produced
+  // here carries them alongside the first batch of reflowed body text; any later spill page
+  // (the body didn't fit in this page's columns) carries only continued body text.
+  let currentBlocks = [...nonBodyBlocks]
 
-    if (startIdx >= page.textBlocks.length) break
+  function flushPage() {
+    if (currentBlocks.length > 0) outputPages.push({ ...page, textBlocks: currentBlocks })
+    currentBlocks = []
+  }
 
-    const blocksForThisColumn = page.textBlocks.slice(startIdx, endIdx)
-    const xMm = col * (columnWidth + gutter)
+  // Only the first output page carries the untouched headings, so only its columns need to start
+  // below them; every later spill page is pure body text and starts at the top.
+  function freshColumnYMm() {
+    return outputPages.length === 0 ? headingBottomMm : 0
+  }
 
-    let currentYMm = 0 // Start at top of text box (margins already accounted for by caller)
+  // Each group of (up to) blockPerColumn source blocks is assigned its own column slot. A single
+  // block's text may still need more vertical room than one column holds at the new, narrower
+  // width -- this is exactly the bug that let text run off the physical page: a box's height,
+  // computed for a much wider box, was being reused verbatim after narrowing it into a column
+  // (confirmed 2026-07-16: a body_overflow block sized for a 116mm-wide box was placed into a
+  // 23.2mm column with its old 176mm height untouched, so ~5x too little height for the same
+  // text). When a block doesn't fit, keep slicing it at word boundaries into subsequent columns,
+  // and once a page's columns are all used, spill onto a new page instead of overflowing.
+  for (let groupIdx = 0; groupIdx < columnCount; groupIdx += 1) {
+    const startIdx = groupIdx * blockPerColumn
+    if (startIdx >= bodyBlocks.length) break
+    const endIdx = Math.min(startIdx + blockPerColumn, bodyBlocks.length)
+    const blocksForThisGroup = bodyBlocks.slice(startIdx, endIdx)
 
-    blocksForThisColumn.forEach((block, blockIdx) => {
-      const originalZone = block.zone || { hMm: 0 }
-      const blockHeight = originalZone.hMm || 20 // Default height if not set
-      const spacingBetweenBlocks = 3 // mm gap between blocks
+    let colIdx = groupIdx
+    let yMm = freshColumnYMm()
 
-      newTextBlocks.push({
-        ...block,
-        zone: {
-          xMm,
-          yMm: currentYMm,
-          wMm: columnWidth,
-          hMm: blockHeight,
-        },
-      })
+    blocksForThisGroup.forEach((block) => {
+      let remaining = block.slice || ''
+      if (remaining.length === 0) return
 
-      currentYMm += blockHeight + spacingBetweenBlocks
+      while (remaining.length > 0) {
+        let availableHeight = pageHeight - yMm
+        if (availableHeight < LINE_HEIGHT_MM) {
+          colIdx += 1
+          if (colIdx >= columnCount) {
+            flushPage()
+            colIdx = 0
+          }
+          yMm = freshColumnYMm()
+          availableHeight = pageHeight - yMm
+        }
+
+        const capacity = Math.max(1, charsForHeight(availableHeight, columnWidth))
+        const { slice, consumed } = sliceAtWordBoundary(remaining, capacity)
+        const usedHeight = heightForChars(slice.length, columnWidth)
+
+        currentBlocks.push({
+          ...block,
+          zone: {
+            xMm: colIdx * (columnWidth + gutter), yMm, wMm: columnWidth, hMm: usedHeight,
+          },
+          slice,
+        })
+
+        yMm += usedHeight + BLOCK_GAP_MM
+        remaining = remaining.slice(consumed)
+      }
     })
   }
 
-  return {
-    ...page,
-    textBlocks: newTextBlocks,
-  }
+  flushPage()
+  return outputPages.length > 0 ? outputPages : [{ ...page, textBlocks: nonBodyBlocks }]
 }

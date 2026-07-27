@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { resolveGridPage } from './resolveGridPage.js'
+import { PAGE_WIDTH_MM, PAGE_HEIGHT_MM } from './layoutConstants.js'
 
 const imagePaths = ['/img0.jpg', '/img1.jpg']
 
@@ -40,4 +41,23 @@ test('throws if an image element references an upload index that does not exist'
     id: 'image_5', type: 'image', role: 'hero', col_start: 1, col_span: 6, row_start: 1, row_span: 12,
   }]
   assert.throws(() => resolveGridPage(elements, imagePaths, {}), /image_5/)
+})
+
+test('bleed:"full" spans the literal physical page, ignoring col/row grid placement', () => {
+  const elements = [{
+    id: 'image_1', type: 'image', role: 'hero', col_start: 1, col_span: 3, row_start: 1, row_span: 6, bleed: 'full',
+  }]
+  const result = resolveGridPage(elements, imagePaths, {})
+  assert.deepEqual(result.images[0], {
+    path: '/img0.jpg', xMm: 0, yMm: 0, wMm: PAGE_WIDTH_MM, hMm: PAGE_HEIGHT_MM, fullBleed: true, objectPosition: 'center',
+  })
+})
+
+test('an image without bleed keeps fullBleed: false and its grid-derived box', () => {
+  const elements = [{
+    id: 'image_1', type: 'image', role: 'hero', col_start: 1, col_span: 3, row_start: 1, row_span: 6,
+  }]
+  const result = resolveGridPage(elements, imagePaths, {})
+  assert.equal(result.images[0].fullBleed, false)
+  assert.notEqual(result.images[0].wMm, PAGE_WIDTH_MM)
 })

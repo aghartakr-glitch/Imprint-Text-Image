@@ -34,6 +34,8 @@ export default function App() {
   const [pageSize, setPageSize] = useState('A5')
   const [columns, setColumns] = useState('4')
   const [gridMode, setGridMode] = useState('flexible')
+  const [forcedFullBleedIndices, setForcedFullBleedIndices] = useState(new Set())
+  const [runningHeadText, setRunningHeadText] = useState('')
 
   function handleApiKeyChange(e) {
     const newKey = e.target.value
@@ -47,6 +49,16 @@ export default function App() {
 
   function handleImageChange(e) {
     setImages(Array.from(e.target.files))
+    setForcedFullBleedIndices(new Set())
+  }
+
+  function toggleForcedFullBleed(index) {
+    setForcedFullBleedIndices((prev) => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
   }
 
   async function handleGenerate() {
@@ -69,6 +81,9 @@ export default function App() {
     if (apiKey) form.append('apiKey', apiKey)
     form.append('userLayoutSettings', JSON.stringify({
       page_size: pageSize, columns: Number(columns), grid_mode: gridMode,
+      forced_full_bleed_images: [...forcedFullBleedIndices].map((i) => i + 1),
+      allow_unforced_full_bleed: false,
+      running_head_text: runningHeadText,
     }))
 
     try {
@@ -108,24 +123,46 @@ export default function App() {
 
       <div style={{ maxWidth: 720, margin: '32px auto', padding: '0 24px' }}>
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: 20 }}>
-          <p style={{ fontSize: 12, color: T.muted, marginTop: 0 }}>이미지와 본문 텍스트를 넣으면, 입력 조건을 분석해 가장 적합한 편집디자인 레이아웃 1개를 만듭니다.</p>
-
           <div style={fieldWrapper}>
             <div style={groupTitle}>이미지</div>
             <input type="file" accept="image/*" multiple onChange={handleImageChange} />
             <p style={{ fontSize: 12, color: T.muted }}>{images.length}장 선택됨</p>
+            {images.length > 0 && (
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <p style={{ fontSize: 11, color: T.muted, margin: '0 0 2px' }}>체크한 이미지만 풀페이지로 강제됩니다.</p>
+                {images.map((file, i) => (
+                  <label key={`${file.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.ink }}>
+                    <input
+                      type="checkbox"
+                      checked={forcedFullBleedIndices.has(i)}
+                      onChange={() => toggleForcedFullBleed(i)}
+                    />
+                    image_{i + 1} — {file.name}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           <div style={fieldWrapper}>
             <div style={groupTitle}>제목 (선택)</div>
             <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
-            <p style={{ fontSize: 12, color: T.muted }}>제목을 넣으면 섹션 오프너 페이지가 추가됩니다. 비워두면 본문 레이아웃만 생성됩니다.</p>
           </div>
 
           <div style={fieldWrapper}>
             <div style={groupTitle}>본문 텍스트</div>
             <textarea value={text} onChange={(e) => setText(e.target.value)} rows={10} style={inputStyle} />
-            <p style={{ fontSize: 12, color: T.muted }}>빈 줄로 구분하면 문단별로 나뉘어 배치됩니다.</p>
+          </div>
+
+          <div style={fieldWrapper}>
+            <div style={groupTitle}>면주 (반복 상단 텍스트, 선택)</div>
+            <input
+              type="text"
+              value={runningHeadText}
+              onChange={(e) => setRunningHeadText(e.target.value)}
+              placeholder="예: 2026/2027    TREND REPORT"
+              style={inputStyle}
+            />
           </div>
 
           <div style={fieldWrapper}>
@@ -149,8 +186,8 @@ export default function App() {
                 <option value="flexible">유연한 그리드</option>
               </select>
             </div>
-            <p style={{ fontSize: 12, color: T.muted }}>판형, 단 수를 선택하면 이미지·텍스트가 그 그리드 안에서 각자 정해진 단수(1~n단)로 배치됩니다.</p>
           </div>
+
 
           <button type="button" onClick={handleGenerate} disabled={status === 'generating'} style={primaryBtn}>
             {status === 'generating' ? '생성 중...' : 'Generate'}
@@ -186,6 +223,22 @@ export default function App() {
             </div>
           </div>
         )}
+
+        <div style={{ marginTop: 20, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: 20 }}>
+          <div style={groupTitle}>참고</div>
+
+          <div style={{ marginBottom: 14 }}>
+            <p style={{ fontSize: 12, fontWeight: 700, color: T.ink, margin: '0 0 4px' }}>사용 방법</p>
+            <ul style={{ fontSize: 12, color: T.muted, lineHeight: 1.6, margin: 0, paddingLeft: 18 }}>
+              <li>이미지와 본문 텍스트를 넣으면, 입력 조건을 분석해 가장 적합한 편집디자인 레이아웃 1개를 만듭니다.</li>
+              <li>제목을 넣으면 섹션 오프너 페이지가 추가됩니다. 비워두면 본문 레이아웃만 생성됩니다.</li>
+              <li>본문 텍스트는 빈 줄로 구분하면 문단별로 나뉘어 배치됩니다.</li>
+              <li>판형, 단 수를 선택하면 이미지·텍스트가 그 그리드 안에서 각자 정해진 단수(1~n단)로 배치됩니다.</li>
+              <li>체크한 이미지는 다른 텍스트/이미지 없이 단독으로 페이지 전체를 채웁니다.</li>
+              <li>면주에 입력한 텍스트는 매 페이지 상단 안쪽에, 쪽번호는 상단 바깥쪽 모서리에 반복해서 들어갑니다.</li>
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
   )

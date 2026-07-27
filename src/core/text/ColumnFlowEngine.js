@@ -2,6 +2,11 @@ import { gridToMm } from '../gridToMm.js'
 import { estimateTextCapacityMm } from '../estimateTextCapacity.js'
 import { expandFlowRegionToSlots } from '../layout/ReservedRegionManager.js'
 
+// Below this many remaining characters, don't bother slicing a partial paragraph into the leftover
+// space -- it would produce a near-empty final line (e.g. a single stray word), which reads worse
+// than just carrying the whole next paragraph to the next column.
+const MIN_PARTIAL_FILL_CHARS = 20
+
 // Same word-boundary logic as paginateGridPlan.js's overflow handling: never cut a slice
 // mid-word, and never leave a leading space on the next slice.
 function sliceAtWordBoundary(text, capacity) {
@@ -85,6 +90,20 @@ export function flowTextAcrossColumns({
       const restOfParagraph = paragraphQueue[0].slice(consumed)
       paragraphQueue[0] = restOfParagraph
       if (restOfParagraph.length === 0) paragraphQueue.shift()
+    } else if (paragraphQueue.length > 0 && remainingCapacity >= MIN_PARTIAL_FILL_CHARS) {
+      // The slot already holds one or more whole paragraphs, but real space is still left over
+      // and the next paragraph doesn't fit whole. Rather than abandoning that leftover space and
+      // moving the entire next paragraph to a fresh slot (visible as text stopping well above the
+      // column's bottom margin even though room remains), slice the next paragraph at a word
+      // boundary to fill the remainder, same as the oversized-paragraph path above.
+      const sepLen = 2 // "\n\n"
+      const { slice, consumed } = sliceAtWordBoundary(paragraphQueue[0], remainingCapacity - sepLen)
+      if (slice.length > 0) {
+        slotText += `\n\n${slice}`
+        const restOfParagraph = paragraphQueue[0].slice(consumed)
+        paragraphQueue[0] = restOfParagraph
+        if (restOfParagraph.length === 0) paragraphQueue.shift()
+      }
     }
     if (slotText.length === 0) continue // eslint-disable-line no-continue -- capacity too small even for one word; try next slot
     filledSlots.push({ ...slot, textSlice: slotText })

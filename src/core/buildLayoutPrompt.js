@@ -46,6 +46,12 @@ Fixed constraints:
 - Grid: use the column count specified in user's grid settings if provided (default 6 columns, 12 rows).
   Output col_start, col_span, row_start, row_span only (plus object_position for images:
   center | top | bottom | left | right, default center). The implementation converts grid units to mm.
+- Full-bleed image (optional): an image element may set "bleed": "full" to span the entire
+  physical page edge-to-edge (ignoring margins) instead of the grid. Only use this when the image
+  is the ONLY element on its page (no text, no other images) -- validation rejects "bleed": "full"
+  if anything else shares that page. Still include col_start/col_span/row_start/row_span on the
+  element (they're ignored for a full-bleed image, but the field is required by the schema).
+  Use this for a strong opener/section-break image, not as the default for every hero image.
 - MUST include grid_spec in every candidate: { page_size, columns, rows, margin_preset, gutter_mm, grid_mode }
   reflecting user's preferences if they were provided, otherwise sensible defaults.
   margin_preset MUST be exactly one of: "recommended" | "narrow" | "wide" | "custom" -- never "default"
@@ -84,6 +90,14 @@ Fixed constraints:
 
   CONSEQUENCE: If you ignore this, the layout will be rejected and fallback deterministic layout used instead.
 
+  🚨 Paragraph order (CRITICAL, validated): the user split their input into paragraph_1, paragraph_2,
+  ... in a deliberate reading sequence. Across pages (in page order), a paragraph_N's first
+  appearance must never be on an earlier page than any paragraph_M with M < N -- i.e. paragraph
+  numbers must never decrease as you move through the pages. If satisfying image-text proximity
+  above would require pulling a later paragraph ahead of an earlier one, do NOT reorder the text --
+  instead move/duplicate placement of the image, or accept a slightly less tight image-text pairing.
+  CONSEQUENCE: reordered paragraphs will be rejected by validation.
+
   If has_title is true, you MUST decide where to place the title element (title_behavior):
   * same_page_with_image_body: title + image + body on one page
   * title_body_same_page_image_next: title + body on page 1, image on page 2+
@@ -108,6 +122,10 @@ Design principles:
 9. If content does not fit, continue to the next page -- never shrink text or delete it.
 10. Prefer output_unit=spread when image_count>=3 or text_density is medium/long, unless the
     input explicitly requests single_page.
+11. Match column count to how much body text a paragraph actually carries, not just to the grid
+    column setting used for images: a paragraph of a few sentences or more reads better as 1-2 wide
+    columns than as 3+ narrow ones. Reserve 3+ column body text for short, list-like or caption-length
+    fragments. When in doubt for a long paragraph, use fewer, wider columns over many narrow ones.
 
 You must generate exactly the requested number of internal candidate layout_plans (see the "candidates"
 array size in the Task section below), each individually valid. The user only ever sees one final
@@ -127,6 +145,10 @@ comment lists options separated by "|" (e.g. Editorial | Magazine | Exhibition C
 means "pick exactly one of these" -- never write the "|"-separated list itself as the value.
 
 Return JSON only.`
+
+// Cost reduction: only the N most relevant retrieved references are worth their token cost -- past
+// this, additional examples add prompt weight without meaningfully improving guidance quality.
+const MAX_REFERENCES_FOR_PROMPT = 3
 
 // Minimal schema example: one candidate, one page, essential fields only.
 // Model extends this pattern to multiple pages/candidates/elements automatically.
@@ -219,7 +241,8 @@ longer intersect and keep the required mm gap (text-text 3mm, text-image 4mm, im
       id: b.id,
       role: b.role,
       char_count: b.char_count,
-    })))}` : undefined,
+      group_id: b.group_id,
+    })))}\n\n🚨 group_id (CRITICAL): the user wrote these paragraphs with NO blank line between some of\nthem on purpose -- blocks sharing the same group_id were glued together deliberately (e.g. a\nKorean heading + English heading + its body paragraph, with no blank line separating any of\nthem) and MUST be placed on the SAME page, adjacent to each other with no other element between\nthem. Treat each group_id as one content card: paragraph_N references are sub-blocks inside\nthat card, not independent objects. Never place only the headings of a group while leaving its\nbody to overflow later. If the whole group cannot fit, move the whole group together. Never split\na group across pages, never insert an unrelated element between two blocks of the same group_id.\nA blank line (different group_id) is the only place a group boundary exists.` : undefined,
     imageAnalysis && imageAnalysis.length > 0 ? `IMAGE VISUAL ANALYSIS (pre-analyzed for you):\n${JSON.stringify(imageAnalysis.map((img) => ({
       id: img.id,
       orientation: img.orientation,
@@ -233,11 +256,11 @@ longer intersect and keep the required mm gap (text-text 3mm, text-image 4mm, im
       relation: rel.relation,
       confidence: rel.confidence,
     })), null, 2)}\n\n⚠️ MUST KEEP HIGH-CONFIDENCE PAIRS (confidence >= 0.7) ON SAME PAGE OR ADJACENT PAGES. Splitting them 3+ pages apart will fail editorial review.` : undefined,
-    imageTextMatching ? `Image-text relationships (suggested pairings):\n${JSON.stringify(imageTextMatching)}` : undefined,
-    suggestedLayoutFamily ? `Suggested layout family (based on image count and content structure):\n${JSON.stringify(suggestedLayoutFamily)}` : undefined,
-    `Image metadata (per-image facts; estimated_role is a starting hint, you may override it):\n${JSON.stringify(imageMetadata ?? [])}`,
-    `Layout knowledge base (design grammar reference, not fixed templates):\n${JSON.stringify(patternLibrarySummary ?? [])}`,
-    `Retrieved reference examples (real tagged pages most similar to this input -- guidance only, do not copy any single example verbatim):\n${JSON.stringify(retrievedReferences ?? [])}`,
+    imageTextMatching && Object.keys(imageTextMatching).length > 0 ? `Image-text relationships (suggested pairings):\n${JSON.stringify(imageTextMatching)}` : undefined,
+    suggestedLayoutFamily && Object.keys(suggestedLayoutFamily).length > 0 ? `Suggested layout family (based on image count and content structure):\n${JSON.stringify(suggestedLayoutFamily)}` : undefined,
+    imageMetadata && imageMetadata.length > 0 ? `Image metadata (per-image facts; estimated_role is a starting hint, you may override it):\n${JSON.stringify(imageMetadata)}` : undefined,
+    patternLibrarySummary && patternLibrarySummary.length > 0 ? `Layout knowledge base (design grammar reference, not fixed templates):\n${JSON.stringify(patternLibrarySummary)}` : undefined,
+    retrievedReferences && retrievedReferences.length > 0 ? `Retrieved reference examples (real tagged pages most similar to this input -- guidance only, do not copy any single example verbatim):\n${JSON.stringify(retrievedReferences.slice(0, MAX_REFERENCES_FOR_PROMPT))}` : undefined,
   ].filter(Boolean)
 
   if (userLayoutSettings && Object.values(userLayoutSettings).some((v) => v && v !== 'auto')) {
@@ -248,6 +271,29 @@ longer intersect and keep the required mm gap (text-text 3mm, text-image 4mm, im
   }
   if (userPreferenceContext && Object.keys(userPreferenceContext).length > 0) {
     sections.push(`User preference context (learned from past edits -- soft guidance, never overrides fixed constraints or validation):\n${JSON.stringify(userPreferenceContext)}`)
+  }
+
+  const forcedFullBleedImages = userLayoutSettings?.forced_full_bleed_images
+  if (Array.isArray(forcedFullBleedImages) && forcedFullBleedImages.length > 0) {
+    const imageIds = forcedFullBleedImages.map((n) => `image_${n}`).join(', ')
+    sections.push(`🚨 REQUIRED full-bleed images (hard requirement, validated): the user explicitly pinned ${imageIds} to always render as a full-bleed page ("bleed": "full"). Each of these MUST be placed alone on its own page (no text, no other images sharing that page) with "bleed": "full" set. This is not a suggestion -- a plan missing this for any of ${imageIds} will fail validation.`)
+  }
+
+  if (userLayoutSettings?.allow_unforced_full_bleed === false) {
+    const allowedIds = Array.isArray(forcedFullBleedImages) && forcedFullBleedImages.length > 0
+      ? forcedFullBleedImages.map((n) => `image_${n}`).join(', ')
+      : 'none'
+    sections.push(`Full-bleed policy: ONLY user-checked images may use "bleed": "full" (allowed: ${allowedIds}). Do not make any unchecked image full-bleed.`)
+  }
+
+  const fullBleedFrequency = userLayoutSettings?.full_bleed_frequency
+  if (userLayoutSettings?.allow_unforced_full_bleed === false) {
+    // The explicit checked-only policy above takes precedence over any legacy frequency setting.
+  } else if (fullBleedFrequency === 'occasional' || fullBleedFrequency === 'frequent') {
+    const targetShare = fullBleedFrequency === 'frequent' ? '25-35%' : '10-15%'
+    sections.push(`Full-bleed image frequency preference: "${fullBleedFrequency}". Actively look for opportunities to make roughly ${targetShare} of pages a full-bleed opener image ("bleed": "full") -- e.g. at section starts or strong standalone images -- rather than treating it as a rare exception. This still only applies to a page where the image is the sole element (no text, no other images); that hard constraint is unchanged.`)
+  } else if (fullBleedFrequency === 'never') {
+    sections.push('Full-bleed image frequency preference: "never". Do not use "bleed": "full" for any image in this generation.')
   }
 
   const candidateProfiles = [
@@ -291,18 +337,8 @@ ${candidateProfiles[0]}
 Create exactly ${internalCandidateCount} distinct candidate layout_plans for the given input.
 Use the pattern library and retrieved references as design grammar guidance, not fixed templates.
 ${diversityGuidance}
-INFERRED RELATIONSHIPS TO PRESERVE:
-- For every high-confidence image-text pair (confidence >= 0.7):
-  → Place text and image on SAME PAGE or ADJACENT PAGES only
-  → Use the detected roles (brand_case_dove, protest_case, etc.) to inform grouping
-  → Never split Dove text from Dove image by 3+ pages
-
-PARAGRAPH ROLE-BASED PLACEMENT:
-- "section_title" (DESIGN CASE STUDIES): prominent, separate visual element
-- "case_title_ko" / "case_title_en": section headers or case headers
-- "brand_case_*" / "protest_case": near related image, same grid region if possible
-- "overview" / "context": early pages, near hero image or standalone
-- "credit": small text near bottom of case study
+(Image-text proximity and paragraph-role placement rules are already given above in the system
+prompt's "Placement Guidance" and "Image-Text Proximity" sections -- apply them here, not repeated.)
 
 Think about image count, image orientation, text density, reading priority, and visual priority.
 

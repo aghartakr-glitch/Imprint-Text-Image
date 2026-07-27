@@ -34,6 +34,19 @@ export function reconstructLayout({
     }
   }
 
+  // Computed before paginateGridPlan runs -- it must slice text against the SAME grid dimensions
+  // resolveGridPage will render into below, or the two disagree on box size (confirmed 2026-07-16:
+  // paginateGridPlan was estimating text capacity against the hardcoded default 6-column/12-row
+  // grid while resolveGridPage rendered the plan's actual grid_spec, so a heading could be sliced
+  // down to a handful of characters sized for a much smaller assumed box, then rendered into a
+  // completely different, often much larger, real box -- the truncation looked arbitrary because
+  // it was computed against a box that was never actually used for rendering).
+  const gridSpec = layoutPlan.grid_spec
+    ? {
+      columns: layoutPlan.grid_spec.columns, rows: layoutPlan.grid_spec.rows, gutterMm: layoutPlan.grid_spec.gutter_mm,
+    }
+    : undefined
+
   const isColumnFlowFallbackPlan = Boolean(layoutPlan.grid_spec) && !planUsesTextSource(layoutPlan)
   const paginated = isColumnFlowFallbackPlan
     ? layoutPlan.pages.map((p) => ({
@@ -42,12 +55,7 @@ export function reconstructLayout({
         p.elements.filter((el) => el.type === 'text' && el.role === 'body').map((el) => [el.id, el.text ?? null]),
       ),
     }))
-    : paginateGridPlan(layoutPlan, text, textBlocks)
-  const gridSpec = layoutPlan.grid_spec
-    ? {
-      columns: layoutPlan.grid_spec.columns, rows: layoutPlan.grid_spec.rows, gutterMm: layoutPlan.grid_spec.gutter_mm,
-    }
-    : undefined
+    : paginateGridPlan(layoutPlan, text, textBlocks, gridSpec)
   const gridResolvedPages = paginated.map((p) => resolveGridPage(p.elements, imagePaths, p.textSlicesByElementId, gridSpec))
 
   // Check if plan includes a title element placed by the LLM; if so, it's already in gridResolvedPages

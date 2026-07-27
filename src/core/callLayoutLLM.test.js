@@ -156,6 +156,24 @@ test('malformed JSON on the one attempt falls back immediately, no retry call', 
   assert.equal(client.calls.length, 1)
 })
 
+// Regression: confirmed 2026-07-27 -- a genuinely truncated response (stop_reason: 'max_tokens')
+// used to be reported to the caller as "LLM 요청/JSON 파싱 실패: Unterminated string in JSON at
+// position ...", indistinguishable from an actual malformed-JSON bug. It must be reported with its
+// own distinct, actionable message instead.
+test('a truncated (stop_reason: max_tokens) response is reported with a distinct "LLM 응답 잘림" message, not a generic parse-failure message', async () => {
+  const client = queueClient([{
+    response: {
+      content: [{ type: 'text', text: '{"candidates":[{"candidate_id":"candidate_1","reason":"cut off mid' }],
+      usage: { input_tokens: 100, output_tokens: 8000 },
+      stop_reason: 'max_tokens',
+    },
+  }])
+  const result = await callLayoutLLM({ promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1 }, { apiKey: 'sk-fake', mockMode: false, client })
+  assert.equal(result.fallbackUsed, true)
+  assert.match(result.fallbackReason, /^LLM 응답 잘림:/)
+  assert.match(result.fallbackReason, /max_tokens/)
+})
+
 test('cost budget refuses the single call outright if even its minimum output would exceed the 0.03 USD ceiling', async () => {
   const budget = { planRequest: async () => { throw new (await import('./layoutCostBudget.js')).LayoutCostBudgetExceeded('LLM 비용 예산 $0.03 초과 방지를 위해 API 호출을 중단했습니다.') }, summary: () => ({ max_spend_usd: 0.03, spent_usd: 0, remaining_usd: 0.03, calls: [] }) }
   const client = queueClient([{ response: textResponse({ candidates: [validPlan('candidate_1')] }) }])
@@ -261,6 +279,80 @@ test('a single candidate combining 3 collisions + 2 severe text overflows is ful
   assert.equal(result.candidates[0].validation.passed, true)
 })
 
+test('a paragraph-order inversion is repaired locally, with zero retries', async () => {
+  const plan = {
+    candidate_id: 'candidate_1',
+    style: 'Editorial',
+    output_unit: 'spread',
+    layout_family: 'balanced',
+    layout_purpose: 'editorial_reading',
+    image_hierarchy: 'hero_support',
+    image_text_relation: 'text_explains_image',
+    composition_strategy: 'image_left_text_right',
+    base_pattern_reference: 'x',
+    layout_intent: 'x',
+    design_sequence: [{ step: 1, decision_type: 'x', value: 'x', reason: 'x' }],
+    grid: { columns: 4, rows: 12 },
+    grid_spec: { columns: 4, rows: 12, gutter_mm: 4, page_size: 'A5', grid_mode: 'flexible' },
+    pages: [
+      { page: 1, elements: [{ id: 'p6_body', type: 'text', role: 'body', text_source: 'paragraph_6', col_start: 1, col_span: 4, row_start: 1, row_span: 4 }] },
+      { page: 2, elements: [{ id: 'p7_body', type: 'text', role: 'body', text_source: 'paragraph_7', col_start: 1, col_span: 4, row_start: 1, row_span: 4 }] },
+      { page: 3, elements: [{ id: 'p5_body', type: 'text', role: 'body', text_source: 'paragraph_5', col_start: 1, col_span: 4, row_start: 1, row_span: 4 }] },
+    ],
+    overflow_policy: { body_overflow: 'continue_to_next_page' },
+    reason: 'x',
+  }
+  const textBlocks = Array.from({ length: 7 }, () => ({ char_count: 20 }))
+  const client = queueClient([{ response: textResponse({ candidates: [plan] }) }])
+
+  const result = await callLayoutLLM(
+    { promptContext: { inputMetadata: { image_count: 0 } }, imageCount: 0, textBlocks },
+    { apiKey: 'sk-fake', mockMode: false, client },
+  )
+
+  assert.equal(result.fallbackUsed, false, JSON.stringify(result.rejectedCandidates?.[0]?.validation?.issues))
+  assert.equal(result.retryCount, 0, 'paragraph order must be fixed locally, without a paid retry')
+  assert.equal(client.calls.length, 1)
+  assert.deepEqual(
+    result.candidates[0].plan.pages.flatMap((page) => page.elements).map((el) => el.text_source),
+    ['paragraph_5', 'paragraph_6', 'paragraph_7'],
+  )
+})
+
+test('paragraph-order inversion is not locally rebuilt for image layouts', async () => {
+  const plan = {
+    candidate_id: 'candidate_1',
+    style: 'Editorial',
+    output_unit: 'spread',
+    layout_family: 'balanced',
+    layout_purpose: 'case_analysis',
+    image_hierarchy: 'hero_support',
+    image_text_relation: 'text_explains_image',
+    composition_strategy: 'image_left_text_right',
+    base_pattern_reference: 'x',
+    layout_intent: 'x',
+    design_sequence: [{ step: 1, decision_type: 'x', value: 'x', reason: 'x' }],
+    grid: { columns: 4, rows: 12 },
+    grid_spec: { columns: 4, rows: 12, gutter_mm: 4, page_size: 'A5', grid_mode: 'flexible' },
+    pages: [
+      { page: 1, elements: [{ id: 'image_1', type: 'image', role: 'hero', col_start: 1, col_span: 4, row_start: 1, row_span: 12, fit: 'contain', object_position: 'center', bleed: 'full' }] },
+      { page: 2, elements: [{ id: 'p2_body', type: 'text', role: 'body', text_source: 'paragraph_2', col_start: 1, col_span: 4, row_start: 1, row_span: 4 }] },
+      { page: 3, elements: [{ id: 'p1_body', type: 'text', role: 'body', text_source: 'paragraph_1', col_start: 1, col_span: 4, row_start: 1, row_span: 4 }] },
+    ],
+    overflow_policy: { body_overflow: 'continue_to_next_page' },
+    reason: 'x',
+  }
+  const client = queueClient([{ response: textResponse({ candidates: [plan] }) }])
+
+  const result = await callLayoutLLM(
+    { promptContext: { inputMetadata: { image_count: 1 } }, imageCount: 1, textBlocks: [{ char_count: 20 }, { char_count: 20 }] },
+    { apiKey: 'sk-fake', mockMode: false, client },
+  )
+
+  assert.equal(result.fallbackUsed, true)
+  assert.equal(result.candidates.length, 0)
+  assert.ok(result.rejectedCandidates[0].validation.issues.some((issue) => issue.includes('문단 순서 위반')))
+})
 // Regression: when every candidate keeps failing validation even after repair + retry, the caller
 // used to get zero candidates and had to hard-fail with no output -- wasting the API spend that
 // already happened for genuinely LLM-reasoned (not template) candidates that just have a residual

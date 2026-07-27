@@ -1,7 +1,16 @@
-import { TEXT_IMAGE_MIN_GAP_MM, TEXT_TEXT_MIN_GAP_MM, IMAGE_IMAGE_MIN_GAP_MM } from "../layoutConstants.js"
+import {
+  TEXT_IMAGE_MIN_GAP_MM, TEXT_TEXT_MIN_GAP_MM, IMAGE_IMAGE_MIN_GAP_MM,
+  TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM,
+} from "../layoutConstants.js"
 
-const CONTENT_WIDTH_MM = 116
-const CONTENT_HEIGHT_MM = 176
+// Previously hardcoded duplicates (116/176) of TEXT_BOX_WIDTH_MM/TEXT_BOX_HEIGHT_MM -- when
+// MARGIN_BOTTOM_MM changed from 18mm to 16mm (equalizing it with MARGIN_TOP_MM), the real content
+// height became 178mm but this file's own copy stayed at the old 176mm, so every generation with a
+// text box using the newly-available extra 2mm failed with a false "exceeds bottom boundary" error
+// (confirmed 2026-07-27: "TextBlock exceeds bottom boundary (y+h=177.8 > 176)"). Import the single
+// source of truth instead of duplicating it, so this can't drift again.
+const CONTENT_WIDTH_MM = TEXT_BOX_WIDTH_MM
+const CONTENT_HEIGHT_MM = TEXT_BOX_HEIGHT_MM
 
 function rectsOverlap(r1, r2) {
   return (
@@ -25,8 +34,17 @@ function getGap(r1, r2) {
   return Math.min(hGap, vGap)
 }
 
+function normalizedTextForDuplicateCheck(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim()
+}
+
+function isBodyRole(role) {
+  return (role || 'body') === 'body' || role === 'continuation_body'
+}
+
 export function validateResolvedLayout(resolvedPages) {
   const issues = []
+  const textSourcePlacements = new Map()
 
   if (!Array.isArray(resolvedPages)) {
     issues.push({
@@ -53,25 +71,29 @@ export function validateResolvedLayout(resolvedPages) {
           })
         }
 
-        // Check bounds
-        if (img.xMm + img.wMm > CONTENT_WIDTH_MM) {
-          issues.push({
-            type: 'out_of_bounds',
-            page: pageIdx + 1,
-            element_id: elementId,
-            box: { xMm: img.xMm, yMm: img.yMm, wMm: img.wMm, hMm: img.hMm },
-            message: `Image exceeds right boundary (x+w=${img.xMm + img.wMm} > ${CONTENT_WIDTH_MM})`
-          })
-        }
+        // Full-bleed images are supposed to exceed the margin-constrained content box (they span
+        // the literal physical page) -- checking them against CONTENT_WIDTH/HEIGHT_MM here would
+        // always fail by design, so they're exempt from this bounds check.
+        if (!img.fullBleed) {
+          if (img.xMm + img.wMm > CONTENT_WIDTH_MM) {
+            issues.push({
+              type: 'out_of_bounds',
+              page: pageIdx + 1,
+              element_id: elementId,
+              box: { xMm: img.xMm, yMm: img.yMm, wMm: img.wMm, hMm: img.hMm },
+              message: `Image exceeds right boundary (x+w=${img.xMm + img.wMm} > ${CONTENT_WIDTH_MM})`
+            })
+          }
 
-        if (img.yMm + img.hMm > CONTENT_HEIGHT_MM) {
-          issues.push({
-            type: 'out_of_bounds',
-            page: pageIdx + 1,
-            element_id: elementId,
-            box: { xMm: img.xMm, yMm: img.yMm, wMm: img.wMm, hMm: img.hMm },
-            message: `Image exceeds bottom boundary (y+h=${img.yMm + img.hMm} > ${CONTENT_HEIGHT_MM})`
-          })
+          if (img.yMm + img.hMm > CONTENT_HEIGHT_MM) {
+            issues.push({
+              type: 'out_of_bounds',
+              page: pageIdx + 1,
+              element_id: elementId,
+              box: { xMm: img.xMm, yMm: img.yMm, wMm: img.wMm, hMm: img.hMm },
+              message: `Image exceeds bottom boundary (y+h=${img.yMm + img.hMm} > ${CONTENT_HEIGHT_MM})`
+            })
+          }
         }
       })
     }
@@ -83,6 +105,16 @@ export function validateResolvedLayout(resolvedPages) {
 
         const elementId = tb.id || `text_${tbIdx + 1}`
         const { xMm, yMm, wMm, hMm } = tb.zone
+
+        if (tb.text_source) {
+          if (!textSourcePlacements.has(tb.text_source)) textSourcePlacements.set(tb.text_source, [])
+          textSourcePlacements.get(tb.text_source).push({
+            page: pageIdx + 1,
+            elementId,
+            role: tb.role,
+            slice: normalizedTextForDuplicateCheck(tb.slice),
+          })
+        }
 
         // Check for invalid dimensions
         if (!Number.isFinite(xMm) || !Number.isFinite(yMm) || !Number.isFinite(wMm) || !Number.isFinite(hMm)) {
@@ -117,9 +149,10 @@ export function validateResolvedLayout(resolvedPages) {
         }
       })
 
-      // Check text-image overlaps
+      // Check text-image overlaps (full-bleed images are exempt -- by contract they're the only
+      // element on their page, so there's no text to compare against)
       if (Array.isArray(page.images)) {
-        page.images.forEach((img, imgIdx) => {
+        page.images.filter((img) => !img.fullBleed).forEach((img, imgIdx) => {
           const imgBox = { x: img.xMm, y: img.yMm, w: img.wMm, h: img.hMm }
           const imgId = img.id || `image_${imgIdx + 1}`
 
@@ -244,15 +277,17 @@ export function validateResolvedLayout(resolvedPages) {
       }
     }
 
-    // Check image-image overlaps
+    // Check image-image overlaps (full-bleed images are exempt -- by contract they're the only
+    // image on their page)
     if (Array.isArray(page.images)) {
-      for (let i = 0; i < page.images.length; i += 1) {
-        for (let j = i + 1; j < page.images.length; j += 1) {
-          const img1 = { x: page.images[i].xMm, y: page.images[i].yMm, w: page.images[i].wMm, h: page.images[i].hMm }
-          const img2 = { x: page.images[j].xMm, y: page.images[j].yMm, w: page.images[j].wMm, h: page.images[j].hMm }
+      const nonBleedImages = page.images.filter((img) => !img.fullBleed)
+      for (let i = 0; i < nonBleedImages.length; i += 1) {
+        for (let j = i + 1; j < nonBleedImages.length; j += 1) {
+          const img1 = { x: nonBleedImages[i].xMm, y: nonBleedImages[i].yMm, w: nonBleedImages[i].wMm, h: nonBleedImages[i].hMm }
+          const img2 = { x: nonBleedImages[j].xMm, y: nonBleedImages[j].yMm, w: nonBleedImages[j].wMm, h: nonBleedImages[j].hMm }
 
-          const id1 = page.images[i].id || `image_${i + 1}`
-          const id2 = page.images[j].id || `image_${j + 1}`
+          const id1 = nonBleedImages[i].id || `image_${i + 1}`
+          const id2 = nonBleedImages[j].id || `image_${j + 1}`
 
           if (rectsOverlap(img1, img2)) {
             issues.push({
@@ -281,9 +316,36 @@ export function validateResolvedLayout(resolvedPages) {
     }
   })
 
+  textSourcePlacements.forEach((placements, source) => {
+    if (placements.length <= 1) return
+    const bodyLike = placements.every((p) => isBodyRole(p.role))
+    if (!bodyLike) {
+      issues.push({
+        type: 'duplicate_text_source',
+        page: placements[1].page,
+        element_id: placements[1].elementId,
+        other_element_id: placements[0].elementId,
+        message: `resolved duplicated heading/label text_source ${source}`,
+      })
+      return
+    }
+
+    const nonEmptySlices = placements.map((p) => p.slice).filter(Boolean)
+    const uniqueSlices = new Set(nonEmptySlices)
+    if (placements.length > 2 || uniqueSlices.size < nonEmptySlices.length) {
+      issues.push({
+        type: 'duplicate_text_source',
+        page: placements[1].page,
+        element_id: placements[1].elementId,
+        other_element_id: placements[0].elementId,
+        message: `resolved duplicated body text_source ${source}`,
+      })
+    }
+  })
+
   // Only severity: 'error' issues (out_of_bounds, overlaps, invalid_dimension)
   const errorIssues = issues.filter(i =>
-    ['out_of_bounds', 'text_text_overlap', 'text_image_overlap', 'image_image_overlap', 'invalid_dimension'].includes(i.type)
+    ['out_of_bounds', 'text_text_overlap', 'text_image_overlap', 'image_image_overlap', 'invalid_dimension', 'duplicate_text_source'].includes(i.type)
   )
 
   return {
@@ -298,7 +360,12 @@ export function assertResolvedPagesInsideBounds(resolvedPages) {
 
   resolvedPages.forEach((page, pageIdx) => {
     if (Array.isArray(page.images)) {
-      page.images.forEach((img, imgIdx) => {
+      // Full-bleed images are supposed to exceed the margin-constrained content box (they span the
+      // literal physical page by design) -- exempt them here too, matching validateResolvedLayout's
+      // bounds check above (confirmed 2026-07-27: enabling full-bleed frequency/forced full-bleed
+      // made every generation with a full-bleed image fail this final assertion, since this
+      // function never got the same fullBleed exemption).
+      page.images.filter((img) => !img.fullBleed).forEach((img, imgIdx) => {
         if (img.xMm + img.wMm > CONTENT_WIDTH_MM) {
           issues.push(`Page ${pageIdx + 1}, image ${imgIdx}: exceeds right boundary`)
         }

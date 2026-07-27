@@ -1,4 +1,4 @@
-import { gridToMm } from './gridToMm.js'
+import { gridToMm, gridToMmFullBleed } from './gridToMm.js'
 
 // Converts one already-validated layout_plan page's elements (grid units) + the text already
 // assigned to its body box into the resolvedPage shape buildLatex.js already knows how to
@@ -13,8 +13,9 @@ export function resolveGridPage(elements, imagePaths, textSlicesByElementId = {}
   const textBlocks = []
 
   elements.forEach((el) => {
-    const box = gridToMm(el, gridSpec)
     if (el.type === 'image') {
+      const isFullBleed = el.bleed === 'full'
+      const box = isFullBleed ? gridToMmFullBleed() : gridToMm(el, gridSpec)
       const match = /^image_(\d+)$/.exec(el.id || '')
       const idx = match ? Number(match[1]) - 1 : -1
       const path = imagePaths[idx]
@@ -22,9 +23,10 @@ export function resolveGridPage(elements, imagePaths, textSlicesByElementId = {}
         throw new Error(`이미지 요소 ${el.id}에 대응하는 업로드 이미지가 없습니다`)
       }
       images.push({
-        path, ...box, fullBleed: false, objectPosition: el.object_position || 'center',
+        path, ...box, fullBleed: isFullBleed, objectPosition: el.object_position || 'center',
       })
     } else if (el.type === 'text') {
+      const box = el.box_mm || gridToMm(el, gridSpec)
       // CRITICAL FIX: Process ALL text roles, not just 'body'.
       // This enables section_title, case_title_ko, case_body, overview, etc. to render.
       // Each text element is independent, allowing images and text to interleave.

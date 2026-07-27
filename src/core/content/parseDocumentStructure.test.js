@@ -111,3 +111,17 @@ test('parseDocumentStructure: handles empty text', () => {
   assert.equal(result.paragraph_count, 0)
   assert.equal(result.text_blocks.length, 0)
 })
+test('parseDocumentStructure: long ### lines are body, not inferred back into section_label', () => {
+  const result = parseDocumentStructure({
+    title: 'Test',
+    text: `## 맥락에 맞는 컬러
+## CONTEXT RELEVANT COLOR
+### 건강기능식품 브랜드 Feel Menopause는 패키지 디자인에 대담한 핑크색을 사용하여 여성들에게 자신감과 힘을 부여하는 이미지를 전달합니다.`,
+  })
+
+  assert.equal(result.text_blocks[0].role, 'section_label')
+  assert.equal(result.text_blocks[1].role, 'section_label')
+  assert.equal(result.text_blocks[2].role, 'body')
+  assert.equal(result.text_blocks[2].downgraded_heading_level, 3)
+  assert.equal(result.text_blocks[2].group_id, 0)
+})

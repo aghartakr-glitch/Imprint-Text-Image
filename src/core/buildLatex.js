@@ -7,7 +7,7 @@ import {
   BODY_FONT_SIZE_PT, BODY_LEADING_PT,
   TITLE_FONT_SIZE_PT, TITLE_LEADING_PT, TITLE_VERTICAL_POSITION_RATIO,
 } from './layoutConstants.js'
-import { stripMarkdownHeadingMarkers } from './text/parseMarkdownBlocks.js'
+import { stripMarkdownHeadingMarkers } from './text/parseMarkdownDocument.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const TEMPLATE_DIR = join(__dirname, '..', '..', 'templates')
@@ -59,15 +59,22 @@ function leftMarginForPage(pageNumber) {
   return pageNumber % 2 === 1 ? MARGIN_INNER_MM : MARGIN_OUTER_MM
 }
 
+function normalizeTextForLatex(text) {
+  return stripMarkdownHeadingMarkers(String(text ?? ''))
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+}
+
 function escapeLatex(text) {
   const BACKSLASH_SENTINEL = ' BACKSLASH '
-  return text
+  return normalizeTextForLatex(text)
     .replace(/\\/g, BACKSLASH_SENTINEL)
     .replace(/([{}#%&_$])/g, '\\$1')
     .replace(/~/g, '\\textasciitilde{}')
     .replace(/\^/g, '\\textasciicircum{}')
     .replace(/\n\s*\n/g, '\\par ')
-    .replace(/\n/g, ' ')
+    .replace(/\n/g, '\\\\ ')
     .split(BACKSLASH_SENTINEL).join('\\textbackslash{}')
 }
 
@@ -97,6 +104,32 @@ function styleCommandForRole(role) {
   return roleMap[role] || '\\BodyText'
 }
 
+// Running head + page number, top of page. In the generated spread preview, odd-numbered pages sit
+// on the left and even-numbered pages sit on the right, so the outer edge is left for odd pages and
+// right for even pages. The running head is placed on the opposite, inner edge. \pagestyle{empty}
+// suppresses LaTeX's own header/footer machinery since every element is absolutely positioned.
+function runningHeadBlock(pageNumber, runningHeadText) {
+  const isLeftSpreadPage = pageNumber % 2 === 1
+  const contentWidthMm = PAGE_WIDTH_MM - MARGIN_INNER_MM - MARGIN_OUTER_MM
+  const yMm = MARGIN_TOP_MM - 8
+  const numberBoxWidthMm = 15
+  const numberXMm = isLeftSpreadPage ? MARGIN_OUTER_MM : PAGE_WIDTH_MM - MARGIN_OUTER_MM - numberBoxWidthMm
+  const labelXMm = isLeftSpreadPage ? MARGIN_OUTER_MM : MARGIN_INNER_MM
+
+  const parts = []
+  if (runningHeadText) {
+    const labelAlign = isLeftSpreadPage ? '\\raggedleft' : '\\raggedright'
+    parts.push(`\\begin{textblock*}{${contentWidthMm}mm}(${labelXMm}mm,${yMm}mm)\n`
+      + `  \\noindent{${labelAlign}\\RunningHeadText{${escapeLatex(runningHeadText)}}\\par}\n`
+      + '\\end{textblock*}')
+  }
+  const numberAlign = isLeftSpreadPage ? '\\raggedright' : '\\raggedleft'
+  parts.push(`\\begin{textblock*}{${numberBoxWidthMm}mm}(${numberXMm}mm,${yMm}mm)\n`
+    + `  \\noindent{${numberAlign}\\PageNumberText{${pageNumber}}\\par}\n`
+    + '\\end{textblock*}')
+  return parts.join('\n')
+}
+
 function textBlock(textZone, pageNumber, textSlice, role = 'body') {
   const xMm = leftMarginForPage(pageNumber) + textZone.xMm
   const yMm = MARGIN_TOP_MM + textZone.yMm
@@ -104,12 +137,9 @@ function textBlock(textZone, pageNumber, textSlice, role = 'body') {
 
   const styleCmd = styleCommandForRole(role)
 
-  // Safety: strip remaining markdown heading markers (should be cleaned in parser, but safety net)
-  const cleanedSlice = stripMarkdownHeadingMarkers(textSlice)
-
   return `\\begin{textblock*}{${textZone.wMm}mm}(${xMm}mm,${yMm}mm)\n`
     + `  \\noindent\\begin{minipage}[t][${hMm}mm][t]{${textZone.wMm}mm}\n`
-    + `    ${styleCmd}{${escapeLatex(cleanedSlice)}}\n`
+    + `    ${styleCmd}{${escapeLatex(textSlice)}}\n`
     + `  \\end{minipage}\n`
     + '\\end{textblock*}'
 }
@@ -128,7 +158,7 @@ function titleBlock(textZone, pageNumber, title) {
     + '\\end{textblock*}'
 }
 
-export function buildPagesLatex(resolvedPages) {
+export function buildPagesLatex(resolvedPages, { runningHeadText } = {}) {
   return resolvedPages
     .map((page, i) => {
       const pageNumber = i + 1
@@ -145,12 +175,13 @@ export function buildPagesLatex(resolvedPages) {
       } else if (page.textZone && page.textSlice) {
         parts.push(textBlock(page.textZone, pageNumber, page.textSlice))
       }
+      parts.push(runningHeadBlock(pageNumber, runningHeadText))
       return parts.join('\n')
     })
     .join('\n\\newpage\n')
 }
 
-export function buildMainTex({ resolvedPages }) {
+export function buildMainTex({ resolvedPages, runningHeadText }) {
   const template = readFileSync(join(TEMPLATE_DIR, 'main_template.tex'), 'utf-8')
-  return fillTemplate(template, { BODY_LATEX: buildPagesLatex(resolvedPages) })
+  return fillTemplate(template, { BODY_LATEX: buildPagesLatex(resolvedPages, { runningHeadText }) })
 }

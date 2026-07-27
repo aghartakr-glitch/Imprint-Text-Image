@@ -1,17 +1,30 @@
-import { CHAR_WIDTH_MM, LINE_HEIGHT_MM } from './layoutConstants.js'
+import {
+  PT_TO_MM, ROLE_FONT_SIZE_PT, ROLE_LEADING_PT, ROLE_BOLD_WIDTH_FACTOR, CHAR_WIDTH_CALIBRATION_FACTOR,
+} from './layoutConstants.js'
 import { gridToMm } from './gridToMm.js'
 
-// Never touches font size or leading (body_font_size_pt=9 / body_leading_pt=14 stay fixed) --
-// this only estimates how many characters fit, so overflow can be routed to more pages instead.
-export function estimateTextCapacityMm(wMm, hMm) {
-  const charsPerLine = Math.floor(wMm / CHAR_WIDTH_MM)
-  const lines = Math.floor(hMm / LINE_HEIGHT_MM)
+// Capacity depends on which font the role actually renders in (see buildLatex.js's
+// styleCommandForRole) -- a 'title' element renders at 28pt/34pt via \TitleText, not the 9pt/14pt
+// body font, so estimating its capacity with body metrics computes a box far too small for even
+// one line (confirmed 2026-07-16: a "Macro-trend" title box was sized for ~2 lines of 9pt text,
+// but \TitleText's single line alone needs more height than that, so it overflowed down into the
+// element below it). Defaults to 'body' so every existing caller that doesn't pass a role keeps
+// its previous behavior unchanged.
+export function estimateTextCapacityMm(wMm, hMm, role = 'body') {
+  const fontSizePt = ROLE_FONT_SIZE_PT[role] ?? ROLE_FONT_SIZE_PT.body
+  const leadingPt = ROLE_LEADING_PT[role] ?? ROLE_LEADING_PT.body
+  const boldFactor = ROLE_BOLD_WIDTH_FACTOR[role] ?? 1
+  const charWidthMm = fontSizePt * PT_TO_MM * boldFactor * CHAR_WIDTH_CALIBRATION_FACTOR
+  const lineHeightMm = leadingPt * PT_TO_MM
+
+  const charsPerLine = Math.floor(wMm / charWidthMm)
+  const lines = Math.floor(hMm / lineHeightMm)
   return Math.max(0, charsPerLine * lines)
 }
 
 export function estimateTextCapacity(gridElement) {
   const box = gridToMm(gridElement)
-  return estimateTextCapacityMm(box.wMm, box.hMm)
+  return estimateTextCapacityMm(box.wMm, box.hMm, gridElement?.role)
 }
 
 // Phase 5-2: Validate if text overflows given box dimensions
@@ -82,7 +95,7 @@ export function validateLayoutTextCapacity(plan, textBlocks = []) {
       // validateTextOverflow (which would re-run gridToMm on {wMm, hMm}, treating them as a
       // nonexistent col_start/row_start and silently producing NaN).
       const box = gridToMm(el, gridOptions)
-      const capacity = estimateTextCapacityMm(box.wMm, box.hMm)
+      const capacity = estimateTextCapacityMm(box.wMm, box.hMm, el.role)
       const ratio = textLength / Math.max(1, capacity)
       if (ratio > 1.05) {
         issues.push({

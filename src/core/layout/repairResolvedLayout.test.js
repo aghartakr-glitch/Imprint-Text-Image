@@ -47,18 +47,23 @@ test('reproduces the real failure: 3 text blocks each overlapping an image on th
   assert.equal(after.passed, true, JSON.stringify(after.error_issues))
 })
 
-test('a block that cannot fit below without exceeding page height is reported as unresolved, not silently overlapping', () => {
+test('a text block that cannot fit below current-page overlaps moves to a continuation page', () => {
   const resolvedPages = [{
     images: [{ id: 'image_1', xMm: 0, yMm: 0, wMm: 116, hMm: 170 }],
-    textBlocks: [{ id: 'p1_text', zone: { xMm: 0, yMm: 100, wMm: 116, hMm: 50 } }],
+    textBlocks: [{ id: 'p1_text', zone: { xMm: 0, yMm: 100, wMm: 116, hMm: 50 }, slice: 'continued text' }],
   }]
 
-  const { pages, unresolvedIssues } = repairResolvedLayout({ resolvedPages, contentWidthMm: 116, contentHeightMm: 176 })
+  const { pages, actions, unresolvedIssues } = repairResolvedLayout({ resolvedPages, contentWidthMm: 116, contentHeightMm: 176 })
+  const after = validateResolvedLayout(pages)
 
-  assert.ok(unresolvedIssues.length > 0)
-  // Left in its original (still-overlapping) position rather than fabricating an invalid fix.
-  assert.equal(pages[0].textBlocks[0].zone.yMm, 100)
+  assert.equal(unresolvedIssues.length, 0)
+  assert.equal(after.passed, true, JSON.stringify(after.error_issues))
+  assert.equal(pages[0].textBlocks.length, 0)
+  assert.equal(pages[1].textBlocks[0].id, 'p1_text')
+  assert.deepEqual(pages[1].textBlocks[0].zone, { xMm: 0, yMm: 0, wMm: 116, hMm: 50 })
+  assert.ok(actions.some((a) => a.type === 'move_textblock_to_continuation_page'))
 })
+
 
 test('non-overlapping elements are left untouched (no spurious actions)', () => {
   const resolvedPages = [{
@@ -90,4 +95,25 @@ test('two images overlapping each other are repositioned vertically', () => {
   assert.equal(after.passed, true, JSON.stringify(after.error_issues))
   // Second image should be pushed below first (80 + 3mm gap = 83mm minimum)
   assert.ok(pages[0].images[1].yMm >= 83, 'image_2 should sit at least 3mm below image_1')
+})
+
+test('a bottom-clamped text block that would overlap earlier text moves to a continuation page', () => {
+  const resolvedPages = [{
+    images: [],
+    textBlocks: [
+      { id: 'label_community', zone: { xMm: 0, yMm: 105, wMm: 86, hMm: 71 }, slice: 'label' },
+      { id: 'body_feminism', zone: { xMm: 60, yMm: 179, wMm: 56, hMm: 4.9392 }, slice: '[' },
+    ],
+  }]
+
+  const { pages, actions, unresolvedIssues } = repairResolvedLayout({ resolvedPages, contentWidthMm: 116, contentHeightMm: 176 })
+  const after = validateResolvedLayout(pages)
+
+  assert.equal(unresolvedIssues.length, 0)
+  assert.equal(after.passed, true, JSON.stringify(after.error_issues))
+  assert.equal(pages[0].textBlocks.length, 1)
+  assert.equal(pages[0].textBlocks[0].id, 'label_community')
+  assert.equal(pages[1].textBlocks[0].id, 'body_feminism')
+  assert.ok(actions.some((a) => a.type === 'clamp_textblock'))
+  assert.ok(actions.some((a) => a.type === 'move_textblock_to_continuation_page'))
 })

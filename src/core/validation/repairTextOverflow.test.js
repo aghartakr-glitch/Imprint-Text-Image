@@ -32,6 +32,36 @@ test('grows an overflowing text box until its paragraph fits (mild overflow, row
   assert.deepEqual(after, [])
 })
 
+// Regression: a real generation gave a role:'title' element (rendered much larger via \TitleText,
+// 28pt/34pt, not the 9pt/14pt body font) a 1-row box -- capacityFor used to always assume body
+// metrics, so it reported the box as already fitting when it didn't fit the actual title font at
+// all, and no repair happened (confirmed 2026-07-16: "Macro-trend" overflowed down into the
+// element below it). capacityFor must use the element's own role.
+test('grows a title-role box sized for body text until it actually fits the title font', () => {
+  const plan = {
+    grid_spec: { columns: 2, rows: 12, gutter_mm: 4 },
+    pages: [{
+      page: 1,
+      elements: [
+        {
+          id: 'title_1', type: 'text', role: 'title', text_source: 'paragraph_1', col_start: 1, col_span: 1, row_start: 1, row_span: 1,
+        },
+      ],
+    }],
+  }
+  const textBlocks = [{ id: 'p1', text: 'Macro-trend', char_count: 11 }]
+
+  const before = validateLayoutTextCapacity(plan, textBlocks)
+  assert.ok(before.length > 0, 'precondition: a 1-row box is too short for even one 28pt title line')
+
+  const { plan: repaired, repaired: didRepair } = repairTextOverflow(plan, textBlocks)
+  assert.equal(didRepair, true)
+  assert.ok(repaired.pages[0].elements[0].row_span > 1, 'row_span should have grown to fit the title font')
+
+  const after = validateLayoutTextCapacity(repaired, textBlocks)
+  assert.deepEqual(after, [])
+})
+
 // Regression fixture matching the exact real report: a 300-character paragraph in a box that only
 // has capacity 85 (3.53x overflow) positioned near the bottom of the grid, where row_span alone
 // (capped by the grid bottom) cannot reach enough capacity -- col_span must widen too.
@@ -50,7 +80,9 @@ test('widens col_span when row growth alone cannot reach the required capacity (
   const textBlocks = [{ id: 'p1', text: 'x'.repeat(300), char_count: 300 }]
 
   const before = validateLayoutTextCapacity(plan, textBlocks)
-  assert.equal(before[0]?.capacity, 85, 'precondition: matches the exact 300ch/85cap overflow from the real report')
+  // Capacity reflects CHAR_WIDTH_CALIBRATION_FACTOR (0.9) applied on top of the original
+  // 300ch/85cap real-report fixture -- still the same overflow scenario, recalibrated capacity.
+  assert.equal(before[0]?.capacity, 95, 'precondition: matches the (calibrated) 300ch/95cap overflow from the real report')
 
   const { plan: repaired, repaired: didRepair, actions } = repairTextOverflow(plan, textBlocks)
   assert.equal(didRepair, true)
@@ -78,7 +110,9 @@ test('fits a 192-character paragraph that overflows a 136-capacity box', () => {
   const textBlocks = [{ id: 'p1', text: 'x'.repeat(192), char_count: 192 }]
 
   const before = validateLayoutTextCapacity(plan, textBlocks)
-  assert.equal(before[0]?.capacity, 136, 'precondition: matches the exact 192ch/136cap overflow from the real report')
+  // Capacity reflects CHAR_WIDTH_CALIBRATION_FACTOR (0.9) applied on top of the original
+  // 192ch/136cap real-report fixture -- still the same overflow scenario, recalibrated capacity.
+  assert.equal(before[0]?.capacity, 152, 'precondition: matches the (calibrated) 192ch/152cap overflow from the real report')
 
   const { plan: repaired, repaired: didRepair } = repairTextOverflow(plan, textBlocks)
   assert.equal(didRepair, true)
@@ -119,7 +153,10 @@ test('moves an element to a new page when nothing on the current page can hold i
       ],
     }],
   }
-  const textBlocks = [{ id: 'p1', text: 'x'.repeat(200), char_count: 200 }]
+  // 220 chars comfortably exceeds even the largest span reachable on this page (full width, the
+  // 2 rows left before the grid bottom) -- with the calibrated capacity formula that ceiling is
+  // 200 chars, so this must still overflow onto a fresh page rather than fit via expand_span.
+  const textBlocks = [{ id: 'p1', text: 'x'.repeat(220), char_count: 220 }]
 
   const { plan: repaired, repaired: didRepair, actions } = repairTextOverflow(plan, textBlocks)
   assert.equal(didRepair, true)

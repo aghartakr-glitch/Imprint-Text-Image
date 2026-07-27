@@ -59,3 +59,20 @@ test('a title-page with no images/text is not flagged as empty (it has its own t
   const result = refineLayout([titlePage], {})
   assert.equal(result.refinements.notes.length, 0)
 })
+
+test('a tiny single image in a spread is enlarged into available page whitespace', () => {
+  const pages = [
+    { type: 'layout-plan-page', images: [], textBlocks: [] },
+    {
+      type: 'layout-plan-page',
+      images: [{ path: '/img0.jpg', xMm: 40, yMm: 150, wMm: 30, hMm: 20, fullBleed: false, objectPosition: 'center' }],
+      textBlocks: [{ id: 'body', zone: { xMm: 0, yMm: 0, wMm: 116, hMm: 120 }, slice: '본문', role: 'body' }],
+    },
+  ]
+
+  const result = refineLayout(pages, { imagePaths: ['/img0.jpg'], imageAspectRatios: [1.5] })
+  const img = result.resolvedPages[1].images[0]
+  assert.ok(img.wMm * img.hMm > 30 * 20 * 1.35, 'image should be materially larger than the thumbnail placement')
+  assert.ok(img.yMm >= 124, 'image should stay below the existing text with the text-image gap')
+  assert.equal(result.refinements.sparse_spread_images_upscaled, true)
+})

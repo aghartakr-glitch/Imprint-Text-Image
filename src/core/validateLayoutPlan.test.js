@@ -45,6 +45,181 @@ test('a well-formed plan passes with no issues', () => {
   assert.deepEqual(result.issues, [])
 })
 
+
+test('rejects layouts that front-load all images before any text', () => {
+  const plan = validPlan({
+    output_unit: 'spread',
+    pages: [
+      {
+        page: 1,
+        elements: [
+          { id: 'image_1', type: 'image', role: 'hero', col_start: 1, col_span: 6, row_start: 1, row_span: 12, fit: 'contain', object_position: 'center' },
+        ],
+      },
+      {
+        page: 2,
+        elements: [
+          { id: 'image_2', type: 'image', role: 'support', col_start: 1, col_span: 6, row_start: 1, row_span: 12, fit: 'contain', object_position: 'center' },
+        ],
+      },
+      {
+        page: 3,
+        elements: [
+          { id: 'body_1', type: 'text', role: 'body', text_source: 'paragraph_1', col_start: 1, col_span: 6, row_start: 1, row_span: 6 },
+        ],
+      },
+    ],
+  })
+
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('이미지-텍스트 분리')), `expected image-text separation issue, got: ${JSON.stringify(result.issues)}`)
+})
+
+
+test('rejects duplicated heading text_source placements', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        { id: 'heading_a', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 1, text_source: 'paragraph_1' },
+        { id: 'heading_b', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 6, row_start: 3, row_span: 1, text_source: 'paragraph_1' },
+        { id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 5, row_span: 4, text_source: 'paragraph_2' },
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 0,
+    textBlocks: [
+      { id: 'p1', role: 'section_label', text: '???? ????', char_count: 9 },
+      { id: 'p2', role: 'body', text: '?????.', char_count: 5 },
+    ],
+  })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('duplicate text_source')), JSON.stringify(result.issues))
+})
+
+test('rejects long body text_source in a 1-row fragment box', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        { id: 'body_tiny', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 2, row_start: 1, row_span: 1, text_source: 'paragraph_1' },
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 0,
+    textBlocks: [{ id: 'p1', role: 'body', text: '???? 2025 N7 ?? ? ?? ???? ??? ???? ???? ?? ???? ?????.', char_count: 57 }],
+  })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('1-row box')), JSON.stringify(result.issues))
+})
+
+test('rejects a content group when only its headings are placed', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        { id: 'g1_title', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 1, text_source: 'paragraph_1' },
+        { id: 'g1_subtitle', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 6, row_start: 2, row_span: 1, text_source: 'paragraph_2' },
+        { id: 'g2_body', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 4, row_span: 3, text_source: 'paragraph_4' },
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 0,
+    textBlocks: [
+      { id: 'p1', role: 'section_label', text: 'Case A', char_count: 6, group_id: 1 },
+      { id: 'p2', role: 'section_label', text: 'CASE A', char_count: 6, group_id: 1 },
+      { id: 'p3', role: 'body', text: 'Body A belongs with Case A.', char_count: 27, group_id: 1 },
+      { id: 'p4', role: 'body', text: 'Body B.', char_count: 7, group_id: 2 },
+    ],
+  })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('content group 1 is split')), JSON.stringify(result.issues))
+})
+
+test('rejects interleaving another content group inside a group', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        { id: 'g1_title', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 1, text_source: 'paragraph_1' },
+        { id: 'g2_title', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 6, row_start: 2, row_span: 1, text_source: 'paragraph_3' },
+        { id: 'g2_body', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 3, row_span: 2, text_source: 'paragraph_4' },
+        { id: 'g1_body', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 6, row_span: 2, text_source: 'paragraph_2' },
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 0,
+    textBlocks: [
+      { id: 'p1', role: 'section_label', text: 'Case A', char_count: 6, group_id: 1 },
+      { id: 'p2', role: 'body', text: 'Body A.', char_count: 7, group_id: 1 },
+      { id: 'p3', role: 'section_label', text: 'Case B', char_count: 6, group_id: 2 },
+      { id: 'p4', role: 'body', text: 'Body B.', char_count: 7, group_id: 2 },
+    ],
+  })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('interleaved')), JSON.stringify(result.issues))
+})
+
+test('accepts contiguous content groups in markdown order', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        { id: 'g1_title', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 1, text_source: 'paragraph_1' },
+        { id: 'g1_subtitle', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 6, row_start: 2, row_span: 1, text_source: 'paragraph_2' },
+        { id: 'g1_body', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 3, row_span: 2, text_source: 'paragraph_3' },
+        { id: 'g2_body', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 6, row_span: 2, text_source: 'paragraph_4' },
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 0,
+    textBlocks: [
+      { id: 'p1', role: 'section_label', text: 'Case A', char_count: 6, group_id: 1 },
+      { id: 'p2', role: 'section_label', text: 'CASE A', char_count: 6, group_id: 1 },
+      { id: 'p3', role: 'body', text: 'Body A.', char_count: 7, group_id: 1 },
+      { id: 'p4', role: 'body', text: 'Body B.', char_count: 7, group_id: 2 },
+    ],
+  })
+  assert.equal(result.passed, true, JSON.stringify(result.issues))
+})
+
+test('rejects content groups placed out of markdown order', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [
+        { id: 'g2_title', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 1, text_source: 'paragraph_3' },
+        { id: 'g2_body', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 2, row_span: 2, text_source: 'paragraph_4' },
+        { id: 'g1_title', type: 'text', role: 'section_label', page: 1, col_start: 1, col_span: 6, row_start: 5, row_span: 1, text_source: 'paragraph_1' },
+        { id: 'g1_body', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 6, row_span: 2, text_source: 'paragraph_2' },
+      ],
+    }],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 0,
+    textBlocks: [
+      { id: 'p1', role: 'section_label', text: 'Case A', char_count: 6, group_id: 1 },
+      { id: 'p2', role: 'body', text: 'Body A.', char_count: 7, group_id: 1 },
+      { id: 'p3', role: 'section_label', text: 'Case B', char_count: 6, group_id: 2 },
+      { id: 'p4', role: 'body', text: 'Body B.', char_count: 7, group_id: 2 },
+    ],
+  })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('content group order violation')), JSON.stringify(result.issues))
+})
+
 test('rejects an out-of-vocabulary style', () => {
   const result = validateLayoutPlan(validPlan({ style: 'Noir' }), { imageCount: 2 })
   assert.equal(result.passed, false)
@@ -122,6 +297,76 @@ test('rejects an out-of-vocabulary object_position', () => {
   const result = validateLayoutPlan(plan, { imageCount: 2 })
   assert.equal(result.passed, false)
   assert.ok(result.issues.some((i) => i.includes('object_position')))
+})
+
+test('accepts bleed:"full" on an image that is the only element on its page', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [{
+        id: 'image_1', type: 'image', role: 'hero', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 12, fit: 'contain', bleed: 'full',
+      }],
+    }, {
+      page: 2,
+      elements: [{
+        id: 'body_1', type: 'text', role: 'body', page: 2, col_start: 1, col_span: 6, row_start: 1, row_span: 12, text_source: 'paragraph_1',
+      }],
+    }],
+  })
+  const result = validateLayoutPlan(plan, { imageCount: 1 })
+  assert.equal(result.passed, true, JSON.stringify(result.issues))
+})
+
+test('rejects unchecked full-bleed images when only checked images may be full-page', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [{
+        id: 'image_1', type: 'image', role: 'hero', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 12, fit: 'contain', bleed: 'full',
+      }],
+    }, {
+      page: 2,
+      elements: [{
+        id: 'body_1', type: 'text', role: 'body', page: 2, col_start: 1, col_span: 6, row_start: 1, row_span: 12, text_source: 'paragraph_1',
+      }],
+    }],
+  })
+  const result = validateLayoutPlan(plan, { imageCount: 1, forcedFullBleedImages: [], allowUnforcedFullBleed: false })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('체크하지 않은 이미지 image_1')))
+})
+
+test('accepts checked full-bleed images when only checked images may be full-page', () => {
+  const plan = validPlan({
+    pages: [{
+      page: 1,
+      elements: [{
+        id: 'image_1', type: 'image', role: 'hero', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 12, fit: 'contain', bleed: 'full',
+      }],
+    }, {
+      page: 2,
+      elements: [{
+        id: 'body_1', type: 'text', role: 'body', page: 2, col_start: 1, col_span: 6, row_start: 1, row_span: 12, text_source: 'paragraph_1',
+      }],
+    }],
+  })
+  const result = validateLayoutPlan(plan, { imageCount: 1, forcedFullBleedImages: [1], allowUnforcedFullBleed: false })
+  assert.equal(result.passed, true, JSON.stringify(result.issues))
+})
+test('rejects bleed:"full" combined with another element on the same page', () => {
+  const plan = validPlan()
+  plan.pages[0].elements[0].bleed = 'full'
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('다른 요소가 없을 때만')))
+})
+
+test('rejects an out-of-vocabulary bleed value', () => {
+  const plan = validPlan()
+  plan.pages[0].elements[0].bleed = 'partial'
+  const result = validateLayoutPlan(plan, { imageCount: 2 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('bleed')))
 })
 
 test('rejects a caption-role text element (caption is not in the allowed text role vocabulary)', () => {
@@ -302,4 +547,61 @@ test('same-span images produce a warning, not a rejection', () => {
   assert.equal(result.passed, true)
   assert.deepEqual(result.issues, [])
   assert.ok(result.warnings.some((w) => w.includes('span 다양화')), `expected a span-variation warning, got: ${JSON.stringify(result.warnings)}`)
+})
+
+// Paragraph order: confirmed 2026-07-27 real-run bug where "DESIGN CASE STUDIES"/"커뮤니티 액티비즘"
+// content (drawn from later paragraphs in the user's input) was placed on an earlier page than
+// paragraphs that preceded them in the input, breaking the reading order the user authored.
+test('rejects a plan where a later paragraph appears on an earlier page than an earlier paragraph', () => {
+  const plan = validPlan({
+    pages: [
+      {
+        page: 1,
+        elements: [
+          {
+            id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 4, text_source: 'paragraph_3',
+          },
+        ],
+      },
+      {
+        page: 2,
+        elements: [
+          {
+            id: 'body_2', type: 'text', role: 'body', page: 2, col_start: 1, col_span: 6, row_start: 1, row_span: 4, text_source: 'paragraph_1',
+          },
+        ],
+      },
+    ],
+  })
+  const result = validateLayoutPlan(plan, { imageCount: 0 })
+  assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('문단 순서 위반')), `expected a paragraph-order issue, got: ${JSON.stringify(result.issues)}`)
+})
+
+test('a plan where paragraphs stay in ascending order across pages passes the order check', () => {
+  const plan = validPlan({
+    pages: [
+      {
+        page: 1,
+        elements: [
+          {
+            id: 'body_1', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 1, row_span: 4, text_source: 'paragraph_1',
+          },
+          {
+            id: 'body_2', type: 'text', role: 'body', page: 1, col_start: 1, col_span: 6, row_start: 6, row_span: 4, text_source: 'paragraph_2',
+          },
+        ],
+      },
+      {
+        page: 2,
+        elements: [
+          {
+            id: 'body_3', type: 'text', role: 'body', page: 2, col_start: 1, col_span: 6, row_start: 1, row_span: 4, text_source: 'paragraph_3',
+          },
+        ],
+      },
+    ],
+  })
+  const result = validateLayoutPlan(plan, { imageCount: 0 })
+  assert.ok(!result.issues.some((i) => i.includes('문단 순서 위반')), `unexpected paragraph-order issue: ${JSON.stringify(result.issues)}`)
 })

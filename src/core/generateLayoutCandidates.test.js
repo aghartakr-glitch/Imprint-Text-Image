@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { generateLayoutCandidates, retryLayoutCandidate, extractFirstBalancedJsonValue } from './generateLayoutCandidates.js'
+import {
+  generateLayoutCandidates, retryLayoutCandidate, extractFirstBalancedJsonValue, removeTrailingCommas, JsonTruncatedError,
+} from './generateLayoutCandidates.js'
 
 function textResponse(obj, usage = { input_tokens: 100, output_tokens: 50 }) {
   return { content: [{ type: 'text', text: JSON.stringify(obj) }], usage }
@@ -28,6 +30,133 @@ test('generateLayoutCandidates throws (not silently returns []) when candidates 
 
   const missingClient = { messages: { create: async () => textResponse({ style: 'Editorial' }) } };
   await assert.rejects(() => generateLayoutCandidates({ inputMetadata: {} }, { client: missingClient }))
+})
+
+// Cost reduction (prompt caching, opt-in): default behavior must be byte-for-byte unchanged --
+// `system` stays the plain SYSTEM_PROMPT string unless the caller explicitly opts in.
+test('generateLayoutCandidates sends system as a plain string by default (prompt caching off)', async () => {
+  let capturedSystem = null
+  const client = {
+    messages: {
+      create: async (req) => {
+        capturedSystem = req.system
+        return textResponse({ candidates: [{ candidate_id: 'candidate_1' }] })
+      },
+    },
+  }
+  const mockCostBudget = {
+    planRequest: async () => ({ maxOutputTokens: 1600, minOutputTokens: 500 }),
+    recordUsage: () => {},
+    summary: () => ({ estimated: '$0.001' }),
+  }
+  await generateLayoutCandidates({ inputMetadata: { image_count: 1 } }, { client, costBudget: mockCostBudget })
+  assert.equal(typeof capturedSystem, 'string')
+})
+
+test('generateLayoutCandidates sends system as a cache_control-tagged block when enablePromptCaching is true', async () => {
+  let capturedSystem = null
+  const client = {
+    messages: {
+      create: async (req) => {
+        capturedSystem = req.system
+        return textResponse({ candidates: [{ candidate_id: 'candidate_1' }] })
+      },
+    },
+  }
+  const mockCostBudget = {
+    planRequest: async () => ({ maxOutputTokens: 1600, minOutputTokens: 500 }),
+    recordUsage: () => {},
+    summary: () => ({ estimated: '$0.001' }),
+  }
+  await generateLayoutCandidates(
+    { inputMetadata: { image_count: 1 } },
+    { client, costBudget: mockCostBudget, enablePromptCaching: true },
+  )
+  assert.ok(Array.isArray(capturedSystem))
+  assert.equal(capturedSystem[0].type, 'text')
+  assert.deepEqual(capturedSystem[0].cache_control, { type: 'ephemeral' })
+})
+
+// Regression: confirmed 2026-07-27 real generation failure -- "Expected double-quoted property
+// name in JSON at position ..." from a trailing comma the model left before a closing }/] (valid in
+// a JS literal, invalid JSON), which previously had no repair path and hard-failed the generation.
+test('removeTrailingCommas drops a comma immediately before a closing brace/bracket, leaves string content untouched', () => {
+  const input = '{"a":1,"b":[1,2,3,],"c":{"d":1,},"note":"trailing, comma, inside string, not touched,"}'
+  const fixed = removeTrailingCommas(input)
+  assert.doesNotThrow(() => JSON.parse(fixed))
+  const parsed = JSON.parse(fixed)
+  assert.deepEqual(parsed.b, [1, 2, 3])
+  assert.deepEqual(parsed.c, { d: 1 })
+  assert.equal(parsed.note, 'trailing, comma, inside string, not touched,')
+})
+
+test('generateLayoutCandidates recovers from a real LLM response with a trailing comma before a closing bracket', async () => {
+  // Deliberately malformed: a trailing comma after the last element of "candidates", exactly the
+  // shape of bug that produced "Expected double-quoted property name in JSON at position 18561".
+  const malformedJson = '{"candidates":[{"candidate_id":"candidate_1","pages":[{"page":1,"elements":[],},],},]}'
+  const client = {
+    messages: {
+      create: async () => ({ content: [{ type: 'text', text: malformedJson }], usage: { input_tokens: 100, output_tokens: 50 } }),
+    },
+  }
+  const mockCostBudget = {
+    planRequest: async () => ({ maxOutputTokens: 1600, minOutputTokens: 500 }),
+    recordUsage: () => {},
+    summary: () => ({ estimated: '$0.001' }),
+  }
+  const result = await generateLayoutCandidates({ inputMetadata: { image_count: 1 } }, { client, costBudget: mockCostBudget })
+  assert.equal(result.candidates.length, 1)
+  assert.equal(result.candidates[0].candidate_id, 'candidate_1')
+})
+
+// Regression: confirmed 2026-07-27 -- a response cut off by max_tokens (stop_reason: 'max_tokens')
+// used to fall through to the generic JSON-repair chain and fail with a misleading parse-error
+// message ("Unterminated string in JSON at position 19031, line 713") that looked like a formatting
+// bug, when the real cause was the response simply running out of token budget. This must be
+// detected up front, before any parse/repair attempt, and raised as a distinct error type.
+test('a response with stop_reason "max_tokens" throws JsonTruncatedError before any parse attempt, even with unparseable text', async () => {
+  const client = {
+    messages: {
+      create: async () => ({
+        // Deliberately unterminated JSON string, mimicking a real truncated response.
+        content: [{ type: 'text', text: '{"candidates":[{"candidate_id":"candidate_1","reason":"cut off mid' }],
+        usage: { input_tokens: 100, output_tokens: 8000 },
+        stop_reason: 'max_tokens',
+      }),
+    },
+  }
+  const mockCostBudget = {
+    planRequest: async () => ({ maxOutputTokens: 8000, minOutputTokens: 500 }),
+    recordUsage: () => {},
+    summary: () => ({ estimated: '$0.001' }),
+  }
+  await assert.rejects(
+    () => generateLayoutCandidates({ inputMetadata: { image_count: 1 } }, { client, costBudget: mockCostBudget }),
+    (err) => {
+      assert.ok(err instanceof JsonTruncatedError, `expected JsonTruncatedError, got ${err.constructor.name}: ${err.message}`)
+      assert.match(err.message, /max_tokens/)
+      return true
+    },
+  )
+})
+
+test('a response with stop_reason "end_turn" is parsed normally, not treated as truncated', async () => {
+  const client = {
+    messages: {
+      create: async () => ({
+        content: [{ type: 'text', text: JSON.stringify({ candidates: [{ candidate_id: 'candidate_1' }] }) }],
+        usage: { input_tokens: 100, output_tokens: 50 },
+        stop_reason: 'end_turn',
+      }),
+    },
+  }
+  const mockCostBudget = {
+    planRequest: async () => ({ maxOutputTokens: 8000, minOutputTokens: 500 }),
+    recordUsage: () => {},
+    summary: () => ({ estimated: '$0.001' }),
+  }
+  const result = await generateLayoutCandidates({ inputMetadata: { image_count: 1 } }, { client, costBudget: mockCostBudget })
+  assert.equal(result.candidates[0].candidate_id, 'candidate_1')
 })
 
 test('retryLayoutCandidate sends the retry-specific prompt and returns one parsed plan', async () => {

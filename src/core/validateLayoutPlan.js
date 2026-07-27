@@ -112,12 +112,23 @@ function checkEnum(value, allowed, fieldName, issues, required = true) {
   if (!allowed.includes(value)) issues.push(`알 수 없는 ${fieldName}: ${value}`)
 }
 
+function isBodyLikeRole(role) {
+  return role === 'body' || role === 'continuation_body'
+}
+
+function placementOrder(placement) {
+  const el = placement.el || {}
+  return (placement.page ?? 0) * 10000 + (el.row_start ?? 0) * 100 + (el.col_start ?? 0)
+}
+
 // Every check from spec v0.3 section 9 plus the v0.4 supplement's extended schema fields
 // (output_unit, layout_purpose, image_hierarchy, image_text_relation, composition_strategy,
 // object_position, design_sequence) plus the grid-preset supplement fields (grid_spec,
 // reserved_regions, text_flow, layout_variation), all validated against designSpace.js's
 // vocabulary. "JSON parses" isn't checked here -- that's the caller's job via JSON.parse.
-export function validateLayoutPlan(plan, { imageCount, textBlocks } = {}) {
+export function validateLayoutPlan(plan, {
+  imageCount, textBlocks, forcedFullBleedImages = [], allowUnforcedFullBleed = true,
+} = {}) {
   const issues = []
   // Design-quality observations that should NOT block rendering (a candidate with only warnings
   // still has passed:true). Kept separate from `issues` so a real-but-fixable geometry/schema
@@ -167,7 +178,34 @@ export function validateLayoutPlan(plan, { imageCount, textBlocks } = {}) {
   }
 
   const seenImageIndices = new Set()
+  const seenFullBleedImageIndices = new Set()
   let hasBodyText = false
+  const imagePageIndices = []
+  const textPageIndices = []
+  const textSourcePlacements = new Map()
+  const textBlockBySource = new Map()
+  const sourceInfoBySource = new Map()
+  const sourcesByGroup = new Map()
+  if (Array.isArray(textBlocks)) {
+    textBlocks.forEach((block, index) => {
+      if (!block) return
+      const source = `paragraph_${index + 1}`
+      const info = {
+        source,
+        block,
+        index,
+        group_id: block.group_id,
+        role: block.role || 'body',
+      }
+      if (block.id) textBlockBySource.set(block.id, block)
+      textBlockBySource.set(source, block)
+      sourceInfoBySource.set(source, info)
+      if (block.group_id != null) {
+        if (!sourcesByGroup.has(block.group_id)) sourcesByGroup.set(block.group_id, [])
+        sourcesByGroup.get(block.group_id).push(info)
+      }
+    })
+  }
   let spanAnalysis = null
 
   pages.forEach((page) => {
@@ -186,16 +224,27 @@ export function validateLayoutPlan(plan, { imageCount, textBlocks } = {}) {
       }
 
       if (el.type === 'image') {
+        imagePageIndices.push(page.page ?? pages.indexOf(page) + 1)
         if (el.fit !== 'contain') {
           issues.push(`요소 ${el.id}: 이미지의 fit은 항상 contain이어야 합니다 (받은 값: ${el.fit})`)
         }
         if (el.role) checkEnum(el.role, DESIGN_SPACE.imageRoles, `요소 ${el.id}의 role`, issues)
         if (el.object_position) checkEnum(el.object_position, DESIGN_SPACE.objectPositions, `요소 ${el.id}의 object_position`, issues)
+        if (el.bleed != null && el.bleed !== 'full') {
+          issues.push(`요소 ${el.id}: bleed는 "full"이거나 아예 없어야 합니다 (받은 값: ${el.bleed})`)
+        }
+        if (el.bleed === 'full' && elements.length > 1) {
+          issues.push(`요소 ${el.id}: bleed:"full"(전면 이미지)은 해당 페이지에 다른 요소가 없을 때만 사용할 수 있습니다 (page ${page.page}에 요소 ${elements.length}개 존재)`)
+        }
         const match = /^image_(\d+)$/.exec(el.id || '')
-        if (match) seenImageIndices.add(Number(match[1]))
+        if (match) {
+          seenImageIndices.add(Number(match[1]))
+          if (el.bleed === 'full') seenFullBleedImageIndices.add(Number(match[1]))
+        }
       }
 
       if (el.type === 'text') {
+        textPageIndices.push(page.page ?? pages.indexOf(page) + 1)
         if (el.role != null) checkEnum(el.role, DESIGN_SPACE.textRoles, `요소 ${el.id}의 role`, issues)
 
         // Three legitimate ways a text element carries its content:
@@ -207,9 +256,19 @@ export function validateLayoutPlan(plan, { imageCount, textBlocks } = {}) {
         // (e.g. "body_all", which used to merge every paragraph into a single undifferentiated blob).
         if (el.text_source != null) {
           if (el.text_source === 'body_all') {
-            issues.push(`요소 ${el.id}: text_source는 "body_all"이 아니라 구체적인 paragraph_N을 참조해야 합니다`)
+            issues.push(`element ${el.id}: text_source must reference a specific paragraph_N, not body_all`)
           } else if (!/^(title|paragraph_\d+)$/.test(el.text_source)) {
-            issues.push(`요소 ${el.id}: text_source 형식이 잘못되었습니다: "${el.text_source}" (title 또는 paragraph_N 형식)`)
+            issues.push(`element ${el.id}: invalid text_source "${el.text_source}"; expected title or paragraph_N`)
+          }
+
+          if (!textSourcePlacements.has(el.text_source)) textSourcePlacements.set(el.text_source, [])
+          textSourcePlacements.get(el.text_source).push({ el, page: page.page ?? pages.indexOf(page) + 1 })
+
+          const sourceBlock = textBlockBySource.get(el.text_source)
+          const sourceRole = sourceBlock?.role || el.role
+          const sourceLength = Number.isFinite(sourceBlock?.char_count) ? sourceBlock.char_count : sourceBlock?.text?.length
+          if (isBodyLikeRole(sourceRole) && sourceLength > 40 && el.row_span <= 1) {
+            issues.push(`element ${el.id}: long body ${el.text_source} (${sourceLength} chars) is placed in a 1-row box, which causes single-character text fragments. Use at least 2-3 rows or a wider body box.`)
           }
         }
 
@@ -228,13 +287,149 @@ export function validateLayoutPlan(plan, { imageCount, textBlocks } = {}) {
     }
   })
 
+  textSourcePlacements.forEach((placements, source) => {
+    if (placements.length <= 1) return
+    const sourceBlock = textBlockBySource.get(source)
+    const sourceRole = sourceBlock?.role || placements[0]?.el?.role
+    const isBodyLike = isBodyLikeRole(sourceRole)
+    if (!isBodyLike) {
+      issues.push(`duplicate text_source: ${source} is placed ${placements.length} times. Heading/label sources must be placed once.`)
+      return
+    }
+    if (placements.length > 2) {
+      issues.push(`over-split body text_source: ${source} is split into ${placements.length} boxes. Use at most two body columns and do not repeat the same source.`)
+    }
+  })
+
+  const placementsByGroup = new Map()
+  textSourcePlacements.forEach((placements, source) => {
+    const info = sourceInfoBySource.get(source)
+    if (!info || info.group_id == null) return
+    placements.forEach((placement) => {
+      if (!placementsByGroup.has(info.group_id)) placementsByGroup.set(info.group_id, [])
+      placementsByGroup.get(info.group_id).push({
+        ...placement,
+        source,
+        info,
+        order: placementOrder(placement),
+      })
+    })
+  })
+
+  placementsByGroup.forEach((placements, groupId) => {
+    const expectedSources = sourcesByGroup.get(groupId) || []
+    if (expectedSources.length <= 1 || placements.length === 0) return
+
+    const placedSources = new Set(placements.map((p) => p.source))
+    const hasHeading = expectedSources.some((info) => !isBodyLikeRole(info.role))
+    const hasBody = expectedSources.some((info) => isBodyLikeRole(info.role))
+    if (hasHeading && hasBody) {
+      const missingSources = expectedSources.filter((info) => !placedSources.has(info.source))
+      if (missingSources.length > 0) {
+        issues.push(`content group ${groupId} is split: placed ${[...placedSources].join(', ')} but omitted ${missingSources.map((info) => info.source).join(', ')}. Blocks with the same group_id must move together as one content unit.`)
+      }
+    }
+
+    const pagesUsed = new Set(placements.map((p) => p.page))
+    if (pagesUsed.size > 1) {
+      issues.push(`content group ${groupId} spans multiple pages (${[...pagesUsed].join(', ')}). Same group_id means one content unit; keep its title, subtitle, and body on the same page.`)
+    }
+
+    const bySourceOrder = placements.slice().sort((a, b) => a.info.index - b.info.index || a.order - b.order)
+    let maxOrder = -Infinity
+    bySourceOrder.forEach((placement) => {
+      if (placement.order < maxOrder) {
+        issues.push(`content group ${groupId} order is inverted near ${placement.source}. Keep blocks in the user's markdown order within each group_id.`)
+      }
+      maxOrder = Math.max(maxOrder, placement.order)
+    })
+
+    const minOrder = Math.min(...placements.map((p) => p.order))
+    const maxGroupOrder = Math.max(...placements.map((p) => p.order))
+    placementsByGroup.forEach((otherPlacements, otherGroupId) => {
+      if (otherGroupId === groupId) return
+      if (otherPlacements.some((p) => p.order > minOrder && p.order < maxGroupOrder)) {
+        issues.push(`content group ${groupId} is interleaved with group ${otherGroupId}. A blank-line-separated group may not be inserted between blocks of another group.`)
+      }
+    })
+  })
+
+  const groupFirstPlacements = [...placementsByGroup.entries()]
+    .map(([groupId, placements]) => ({
+      groupId,
+      firstOrder: Math.min(...placements.map((p) => p.order)),
+    }))
+    .sort((a, b) => Number(a.groupId) - Number(b.groupId))
+  let maxGroupFirstOrder = -Infinity
+  groupFirstPlacements.forEach(({ groupId, firstOrder }) => {
+    if (firstOrder < maxGroupFirstOrder) {
+      issues.push(`content group order violation: group ${groupId} appears before an earlier group. Keep blank-line-separated content groups in the user's input order.`)
+    }
+    maxGroupFirstOrder = Math.max(maxGroupFirstOrder, firstOrder)
+  })
+
   if (!hasBodyText) {
     issues.push('본문 텍스트 영역(role: body)이 존재하지 않습니다')
   }
 
+  if ((imageCount ?? seenImageIndices.size) >= 2 && imagePageIndices.length > 0 && textPageIndices.length > 0) {
+    const lastImagePage = Math.max(...imagePageIndices)
+    const firstTextPage = Math.min(...textPageIndices)
+    if (lastImagePage < firstTextPage) {
+      issues.push(`❌ 이미지-텍스트 분리: 모든 이미지가 page ${lastImagePage} 이전에 끝나고 텍스트는 page ${firstTextPage}부터 시작합니다. 이미지와 관련 텍스트를 같은 페이지 또는 같은 스프레드에 섞어 배치하세요.`)
+    }
+  }
+
+  // Paragraph order check: the user split their input into paragraphs in a specific sequence on
+  // purpose. A later paragraph_N appearing on an EARLIER page than an earlier paragraph_M (M < N)
+  // means the LLM reordered content to chase image proximity, breaking the reading flow the user
+  // authored (confirmed 2026-07-27: section content the user wrote near the end of the input
+  // appeared on an earlier page than paragraphs that preceded it). This only checks page-level
+  // ordering (not exact position within a page), since flow_regions/columns can legitimately
+  // interleave a paragraph's own continuation across a page without inverting intent.
+  const paragraphFirstPage = new Map()
+  pages.forEach((page, pageIdx) => {
+    const elements = Array.isArray(page.elements) ? page.elements : []
+    elements.forEach((el) => {
+      const match = el.text_source && /^paragraph_(\d+)$/.exec(el.text_source)
+      if (!match) return
+      const n = Number(match[1])
+      if (!paragraphFirstPage.has(n)) paragraphFirstPage.set(n, pageIdx)
+    })
+  })
+  let maxPageSoFar = -1
+  ;[...paragraphFirstPage.keys()].sort((a, b) => a - b).forEach((n) => {
+    const firstPage = paragraphFirstPage.get(n)
+    if (firstPage < maxPageSoFar) {
+      issues.push(`❌ 문단 순서 위반: paragraph_${n}이 앞선 문단들(최대 page ${maxPageSoFar + 1})보다 이른 page ${firstPage + 1}에 배치되었습니다. 사용자가 입력한 문단 순서를 유지하세요.`)
+    }
+    maxPageSoFar = Math.max(maxPageSoFar, firstPage)
+  })
+
   if (Number.isInteger(imageCount)) {
     for (let n = 1; n <= imageCount; n += 1) {
       if (!seenImageIndices.has(n)) issues.push(`업로드된 이미지 image_${n}이 배치되지 않았습니다`)
+    }
+  }
+
+  // User-forced full-bleed images (userLayoutSettings.forced_full_bleed_images): the user
+  // explicitly requested specific uploaded images always render as a full-page opener, not a
+  // probabilistic LLM choice. Unlike the frequency hint (which the LLM may or may not follow),
+  // this is a hard requirement -- an image the user pinned that didn't get "bleed": "full" fails
+  // validation just like an unplaced image does.
+  if (Array.isArray(forcedFullBleedImages)) {
+    const forcedSet = new Set(forcedFullBleedImages.map((n) => Number(n)))
+    forcedFullBleedImages.forEach((n) => {
+      if (!seenFullBleedImageIndices.has(Number(n))) {
+        issues.push(`❌ 사용자가 풀페이지로 지정한 이미지 image_${n}이 "bleed": "full"로 배치되지 않았습니다. 해당 이미지를 다른 요소 없이 단독으로 페이지 전체를 채우도록 배치하세요.`)
+      }
+    })
+    if (allowUnforcedFullBleed === false) {
+      seenFullBleedImageIndices.forEach((n) => {
+        if (!forcedSet.has(Number(n))) {
+          issues.push(`❌ 체크하지 않은 이미지 image_${n}이 풀페이지로 배치되었습니다. 체크한 이미지만 "bleed": "full"을 사용할 수 있습니다.`)
+        }
+      })
     }
   }
 

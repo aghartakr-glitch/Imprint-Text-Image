@@ -1,5 +1,6 @@
 import {
   TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM, GRID_COLUMNS, GRID_ROWS, GRID_GUTTER_MM,
+  PAGE_WIDTH_MM, PAGE_HEIGHT_MM,
 } from './layoutConstants.js'
 
 // Converts one layout_plan element's grid placement (1-based col_start/row_start, col_span/
@@ -21,4 +22,14 @@ export function gridToMm(element, {
   const hMm = element.row_span * rowHeightMm + (element.row_span - 1) * gutterMm
 
   return { xMm, yMm, wMm, hMm }
+}
+
+// Full-bleed box: ignores col/row placement entirely and spans the literal physical page edge to
+// edge, not just the margin-constrained text box. Paired with buildLatex.js's `image.fullBleed`
+// branch, which places these xMm/yMm as absolute physical-page coordinates instead of adding the
+// margin offset it uses for every other (grid-placed) element.
+export function gridToMmFullBleed() {
+  return {
+    xMm: 0, yMm: 0, wMm: PAGE_WIDTH_MM, hMm: PAGE_HEIGHT_MM,
+  }
 }
