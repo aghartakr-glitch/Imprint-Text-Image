@@ -16,7 +16,48 @@
 
 import { estimateTextCapacityMm } from '../estimateTextCapacity.js'
 import { gridToMm } from '../gridToMm.js'
-import { GRID_COLUMNS, GRID_ROWS } from '../layoutConstants.js'
+import {
+  GRID_COLUMNS, GRID_ROWS, ROLE_LEADING_PT, BODY_LEADING_PT, PT_TO_MM, TEXT_BOX_HEIGHT_MM,
+} from '../layoutConstants.js'
+
+// Gaps INSIDE one content group, in mm. These are deliberately far smaller than a grid row pitch
+// (11.2mm row + 4mm gutter = 15.2mm): a Korean heading and its English counterpart belong one line
+// apart, not one grid row apart. Confirmed 2026-07-27 on real output -- the user marked headings of
+// the same group sitting 15-30mm away from each other, because every paragraph was snapped to its
+// own grid row and the unused remainder of each row became visible whitespace.
+const GAP_AFTER_HEADING_MM = 1.5
+const GAP_AFTER_BODY_MM = 3
+const GAP_AFTER_IMAGE_MM = 3
+
+function leadingMmFor(role) {
+  return (ROLE_LEADING_PT[role] ?? BODY_LEADING_PT) * PT_TO_MM
+}
+
+// Tight mm heights for a group's text stack, bypassing grid-row quantization. The grid box stays on
+// the element (validation is grid-based); box_mm is what resolveGridPage actually renders, so the
+// visible result is typographically tight while the plan still validates.
+function tightBoxesFor(entries, xMm, wMm, startYMm) {
+  let y = startYMm
+  return entries.map(({ el, rows, sourceRole }, index) => {
+    if (el.type === 'image') {
+      const h = el.__gridHMm ?? rows
+      const box = { xMm, yMm: y, wMm, hMm: h }
+      y += h + GAP_AFTER_IMAGE_MM
+      return box
+    }
+    const role = sourceRole || el.role || 'body'
+    const leading = leadingMmFor(role)
+    const charsPerLine = Math.max(1, estimateTextCapacityMm(wMm, leading, role))
+    const lines = Math.max(1, Math.ceil((el.__charCount ?? 0) / charsPerLine))
+    // A hair of extra height so a descender or a second wrapped line is never clipped.
+    const h = lines * leading + leading * 0.35
+    const box = { xMm, yMm: y, wMm, hMm: h }
+    const isHeading = role !== 'body' && role !== 'continuation_body' && role !== 'quote' && role !== 'lead' && role !== 'list_item'
+    y += h + (isHeading ? GAP_AFTER_HEADING_MM : GAP_AFTER_BODY_MM)
+    if (index === entries.length - 1) return box
+    return box
+  })
+}
 
 // Ordering inside one group, so a group always reads image -> heading -> body -> credit regardless
 // of the order the model emitted its elements in.
@@ -106,7 +147,7 @@ function sizeGroup(group, colSpan, gridSpec, textBlocks, lookup, forcedIds = new
       id: `text_${source}`, type: 'text', role: toOutputRole(sourceRole), text_source: source,
     }
     entries.push({
-      el,
+      el: { ...el, __charCount: charCountOf(block) },
       sourceRole,
       rows: rowsNeededForText(charCountOf(block), sourceRole, colSpan, gridSpec),
     })
@@ -165,23 +206,54 @@ function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set())
   }
 
   const place = (entries, colStart, colSpan, startRow) => {
+    // Grid pass: assign each element its row span, which is what validation checks.
+    const placed = []
     let cursor = startRow
-    entries.forEach(({ el, rows }) => {
+    entries.forEach((entry) => {
       // Never emit a row_start past the grid: an element placed outside 1..rows fails validation
       // outright (confirmed 2026-07-27: "row 범위가 grid(1~12)를 벗어났습니다").
       if (cursor > gridSpec.rows) return
-      const rowSpan = Math.max(1, Math.min(rows, gridSpec.rows - cursor + 1))
+      const rowSpan = Math.max(1, Math.min(entry.rows, gridSpec.rows - cursor + 1))
+      const gridBox = gridToMm(
+        {
+          col_start: colStart, col_span: colSpan, row_start: cursor, row_span: rowSpan,
+        },
+        { columns: gridSpec.columns, rows: gridSpec.rows, gutterMm: gridSpec.gutterMm },
+      )
       const packed = {
-        ...el, col_start: colStart, col_span: colSpan, row_start: cursor, row_span: rowSpan,
+        ...entry.el, col_start: colStart, col_span: colSpan, row_start: cursor, row_span: rowSpan,
       }
       // bleed:"full" is legal only on a page holding nothing else. Packing places groups alongside
       // each other, so a full-bleed flag carried over from the model's plan would be a validation
       // failure introduced BY this layout (confirmed 2026-07-27: three such errors in a real
       // generation). The image keeps its slot; it just no longer claims the whole page.
       delete packed.bleed
-      currentElements.push(packed)
+      placed.push({ packed, entry, gridBox })
       cursor += rowSpan
     })
+
+    if (placed.length > 0) {
+      // mm pass: re-stack the group tightly from the top of its first grid box. Images keep their
+      // full grid box (so they still fill their cell edge to edge); text gets exactly the height its
+      // lines need. Everything only ever SHRINKS relative to the grid boxes validation approved, so
+      // no new overlap can be introduced.
+      const startYMm = placed[0].gridBox.yMm
+      const wMm = placed[0].gridBox.wMm
+      const xMm = placed[0].gridBox.xMm
+      const tightEntries = placed.map(({ entry, gridBox }) => ({
+        el: { ...entry.el, __gridHMm: gridBox.hMm },
+        rows: gridBox.hMm,
+        sourceRole: entry.sourceRole,
+      }))
+      const boxes = tightBoxesFor(tightEntries, xMm, wMm, startYMm)
+      placed.forEach(({ packed, gridBox }, i) => {
+        const box = boxes[i]
+        // Never let the tightened stack run past the page; fall back to the grid box if it would.
+        packed.box_mm = (box.yMm + box.hMm <= TEXT_BOX_HEIGHT_MM) ? box : gridBox
+        currentElements.push(packed)
+      })
+    }
+
     return cursor
   }
 

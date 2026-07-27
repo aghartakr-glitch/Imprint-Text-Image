@@ -82,6 +82,20 @@ function imageBlock(image, pageNumber) {
   const xMm = image.fullBleed ? image.xMm : leftMarginForPage(pageNumber) + image.xMm
   const yMm = image.fullBleed ? image.yMm : MARGIN_TOP_MM + image.yMm
   const path = image.path.replace(/\\/g, '/')
+
+  // Cover-crop (refineLayout.js's coverImageInBox): render the image at cover size (aspect
+  // preserved, spilling past the box in one dimension) and clip the spill with trimclip's
+  // \clipbox{left bottom right top}, so the visible image fills its grid box edge-to-edge. The
+  // trim amounts are computed in JS from the measured aspect ratio; width alone is passed to
+  // \includegraphics so the render keeps the file's true proportions.
+  if (image.cover) {
+    const c = image.cover
+    const fmt = (n) => Number(n.toFixed(3))
+    return `\\begin{textblock*}{${image.wMm}mm}(${xMm}mm,${yMm}mm)\n`
+      + `  \\noindent\\clipbox{${fmt(c.trimLeftMm)}mm ${fmt(c.trimBottomMm)}mm ${fmt(c.trimRightMm)}mm ${fmt(c.trimTopMm)}mm}{\\includegraphics[width=${fmt(c.renderWMm)}mm]{${path}}}\n`
+      + '\\end{textblock*}'
+  }
+
   return `\\begin{textblock*}{${image.wMm}mm}(${xMm}mm,${yMm}mm)\n`
     + `  \\noindent\\includegraphics[width=${image.wMm}mm,height=${image.hMm}mm,keepaspectratio]{${path}}\n`
     + '\\end{textblock*}'

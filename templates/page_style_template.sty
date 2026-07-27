@@ -16,6 +16,9 @@
 \RequirePackage{geometry}
 \RequirePackage[absolute,overlay]{textpos}
 \RequirePackage{graphicx}
+% cover-crop 이미지: 그리드 칸을 비율 유지로 꽉 채우고 넘치는 부분을 \clipbox로 잘라낸다
+% (buildLatex.js의 image.cover 분기). trimclip은 texlive에 포함된 adjustbox 번들의 일부.
+\RequirePackage{trimclip}
 \RequirePackage[none]{hyphenat}
 
 % 전역 문단 들여쓰기 및 간격 제거 (textblock 정렬 보장)

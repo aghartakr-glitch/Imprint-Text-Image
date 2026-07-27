@@ -13,25 +13,41 @@ function pageWithImage(box, objectPosition) {
   }
 }
 
-test('a wide image (ratio 2) in a tall box gets centered vertically, width fills the box', () => {
+// Cover-crop semantics (2026-07-27, user decision): the image box stays EXACTLY the planned grid
+// box -- aspect ratio is preserved by rendering oversize and cropping the spill, never by shrinking
+// the box. The previous letterbox-contain behavior shrank and centered the image, which produced
+// ragged tops/bottoms between side-by-side images and a phantom "indent" before portrait images
+// (both circled by the user on real output).
+test('a wide image (ratio 2) in a square box keeps the box and crops the horizontal spill evenly', () => {
   const box = {
     xMm: 10, yMm: 10, wMm: 60, hMm: 60,
   }
   const result = refineLayout([pageWithImage(box, 'center')], { imagePaths: ['/img0.jpg'], imageAspectRatios: [2] })
   const img = result.resolvedPages[0].images[0]
+  // Box untouched: edges stay on the grid lines.
+  assert.equal(img.xMm, 10)
+  assert.equal(img.yMm, 10)
   assert.equal(img.wMm, 60)
-  assert.ok(Math.abs(img.hMm - 30) < 1e-9) // 60 / ratio(2) = 30
-  assert.ok(Math.abs(img.yMm - (10 + 15)) < 1e-9) // vertically centered within the 60mm-tall box
+  assert.equal(img.hMm, 60)
+  // Rendered at 60mm tall * ratio 2 = 120mm wide; 60mm of spill split evenly left/right.
+  assert.ok(Math.abs(img.cover.renderWMm - 120) < 1e-9)
+  assert.ok(Math.abs(img.cover.trimLeftMm - 30) < 1e-9)
+  assert.ok(Math.abs(img.cover.trimRightMm - 30) < 1e-9)
+  assert.equal(img.cover.trimTopMm, 0)
+  assert.equal(img.cover.trimBottomMm, 0)
   assert.equal(result.refinements.object_position_adjusted, true)
 })
 
-test('object_position=top pins the image to the top of the box instead of centering', () => {
+test('object_position=top keeps the top of a tall image and crops only the bottom', () => {
   const box = {
     xMm: 10, yMm: 10, wMm: 60, hMm: 60,
   }
-  const result = refineLayout([pageWithImage(box, 'top')], { imagePaths: ['/img0.jpg'], imageAspectRatios: [2] })
+  const result = refineLayout([pageWithImage(box, 'top')], { imagePaths: ['/img0.jpg'], imageAspectRatios: [0.5] })
   const img = result.resolvedPages[0].images[0]
-  assert.equal(img.yMm, 10) // no vertical offset
+  // Rendered at 60mm wide / ratio 0.5 = 120mm tall; all 60mm of spill cropped from the bottom.
+  assert.ok(Math.abs(img.cover.renderHMm - 120) < 1e-9)
+  assert.equal(img.cover.trimTopMm, 0)
+  assert.ok(Math.abs(img.cover.trimBottomMm - 60) < 1e-9)
 })
 
 test('a full-bleed image (e.g. title-page has none, but any fullBleed image) is left untouched', () => {

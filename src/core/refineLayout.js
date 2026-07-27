@@ -1,28 +1,58 @@
-// Spec section 10: after reconstruction, refine the result before it becomes LaTeX. The one
-// concrete geometric fix here is real: `fit: contain` alone leaves a non-matching-aspect-ratio
-// image hugging the top-left corner of its box (plain LaTeX \includegraphics behavior) --
-// object_position tells us where to actually center/align it within the box. Other checks below
-// are advisory (logged into `refinements.notes`, surfaced in generation-log.json) rather than
-// auto-corrective, since silently resizing/moving a validated grid box risks reintroducing the
-// overlaps/out-of-bounds errors validateLayoutPlan already rejected.
+// Spec section 10: after reconstruction, refine the result before it becomes LaTeX.
+//
+// Image fitting is COVER-CROP (2026-07-27, user decision): an image fills its grid box exactly --
+// aspect ratio preserved, the overflowing dimension cropped, object_position choosing which part
+// survives the crop. The previous behavior was letterbox-contain with centering: the image shrank
+// inside its box and was then centered, which produced two visible defects the user circled on real
+// output -- side-by-side images with ragged, unequal tops/bottoms (each centered vertically to a
+// different fitted height), and a mysterious "indent" before portrait images (horizontal centering
+// pushed a 42.9mm-wide fit 6.5mm into its 56mm column). Filling the box removes both causes
+// outright: every image edge lands exactly on its grid lines.
 import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM, TEXT_IMAGE_MIN_GAP_MM } from './layoutConstants.js'
 
-function fitImageWithinBox(img, ratio) {
+// Keeps the grid box exactly as planned and attaches the render/crop numbers buildLatex.js needs to
+// draw the image covering it: render at `renderWMm` wide (aspect preserved), then trim
+// left/bottom/right/top by the given amounts so exactly the box survives.
+function coverImageInBox(img, ratio) {
   const boxRatio = img.wMm / img.hMm
-  const widthConstrained = ratio > boxRatio
-  const containedW = widthConstrained ? img.wMm : img.hMm * ratio
-  const containedH = widthConstrained ? img.wMm / ratio : img.hMm
-
   const objectPosition = img.objectPosition || 'center'
-  let offsetX = (img.wMm - containedW) / 2
-  let offsetY = (img.hMm - containedH) / 2
-  if (objectPosition === 'top') offsetY = 0
-  if (objectPosition === 'bottom') offsetY = img.hMm - containedH
-  if (objectPosition === 'left') offsetX = 0
-  if (objectPosition === 'right') offsetX = img.wMm - containedW
 
+  if (ratio > boxRatio) {
+    // Image is proportionally wider than the box: match heights, crop the horizontal overflow.
+    const renderWMm = img.hMm * ratio
+    const overflowX = renderWMm - img.wMm
+    let trimLeftMm = overflowX / 2
+    if (objectPosition === 'left') trimLeftMm = 0
+    if (objectPosition === 'right') trimLeftMm = overflowX
+    return {
+      ...img,
+      cover: {
+        renderWMm,
+        renderHMm: img.hMm,
+        trimLeftMm,
+        trimRightMm: overflowX - trimLeftMm,
+        trimTopMm: 0,
+        trimBottomMm: 0,
+      },
+    }
+  }
+
+  // Image is proportionally taller than the box: match widths, crop the vertical overflow.
+  const renderHMm = img.wMm / ratio
+  const overflowY = renderHMm - img.hMm
+  let trimTopMm = overflowY / 2
+  if (objectPosition === 'top') trimTopMm = 0
+  if (objectPosition === 'bottom') trimTopMm = overflowY
   return {
-    ...img, xMm: img.xMm + offsetX, yMm: img.yMm + offsetY, wMm: containedW, hMm: containedH,
+    ...img,
+    cover: {
+      renderWMm: img.wMm,
+      renderHMm,
+      trimLeftMm: 0,
+      trimRightMm: 0,
+      trimTopMm,
+      trimBottomMm: overflowY - trimTopMm,
+    },
   }
 }
 
@@ -32,15 +62,6 @@ function getTextBlocksForPage(page) {
     : (page.textZone ? [{ zone: page.textZone, slice: page.textSlice }] : [])
 }
 
-function fitImageInBoxAt(ratio, xMm, yMm, wMm, hMm) {
-  const boxRatio = wMm / hMm
-  if (ratio > boxRatio) {
-    const h = wMm / ratio
-    return { xMm, yMm: yMm + (hMm - h) / 2, wMm, hMm: h }
-  }
-  const w = hMm * ratio
-  return { xMm: xMm + (wMm - w) / 2, yMm, wMm: w, hMm }
-}
 
 function upscaleSparseSpreadImages(pages, { imagePaths = [], imageAspectRatios = [] } = {}) {
   let adjusted = false
@@ -84,11 +105,14 @@ function upscaleSparseSpreadImages(pages, { imagePaths = [], imageAspectRatios =
     const availableHeight = TEXT_BOX_HEIGHT_MM - yMm
     if (availableHeight < 35) continue
 
-    const fitted = fitImageInBoxAt(ratio, 0, yMm, TEXT_BOX_WIDTH_MM, availableHeight)
-    const nextArea = fitted.wMm * fitted.hMm
+    // Cover-crop into the full remaining area: the enlarged image takes the whole available box
+    // (edges on the grid), with the overflowing dimension cropped, same as every other image.
+    const nextArea = TEXT_BOX_WIDTH_MM * availableHeight
     if (nextArea <= currentArea * 1.35) continue
 
-    page.images[item.imageIndex] = { ...img, ...fitted }
+    page.images[item.imageIndex] = coverImageInBox({
+      ...img, xMm: 0, yMm, wMm: TEXT_BOX_WIDTH_MM, hMm: availableHeight,
+    }, ratio)
     adjusted = true
   }
 
@@ -106,7 +130,7 @@ export function refineLayout(resolvedPages, { imagePaths = [], imageAspectRatios
       const ratio = idx >= 0 ? imageAspectRatios[idx] : null
       if (!ratio) return img
       objectPositionAdjusted = true
-      return fitImageWithinBox(img, ratio)
+      return coverImageInBox(img, ratio)
     })
 
     const pageTextBlocks = getTextBlocksForPage(page)

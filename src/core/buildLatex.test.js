@@ -186,3 +186,49 @@ test('buildStyleTex normalizes a Windows-style fontsDir to forward slashes', () 
   assert.match(tex, /Path = \{C:\/Users\/mjungpk\/Desktop\/Imprint\(Image\+Text\)\/assets\/fonts\/\}/)
   assert.doesNotMatch(tex, /Path = \{C:\\/, 'fontsDir must not contain backslashes in the rendered .sty')
 })
+
+// Cover-crop rendering (2026-07-27): an image must fill its grid box exactly. The emitted LaTeX
+// renders the image oversize (aspect preserved via width alone) and clips the spill, so the visible
+// result lands precisely on the box edges -- no letterbox gap, no centering offset.
+test('buildPagesLatex emits a clipped cover render when the image carries crop data', () => {
+  const resolvedPages = [{
+    type: 'layout-plan-page',
+    images: [{
+      path: '/a.jpg',
+      xMm: 0,
+      yMm: 0,
+      wMm: 56,
+      hMm: 40,
+      fullBleed: false,
+      cover: {
+        renderWMm: 80, renderHMm: 40, trimLeftMm: 12, trimRightMm: 12, trimTopMm: 0, trimBottomMm: 0,
+      },
+    }],
+    textZone: null,
+    textSlice: null,
+  }]
+  const body = buildPagesLatex(resolvedPages)
+  assert.match(body, /\\clipbox\{12mm 0mm 12mm 0mm\}\{\\includegraphics\[width=80mm\]\{\/a\.jpg\}\}/)
+  // The positioning box still uses the planned grid size, so the image occupies its whole cell.
+  assert.match(body, /\\begin\{textblock\*\}\{56mm\}/)
+  assert.doesNotMatch(body, /keepaspectratio/)
+})
+
+test('buildPagesLatex falls back to plain contain rendering when no crop data is present', () => {
+  const resolvedPages = [{
+    type: 'layout-plan-page',
+    images: [{
+      path: '/a.jpg', xMm: 0, yMm: 0, wMm: 56, hMm: 40, fullBleed: false,
+    }],
+    textZone: null,
+    textSlice: null,
+  }]
+  const body = buildPagesLatex(resolvedPages)
+  assert.match(body, /keepaspectratio/)
+  assert.doesNotMatch(body, /clipbox/)
+})
+
+test('buildStyleTex loads trimclip so \\clipbox is defined', () => {
+  const tex = buildStyleTex({ fontsDir: '/abs/path/assets/fonts' })
+  assert.match(tex, /\\RequirePackage\{trimclip\}/)
+})
