@@ -5,6 +5,7 @@ import { normalizeLayoutPlan } from './normalizeLayoutPlan.js'
 import { repairLayoutPlan } from './repairLayoutPlan.js'
 import { repairTextOverflow } from './validation/repairTextOverflow.js'
 import { repairParagraphOrder } from './validation/repairParagraphOrder.js'
+import { repairContentGroups } from './validation/repairContentGroups.js'
 import { compactOversizedTextSpans } from './validation/compactOversizedTextSpans.js'
 import { repairCollisions } from './validation/repairCollisions.js'
 import { enforceGridOccupancy } from './validation/enforceGridOccupancy.js'
@@ -78,7 +79,10 @@ function processCandidate(rawPlan, index, imageCount, textBlocks, forcedFullBlee
     const { plan: orderRepaired, repaired: didRepairOrder } = repairParagraphOrder(candidatePlan)
     if (didRepairOrder) candidatePlan = orderRepaired
 
-    if (didRepairDefaults || didRepairOverflow || didRepairOrder) {
+    const { plan: groupsRepaired, repaired: didRepairGroups } = repairContentGroups(candidatePlan, textBlocks)
+    if (didRepairGroups) candidatePlan = groupsRepaired
+
+    if (didRepairDefaults || didRepairOverflow || didRepairOrder || didRepairGroups) {
       candidateResult = validateLayoutPlan(candidatePlan, { imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed })
       repaired = true
     }
@@ -151,6 +155,21 @@ function processCandidate(rawPlan, index, imageCount, textBlocks, forcedFullBlee
         candidateResult = revalidated
       }
       repaired = true
+    }
+
+    // Some later geometry repairs can move text boxes across pages after content-group repair has
+    // already run. Re-apply the markdown group invariant at the end so title/subtitle/body groups
+    // cannot finish split or interleaved.
+    if (!candidateResult.passed) {
+      const { plan: finalGroupsRepaired, repaired: didFinalRepairGroups } = repairContentGroups(candidatePlan, textBlocks)
+      if (didFinalRepairGroups) {
+        const revalidated = validateLayoutPlan(finalGroupsRepaired, { imageCount, textBlocks, forcedFullBleedImages, allowUnforcedFullBleed })
+        if (revalidated.issues.length <= candidateResult.issues.length) {
+          candidatePlan = finalGroupsRepaired
+          candidateResult = revalidated
+        }
+        repaired = true
+      }
     }
   }
 
