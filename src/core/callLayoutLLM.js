@@ -166,7 +166,7 @@ function processCandidate(rawPlan, index, validationOpts) {
     // generations hard-failed on 그룹 분리 with no way to recover).
     if (!candidateResult.passed && validationOpts.contentGroupModel) {
       const { plan: regrouped, repaired: didRegroup } = repairContentGroupLayout(
-        candidatePlan, validationOpts.contentGroupModel, textBlocks,
+        candidatePlan, validationOpts.contentGroupModel, textBlocks, validationOpts.forcedFullBleedImages,
       )
       if (didRegroup) {
         const revalidated = validateLayoutPlan(regrouped, validationOpts)

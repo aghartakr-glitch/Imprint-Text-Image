@@ -467,8 +467,17 @@ export function validateLayoutPlan(plan, {
   const groupByTextSource = contentGroupModel?.groupByTextSource
   const groupByImageId = contentGroupModel?.groupByImageId
   if (groupByTextSource && groupByImageId && (groupByTextSource.size > 0 || groupByImageId.size > 0)) {
+    // An image the user pinned as a full-page opener is REQUIRED to sit alone on its page, which
+    // directly contradicts group cohesion. The explicit user instruction wins, so those images are
+    // excluded from group membership here rather than being reported as separated from their text
+    // (confirmed 2026-07-27: pinning images 1/3/5 made every layout unsatisfiable, including the
+    // deterministic fallback, so the generation returned nothing at all).
+    const forcedImageIds = new Set((forcedFullBleedImages || []).map((n) => `image_${n}`))
     const groupIdOfElement = (el) => {
-      if (el.type === 'image') return groupByImageId.get(el.id)
+      if (el.type === 'image') {
+        if (forcedImageIds.has(el.id)) return undefined
+        return groupByImageId.get(el.id)
+      }
       if (el.type === 'text' && el.text_source) return groupByTextSource.get(el.text_source)
       return undefined
     }

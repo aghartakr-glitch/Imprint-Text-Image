@@ -361,6 +361,7 @@ export async function runGeneration({
       textBlocks: textBlocksAdvanced,
       gridSettings: gridSettings.resolved_grid_settings,
       outputUnit,
+      forcedFullBleedImages: userLayoutSettings.forced_full_bleed_images ?? [],
     })
     const deterministicValidation = deterministicPlan
       ? validateLayoutPlan(deterministicPlan, {

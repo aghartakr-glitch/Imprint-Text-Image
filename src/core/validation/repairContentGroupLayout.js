@@ -82,10 +82,12 @@ function rowsNeededForText(charCount, role, colSpan, gridSpec) {
 }
 
 // Sizes one group's elements at a given column width, returning the stack and its total height.
-function sizeGroup(group, colSpan, gridSpec, textBlocks, lookup) {
+function sizeGroup(group, colSpan, gridSpec, textBlocks, lookup, forcedIds = new Set()) {
   const entries = []
 
-  group.images.forEach((imageId) => {
+  // Images the user pinned as full-page are emitted as their own standalone page by packGroups, so
+  // they must not also be stacked inside the group's column band.
+  group.images.filter((id) => !forcedIds.has(id)).forEach((imageId) => {
     const existing = lookup.imageById.get(imageId)
     const el = existing || {
       id: imageId, type: 'image', role: 'support', fit: 'contain', object_position: 'center',
@@ -117,7 +119,7 @@ function sizeGroup(group, colSpan, gridSpec, textBlocks, lookup) {
 // Packs groups in document order into column bands. A group always lands whole, on one page, in one
 // band; a group too tall for a half-width band is widened to full width (which roughly halves the
 // rows its text needs) before being given its own page.
-function packGroups(groups, gridSpec, textBlocks, lookup) {
+function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set()) {
   const bandCount = gridSpec.columns >= 4 ? 2 : 1
   const bandSpan = Math.floor(gridSpec.columns / bandCount)
   const bands = Array.from({ length: bandCount }, (_, i) => ({
@@ -137,9 +139,37 @@ function packGroups(groups, gridSpec, textBlocks, lookup) {
     rowCursor = 1
   }
 
+  // A user-pinned full-page image gets a page to itself, immediately before the group it belongs
+  // to, so it reads as that group's opener. This is the one case where an image is deliberately
+  // separated from its own text: the explicit user instruction outranks group cohesion, and the
+  // cohesion validator excludes these images for the same reason.
+  const emitFullBleedPage = (imageId) => {
+    flushPage()
+    const existing = lookup.imageById.get(imageId) || {}
+    pages.push({
+      page: pages.length + 1,
+      elements: [{
+        ...existing,
+        id: imageId,
+        type: 'image',
+        role: existing.role || 'hero',
+        fit: existing.fit || 'contain',
+        object_position: existing.object_position || 'center',
+        bleed: 'full',
+        col_start: 1,
+        col_span: gridSpec.columns,
+        row_start: 1,
+        row_span: gridSpec.rows,
+      }],
+    })
+  }
+
   const place = (entries, colStart, colSpan, startRow) => {
     let cursor = startRow
     entries.forEach(({ el, rows }) => {
+      // Never emit a row_start past the grid: an element placed outside 1..rows fails validation
+      // outright (confirmed 2026-07-27: "row 범위가 grid(1~12)를 벗어났습니다").
+      if (cursor > gridSpec.rows) return
       const rowSpan = Math.max(1, Math.min(rows, gridSpec.rows - cursor + 1))
       const packed = {
         ...el, col_start: colStart, col_span: colSpan, row_start: cursor, row_span: rowSpan,
@@ -156,12 +186,14 @@ function packGroups(groups, gridSpec, textBlocks, lookup) {
   }
 
   groups.forEach((group) => {
-    let { entries, totalRows } = sizeGroup(group, bands[0].colSpan, gridSpec, textBlocks, lookup)
+    group.images.filter((id) => forcedIds.has(id)).forEach(emitFullBleedPage)
+
+    let { entries, totalRows } = sizeGroup(group, bands[0].colSpan, gridSpec, textBlocks, lookup, forcedIds)
     if (entries.length === 0) return
 
     // Too tall for a half-width band: re-measure at full width, and give it a clean page.
     if (totalRows > gridSpec.rows && bandCount > 1) {
-      const wide = sizeGroup(group, gridSpec.columns, gridSpec, textBlocks, lookup)
+      const wide = sizeGroup(group, gridSpec.columns, gridSpec, textBlocks, lookup, forcedIds)
       if (wide.totalRows <= gridSpec.rows) {
         flushPage()
         place(wide.entries, 1, gridSpec.columns, 1)
@@ -218,7 +250,7 @@ function gridSpecOf(plan, fallback = {}) {
  * Repairs an existing plan by repacking its content groups. Preserves each element's identity,
  * role, text_source, and image fit/object_position; decides only which page and rectangle it gets.
  */
-export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = []) {
+export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = [], forcedFullBleedImages = []) {
   const groups = contentGroupModel?.groups
   if (!plan || !Array.isArray(plan.pages) || !Array.isArray(groups) || groups.length === 0) {
     return { plan, repaired: false, actions: [] }
@@ -228,7 +260,8 @@ export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = [
   const usable = groups.filter((g) => g.images.length > 0 || g.text_sources.length > 0)
   if (usable.length === 0) return { plan, repaired: false, actions: [] }
 
-  const { pages, bandCount } = packGroups(usable, gridSpec, textBlocks, buildLookup(plan))
+  const forcedIds = new Set((forcedFullBleedImages || []).map((n) => `image_${n}`))
+  const { pages, bandCount } = packGroups(usable, gridSpec, textBlocks, buildLookup(plan), forcedIds)
   if (pages.length === 0) return { plan, repaired: false, actions: [] }
 
   return {
@@ -250,6 +283,7 @@ export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = [
  */
 export function buildContentGroupPlan({
   contentGroupModel, textBlocks = [], gridSettings = {}, outputUnit = 'single_page',
+  forcedFullBleedImages = [],
 } = {}) {
   const groups = contentGroupModel?.groups
   if (!Array.isArray(groups) || groups.length === 0) return null
@@ -263,7 +297,10 @@ export function buildContentGroupPlan({
   const usable = groups.filter((g) => g.images.length > 0 || g.text_sources.length > 0)
   if (usable.length === 0) return null
 
-  const { pages } = packGroups(usable, gridSpec, textBlocks, { imageById: new Map(), textBySource: new Map() })
+  const forcedIds = new Set((forcedFullBleedImages || []).map((n) => `image_${n}`))
+  const { pages } = packGroups(
+    usable, gridSpec, textBlocks, { imageById: new Map(), textBySource: new Map() }, forcedIds,
+  )
   if (pages.length === 0) return null
 
   const hasImages = usable.some((g) => g.images.length > 0)
