@@ -38,6 +38,35 @@ test('a text block that exceeds the content box is still caught', () => {
   assert.ok(issues[0].includes('exceeds bottom boundary'))
 })
 
+// Regression: a caption is deliberately pinned as an overlay chip on its own image's bottom corner
+// (repairContentGroupLayout.js's tightBoxesFor __overlay branch, later marked render_role: 'caption'
+// -> resolved as role: 'caption'). Overlapping that image is the intended design, not a defect --
+// confirmed 2026-07-28 from a real generation reporting "text_image_overlap" for exactly this case,
+// which then made the repair step push the caption off the image into the next flow text block.
+test('a caption overlapping its own image is not flagged (by-design overlay pin)', () => {
+  const resolvedPages = [{
+    images: [{ id: 'image_2', xMm: 60.75, yMm: 0, wMm: 55.25, hMm: 70.96 }],
+    textBlocks: [
+      { id: 'caption_1', role: 'caption', zone: { xMm: 60.75, yMm: 66.44, wMm: 55.25, hMm: 4.52 } },
+    ],
+  }]
+  const result = validateResolvedLayout(resolvedPages)
+  assert.equal(result.passed, true)
+  assert.deepEqual(result.error_issues, [])
+})
+
+test('a non-caption text block overlapping an image is still flagged', () => {
+  const resolvedPages = [{
+    images: [{ id: 'image_2', xMm: 60.75, yMm: 0, wMm: 55.25, hMm: 70.96 }],
+    textBlocks: [
+      { id: 'body_1', role: 'body', zone: { xMm: 60.75, yMm: 66.44, wMm: 55.25, hMm: 4.52 } },
+    ],
+  }]
+  const result = validateResolvedLayout(resolvedPages)
+  assert.equal(result.passed, false)
+  assert.ok(result.error_issues.some((i) => i.type === 'text_image_overlap'))
+})
+
 test('a well-formed page produces no issues', () => {
   const resolvedPages = [{
     images: [{
@@ -49,6 +78,14 @@ test('a well-formed page produces no issues', () => {
   assert.deepEqual(issues, [])
 })
 
+
+
+
+test('rejects an empty resolved page', () => {
+  const result = validateResolvedLayout([{ images: [], textBlocks: [] }])
+  assert.equal(result.passed, false)
+  assert.ok(result.error_issues.some((i) => i.type === 'empty_page'))
+})
 
 test('rejects duplicated resolved heading text_source', () => {
   const result = validateResolvedLayout([{

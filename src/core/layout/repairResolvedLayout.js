@@ -203,7 +203,7 @@ export function repairResolvedLayout({
       }
 
       fixedBoxes.push({
-        xMm: img.xMm, yMm: img.yMm, wMm: img.wMm, hMm: img.hMm,
+        xMm: img.xMm, yMm: img.yMm, wMm: img.wMm, hMm: img.hMm, isImage: true,
       })
     })
 
@@ -216,8 +216,17 @@ export function repairResolvedLayout({
 
       const requiredGapAgainst = (otherIsImage) => (otherIsImage ? minTextImageGapMm : minTextTextGapMm)
 
+      // A caption is deliberately pinned as an overlay chip on its own image's corner (see the
+      // matching exemption in validateResolvedLayout.js) -- it's meant to overlap that image, so
+      // only its overlap against OTHER text blocks is a real collision worth repairing. Without
+      // this, the block below pushed the caption off the image and straight into the next flow
+      // text block instead (confirmed 2026-07-28 from a real generation failure).
+      const candidateBoxes = tb.role === 'caption'
+        ? fixedBoxes.filter((box) => !box.isImage)
+        : fixedBoxes
+
       // Find every already-placed box (images + earlier text blocks) this block currently overlaps.
-      const overlapping = fixedBoxes.filter((other) => boxesOverlap(tb.zone, other))
+      const overlapping = candidateBoxes.filter((other) => boxesOverlap(tb.zone, other))
 
       if (overlapping.length === 0) {
         fixedBoxes.push({
@@ -230,7 +239,7 @@ export function repairResolvedLayout({
       const originalY = tb.zone.yMm
       // Push below the lowest bottom edge among everything it overlaps, using the largest of the
       // gap requirements that apply (text-image 4mm vs text-text 3mm).
-      const requiredGap = Math.max(...overlapping.map((_, i) => requiredGapAgainst(i < repairedPage.images.length)))
+      const requiredGap = Math.max(...overlapping.map((box) => requiredGapAgainst(Boolean(box.isImage))))
       const newY = Math.max(...overlapping.map((box) => box.yMm + box.hMm)) + requiredGap
 
       if (newY + tb.zone.hMm > contentHeightMm) {
@@ -262,11 +271,29 @@ export function repairResolvedLayout({
     repairedPages.push(repairedPage)
   })
 
+  const pagesBeforeEmptyRemoval = [...repairedPages, ...continuationPages]
+  const pages = pagesBeforeEmptyRemoval.filter((page, index) => {
+    if (hasRenderableContent(page)) return true
+    actions.push({
+      type: 'remove_empty_page',
+      page: index + 1,
+      reason: 'page has no images, text blocks, or textSlice',
+    })
+    return false
+  })
+
   return {
-    pages: [...repairedPages, ...continuationPages],
+    pages,
     actions,
     unresolvedIssues
   }
+}
+
+function hasRenderableContent(page) {
+  const hasImages = Array.isArray(page.images) && page.images.length > 0
+  const hasTextBlocks = Array.isArray(page.textBlocks) && page.textBlocks.some((tb) => tb && (tb.slice || tb.zone))
+  const hasTextSlice = typeof page.textSlice === 'string' && page.textSlice.trim().length > 0
+  return hasImages || hasTextBlocks || hasTextSlice
 }
 
 function boxesOverlap(a, b) {

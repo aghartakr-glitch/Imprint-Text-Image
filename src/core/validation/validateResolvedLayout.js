@@ -55,6 +55,16 @@ export function validateResolvedLayout(resolvedPages) {
   }
 
   resolvedPages.forEach((page, pageIdx) => {
+    const hasImages = Array.isArray(page.images) && page.images.length > 0
+    const hasText = Array.isArray(page.textBlocks) && page.textBlocks.some((tb) => tb && (tb.slice || tb.zone))
+    if (!hasImages && !hasText) {
+      issues.push({
+        type: 'empty_page',
+        page: pageIdx + 1,
+        message: 'Resolved page has no images or text blocks'
+      })
+    }
+
     // Check images for valid dimensions and bounds
     if (Array.isArray(page.images)) {
       page.images.forEach((img, imgIdx) => {
@@ -158,6 +168,13 @@ export function validateResolvedLayout(resolvedPages) {
 
           page.textBlocks.forEach((tb, tbIdx) => {
             if (!tb.zone) return
+            // A caption is deliberately pinned as an overlay chip on its image's own corner
+            // (repairContentGroupLayout.js's tightBoxesFor `__overlay` branch) -- overlapping that
+            // image is the intended design, not a layout error. Confirmed 2026-07-28: real
+            // generation reported this as text_image_overlap, and the repair step then pushed the
+            // caption down off the image straight into the next flow text block, turning one
+            // by-design overlap into a real text_text_overlap.
+            if (tb.role === 'caption') return
 
             const textBox = { x: tb.zone.xMm, y: tb.zone.yMm, w: tb.zone.wMm, h: tb.zone.hMm }
             const textId = tb.id || `text_${tbIdx + 1}`
@@ -345,7 +362,7 @@ export function validateResolvedLayout(resolvedPages) {
 
   // Only severity: 'error' issues (out_of_bounds, overlaps, invalid_dimension)
   const errorIssues = issues.filter(i =>
-    ['out_of_bounds', 'text_text_overlap', 'text_image_overlap', 'image_image_overlap', 'invalid_dimension', 'duplicate_text_source'].includes(i.type)
+    ['out_of_bounds', 'text_text_overlap', 'text_image_overlap', 'image_image_overlap', 'invalid_dimension', 'duplicate_text_source', 'empty_page'].includes(i.type)
   )
 
   return {
