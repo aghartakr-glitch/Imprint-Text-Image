@@ -20,11 +20,14 @@ const MARGIN_PRESETS_MM = {
   },
 }
 
+// Widened 2026-07-27: the user marked the column gutter as visibly too narrow on real output.
+// Values still scale down as columns increase (more columns need to give width back to content),
+// but every tier moved up.
 const GRID_PRESETS = [
-  { id: 'two_column', columns: 2, gutterMm: 5 },
-  { id: 'three_column', columns: 3, gutterMm: 4.5 },
-  { id: 'four_column_editorial', columns: 4, gutterMm: 4 },
-  { id: 'six_column_flexible', columns: 6, gutterMm: 3 },
+  { id: 'two_column', columns: 2, gutterMm: 7 },
+  { id: 'three_column', columns: 3, gutterMm: 6 },
+  { id: 'four_column_editorial', columns: 4, gutterMm: 5.5 },
+  { id: 'six_column_flexible', columns: 6, gutterMm: 4.5 },
 ]
 
 function presetForColumns(columns) {

@@ -40,8 +40,8 @@ Your forbidden actions:
 Fixed constraints:
 - A5 portrait page: 148mm x 210mm. Spread preview: 296mm x 210mm.
 - Margins: top 16mm, bottom 18mm, inner 18mm, outer 14mm (or user's margin_preset if provided).
-- Body font size: 9pt. Body leading: 14pt.
-- Image count: 1 to 6. Captions disabled. Image fit: contain. Preserve image aspect ratio.
+- Body font size: 9pt. Body leading: 15pt.
+- Image fit: contain. Preserve image aspect ratio.
 - Text overlay is forbidden. Body overflow continues to next page without shrinking.
 - Grid: use the column count specified in user's grid settings if provided (default 6 columns, 12 rows).
   Output col_start, col_span, row_start, row_span only (plus object_position for images:
@@ -77,15 +77,10 @@ Fixed constraints:
   * Long prose paragraphs → give them a readable measure; prefer fewer, wider columns over many narrow ones
   * The opening content group of the document may be given extra space as an opener, if the layout benefits
 
-  Image-Text Proximity (CRITICAL for editorial quality):
-  * Images and text are NOT independent boxes competing for grid space. Every image belongs to the content group named in inferred_image_text_relations / image_text_matching below.
-  * IF a relation has confidence >= 0.7:
-    - MUST place the text block and its related image on the SAME page (or at worst within 1 page)
-    - MUST NOT place them 3+ pages apart (the reader loses the connection)
-  * An image and the text of its own content group should share an alignment edge (same col_start, or same col_end) and sit adjacent, so they read as one unit rather than two unrelated objects.
-  * Do NOT position images first and then pour text into whatever space is left. Decide the size of an image together with how much text its group carries.
-
-  CONSEQUENCE: If you ignore this, the layout will be rejected and fallback deterministic layout used instead.
+  Image-Text Proximity: full rule and the exact groups for this input are given below in the
+  "CONTENT GROUPS" section of the user prompt -- apply them there, not repeated here. Summary:
+  every image belongs to one content group, must stay on the same page as that group's text, and
+  shares an alignment edge with it. Violating this gets the layout rejected.
 
   🚨 Paragraph order (CRITICAL, validated): the user split their input into paragraph_1, paragraph_2,
   ... in a deliberate reading sequence. Across pages (in page order), a paragraph_N's first

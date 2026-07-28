@@ -17,9 +17,10 @@ test('page and text-box dimensions match PRD 4.6', () => {
   assert.equal(TEXT_BOX_HEIGHT_MM, 210 - 16 - 16)
 })
 
-test('char/line size derived from 9pt/14pt typography', () => {
+test('char/line size derived from 9pt/15pt typography', () => {
   // CHAR_WIDTH_MM includes a 0.9 calibration factor (real CJK glyphs render narrower than a full
   // em-square) -- see layoutConstants.js's CHAR_WIDTH_CALIBRATION_FACTOR comment.
   assert.ok(Math.abs(CHAR_WIDTH_MM - 9 * 0.3528 * 0.9) < 1e-9)
-  assert.ok(Math.abs(LINE_HEIGHT_MM - 14 * 0.3528) < 1e-9)
+  // 15pt (was 14pt) -- bumped 2026-07-27, see layoutConstants.js's BODY_LEADING_PT comment.
+  assert.ok(Math.abs(LINE_HEIGHT_MM - 15 * 0.3528) < 1e-9)
 })

@@ -19,6 +19,7 @@
 % cover-crop 이미지: 그리드 칸을 비율 유지로 꽉 채우고 넘치는 부분을 \clipbox로 잘라낸다
 % (buildLatex.js의 image.cover 분기). trimclip은 texlive에 포함된 adjustbox 번들의 일부.
 \RequirePackage{trimclip}
+\RequirePackage{xcolor}
 \RequirePackage[none]{hyphenat}
 
 % 전역 문단 들여쓰기 및 간격 제거 (textblock 정렬 보장)
@@ -70,11 +71,17 @@
 % read as visibly cramped once a heading needs more than one line (bold CJK glyphs are visually
 % denser than regular-weight body text, so headings need MORE headroom than body text's 1.56x
 % ratio, not less). Bumped to a consistent >=1.25x floor across every heading-style role.
-\newcommand{\SectionTitleText}[1]{\fontsize{14pt}{18pt}\selectfont\bfseries\NoHyphenRaggedRight #1\par}
-\newcommand{\CaseTitleKoText}[1]{\fontsize{11pt}{14pt}\selectfont\bfseries\NoHyphenRaggedRight #1\par}
-\newcommand{\CaseTitleEnText}[1]{\fontsize{10pt}{13pt}\selectfont\bfseries\NoHyphenRaggedRight\MakeUppercase{#1}\par}
+% Leading nudged +1pt again 2026-07-27 to match layoutConstants.js's ROLE_LEADING_PT bump (must be
+% kept in sync by hand) -- a single heading wrapped by LaTeX itself into two lines and two separate
+% heading blocks stacked by repairContentGroupLayout.js are now much closer in visual rhythm.
+\newcommand{\SectionTitleText}[1]{\fontsize{14pt}{19pt}\selectfont\bfseries\NoHyphenRaggedRight #1\par}
+\newcommand{\CaseTitleKoText}[1]{\fontsize{11pt}{15pt}\selectfont\bfseries\NoHyphenRaggedRight #1\par}
+\newcommand{\CaseTitleEnText}[1]{\fontsize{10pt}{14pt}\selectfont\bfseries\NoHyphenRaggedRight\MakeUppercase{#1}\par}
 \newcommand{\CaseBodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont\NoHyphenRaggedRight #1\par}
 \newcommand{\CreditText}[1]{\fontsize{7pt}{9pt}\selectfont\itshape #1\par}
+% 사진 출처 캡션: 이미지 우하단에 얹히므로 배경 칩을 깔아 사진 위에서도 읽히게 한다.
+% \colorbox 안에서 흰 글씨 -- 목표 지면의 캡션 처리와 같은 방식.
+\newcommand{\CaptionText}[1]{\fontsize{6.5pt}{8pt}\selectfont\hfill\colorbox{black}{\color{white}\,#1\,}\par}
 \newcommand{\PageNumberText}[1]{\fontsize{9pt}{11pt}\selectfont #1}
 \newcommand{\RunningHeadText}[1]{\fontsize{8pt}{10pt}\selectfont #1}
 

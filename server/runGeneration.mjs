@@ -359,7 +359,13 @@ export async function runGeneration({
     const deterministicPlan = buildContentGroupPlan({
       contentGroupModel,
       textBlocks: textBlocksAdvanced,
-      gridSettings: gridSettings.resolved_grid_settings,
+      // gridSettings.resolved_grid_settings alone has no `columns`/`page_size`/`margin_preset` --
+      // those live only on gridSettings.grid_spec (see GridPresetManager.js's return shape). Passing
+      // resolved_grid_settings by itself meant this builder always fell through to the hardcoded
+      // GRID_COLUMNS default (6), silently ignoring whatever column count the user picked in the UI
+      // (confirmed 2026-07-27: user selected 4단 and still got a 6-column layout). Merge both so
+      // every field this builder reads is actually present.
+      gridSettings: { ...gridSettings.resolved_grid_settings, ...gridSettings.grid_spec },
       outputUnit,
       forcedFullBleedImages: userLayoutSettings.forced_full_bleed_images ?? [],
     })

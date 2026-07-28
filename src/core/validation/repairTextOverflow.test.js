@@ -80,9 +80,10 @@ test('widens col_span when row growth alone cannot reach the required capacity (
   const textBlocks = [{ id: 'p1', text: 'x'.repeat(300), char_count: 300 }]
 
   const before = validateLayoutTextCapacity(plan, textBlocks)
-  // Capacity reflects CHAR_WIDTH_CALIBRATION_FACTOR (0.9) applied on top of the original
-  // 300ch/85cap real-report fixture -- still the same overflow scenario, recalibrated capacity.
-  assert.equal(before[0]?.capacity, 95, 'precondition: matches the (calibrated) 300ch/95cap overflow from the real report')
+  // Capacity reflects CHAR_WIDTH_CALIBRATION_FACTOR (0.9) and the 15pt body leading (was 14pt,
+  // bumped 2026-07-27) on top of the original 300ch/85cap real-report fixture -- still the same
+  // overflow scenario, recalibrated capacity.
+  assert.equal(before[0]?.capacity, 76, 'precondition: matches the (recalibrated) 300ch overflow from the real report')
 
   const { plan: repaired, repaired: didRepair, actions } = repairTextOverflow(plan, textBlocks)
   assert.equal(didRepair, true)
@@ -110,9 +111,10 @@ test('fits a 192-character paragraph that overflows a 136-capacity box', () => {
   const textBlocks = [{ id: 'p1', text: 'x'.repeat(192), char_count: 192 }]
 
   const before = validateLayoutTextCapacity(plan, textBlocks)
-  // Capacity reflects CHAR_WIDTH_CALIBRATION_FACTOR (0.9) applied on top of the original
-  // 192ch/136cap real-report fixture -- still the same overflow scenario, recalibrated capacity.
-  assert.equal(before[0]?.capacity, 152, 'precondition: matches the (calibrated) 192ch/152cap overflow from the real report')
+  // Capacity reflects CHAR_WIDTH_CALIBRATION_FACTOR (0.9) and the 15pt body leading (was 14pt,
+  // bumped 2026-07-27) on top of the original 192ch/136cap real-report fixture -- still the same
+  // overflow scenario, recalibrated capacity.
+  assert.equal(before[0]?.capacity, 133, 'precondition: matches the (recalibrated) 192ch overflow from the real report')
 
   const { plan: repaired, repaired: didRepair } = repairTextOverflow(plan, textBlocks)
   assert.equal(didRepair, true)

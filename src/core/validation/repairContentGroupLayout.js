@@ -18,6 +18,7 @@ import { estimateTextCapacityMm } from '../estimateTextCapacity.js'
 import { gridToMm } from '../gridToMm.js'
 import {
   GRID_COLUMNS, GRID_ROWS, ROLE_LEADING_PT, BODY_LEADING_PT, PT_TO_MM, TEXT_BOX_HEIGHT_MM,
+  MIN_READABLE_COLUMN_WIDTH_MM,
 } from '../layoutConstants.js'
 
 // Gaps INSIDE one content group, in mm. These are deliberately far smaller than a grid row pitch
@@ -25,7 +26,15 @@ import {
 // apart, not one grid row apart. Confirmed 2026-07-27 on real output -- the user marked headings of
 // the same group sitting 15-30mm away from each other, because every paragraph was snapped to its
 // own grid row and the unused remainder of each row became visible whitespace.
-const GAP_AFTER_HEADING_MM = 1.5
+//
+// Tightened again 2026-07-27: two headings of the same tier stacked as separate blocks (e.g. a
+// Korean heading directly followed by its English counterpart) read visibly LOOSER than the same
+// pair of lines wrapped naturally inside one heading block by LaTeX -- the user compared them
+// side-by-side on real output. The two rendering paths need to converge on one rhythm: this gap
+// shrinks, and the multi-line safety padding below no longer applies to single-line heading
+// entries, whose full box height was previously inflated by 35% for no reason (that padding exists
+// to protect a wrapped line's descender, which a one-line heading never has).
+const GAP_AFTER_HEADING_MM = 1
 const GAP_AFTER_BODY_MM = 3
 const GAP_AFTER_IMAGE_MM = 3
 
@@ -38,23 +47,44 @@ function leadingMmFor(role) {
 // visible result is typographically tight while the plan still validates.
 function tightBoxesFor(entries, xMm, wMm, startYMm) {
   let y = startYMm
-  return entries.map(({ el, rows, sourceRole }, index) => {
+  let lastImageBox = null
+  return entries.map(({ el, rows, sourceRole }) => {
     if (el.type === 'image') {
       const h = el.__gridHMm ?? rows
       const box = { xMm, yMm: y, wMm, hMm: h }
+      lastImageBox = box
       y += h + GAP_AFTER_IMAGE_MM
       return box
     }
+
     const role = sourceRole || el.role || 'body'
     const leading = leadingMmFor(role)
+
+    // A credit line belonging to a group that has an image sits ON the image's bottom-right corner,
+    // the way the reference spreads set them (2026-07-27 user request). It is pinned to the image
+    // rather than flowing in the column, so it consumes no vertical space and cannot push the
+    // heading or body around -- everything below it stays exactly where it would otherwise be.
+    if (role === 'caption' && lastImageBox) {
+      const h = leading * 1.6
+      return {
+        xMm: lastImageBox.xMm,
+        yMm: lastImageBox.yMm + lastImageBox.hMm - h,
+        wMm: lastImageBox.wMm,
+        hMm: h,
+        __overlay: true,
+      }
+    }
+
     const charsPerLine = Math.max(1, estimateTextCapacityMm(wMm, leading, role))
     const lines = Math.max(1, Math.ceil((el.__charCount ?? 0) / charsPerLine))
-    // A hair of extra height so a descender or a second wrapped line is never clipped.
-    const h = lines * leading + leading * 0.35
+    // Extra headroom only for text that actually wraps onto a 2nd+ line, so a descender is never
+    // clipped -- a single-line heading has no wrapped line to protect and was previously getting
+    // this padding for nothing, which is what made stacked headings read looser than one intrinsic
+    // wrapped block.
+    const h = lines > 1 ? lines * leading + leading * 0.35 : leading
     const box = { xMm, yMm: y, wMm, hMm: h }
-    const isHeading = role !== 'body' && role !== 'continuation_body' && role !== 'quote' && role !== 'lead' && role !== 'list_item'
+    const isHeading = !['body', 'continuation_body', 'quote', 'lead', 'list_item'].includes(role)
     y += h + (isHeading ? GAP_AFTER_HEADING_MM : GAP_AFTER_BODY_MM)
-    if (index === entries.length - 1) return box
     return box
   })
 }
@@ -157,12 +187,32 @@ function sizeGroup(group, colSpan, gridSpec, textBlocks, lookup, forcedIds = new
   return { entries, totalRows: entries.reduce((sum, e) => sum + e.rows, 0) }
 }
 
+// How many side-by-side bands to flow groups into, derived from the user's own column setting
+// rather than fixed (2026-07-27: this was hardcoded to 2 bands whenever the grid had 4+ columns,
+// which silently ignored the 1단~6단 choice in the UI). Bands are always a whole number of the
+// user's columns, so group edges land on their grid; among the options, the most bands that still
+// leave a readable measure wins. A 6-column A5 yields 2 bands (56mm each) while a 6-column A4
+// yields 3 (56.6mm each), and picking 1단 or 2단 is honored exactly.
+function chooseBands(gridSpec) {
+  for (let bandCount = gridSpec.columns; bandCount >= 1; bandCount -= 1) {
+    if (gridSpec.columns % bandCount !== 0) continue
+    const bandSpan = gridSpec.columns / bandCount
+    const { wMm } = gridToMm(
+      {
+        col_start: 1, col_span: bandSpan, row_start: 1, row_span: 1,
+      },
+      { columns: gridSpec.columns, rows: gridSpec.rows, gutterMm: gridSpec.gutterMm },
+    )
+    if (wMm >= MIN_READABLE_COLUMN_WIDTH_MM) return { bandCount, bandSpan }
+  }
+  return { bandCount: 1, bandSpan: gridSpec.columns }
+}
+
 // Packs groups in document order into column bands. A group always lands whole, on one page, in one
-// band; a group too tall for a half-width band is widened to full width (which roughly halves the
-// rows its text needs) before being given its own page.
+// band; a group too tall for a single band is widened to full width (which reduces the rows its
+// text needs) before being given its own page.
 function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set()) {
-  const bandCount = gridSpec.columns >= 4 ? 2 : 1
-  const bandSpan = Math.floor(gridSpec.columns / bandCount)
+  const { bandCount, bandSpan } = chooseBands(gridSpec)
   const bands = Array.from({ length: bandCount }, (_, i) => ({
     colStart: i * bandSpan + 1,
     colSpan: bandSpan,
@@ -249,7 +299,12 @@ function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set())
       placed.forEach(({ packed, gridBox }, i) => {
         const box = boxes[i]
         // Never let the tightened stack run past the page; fall back to the grid box if it would.
-        packed.box_mm = (box.yMm + box.hMm <= TEXT_BOX_HEIGHT_MM) ? box : gridBox
+        const fits = box.yMm + box.hMm <= TEXT_BOX_HEIGHT_MM
+        const { __overlay: isOverlay, ...boxMm } = box
+        packed.box_mm = fits ? boxMm : gridBox
+        // Credit lines pinned onto an image render with credit styling, while the plan keeps a
+        // role from the validated six-value vocabulary.
+        if (isOverlay && fits) packed.render_role = 'caption'
         currentElements.push(packed)
       })
     }

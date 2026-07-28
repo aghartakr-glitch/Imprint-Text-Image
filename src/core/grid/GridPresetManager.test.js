@@ -18,10 +18,10 @@ test('A4 always resolves to 16 rows regardless of column count; A5/B5 resolve to
 })
 
 test('gutter follows the columns table and narrows/widens with margin_preset', () => {
-  assert.equal(resolveGridSettings({ columns: 2 }).grid_spec.gutter_mm, 5)
-  assert.equal(resolveGridSettings({ columns: 6 }).grid_spec.gutter_mm, 3)
-  assert.equal(resolveGridSettings({ columns: 4, marginPreset: 'narrow' }).grid_spec.gutter_mm, 3)
-  assert.equal(resolveGridSettings({ columns: 4, marginPreset: 'wide' }).grid_spec.gutter_mm, 5)
+  assert.equal(resolveGridSettings({ columns: 2 }).grid_spec.gutter_mm, 7)
+  assert.equal(resolveGridSettings({ columns: 6 }).grid_spec.gutter_mm, 4.5)
+  assert.equal(resolveGridSettings({ columns: 4, marginPreset: 'narrow' }).grid_spec.gutter_mm, 4.5)
+  assert.equal(resolveGridSettings({ columns: 4, marginPreset: 'wide' }).grid_spec.gutter_mm, 6.5)
 })
 
 test('resolveTextFlow: 3+ paragraphs forces column_flow even with short text', () => {

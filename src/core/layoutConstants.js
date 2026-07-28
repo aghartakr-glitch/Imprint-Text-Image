@@ -13,7 +13,8 @@ export const TEXT_BOX_WIDTH_MM = PAGE_WIDTH_MM - MARGIN_INNER_MM - MARGIN_OUTER_
 export const TEXT_BOX_HEIGHT_MM = PAGE_HEIGHT_MM - MARGIN_TOP_MM - MARGIN_BOTTOM_MM
 
 export const BODY_FONT_SIZE_PT = 9
-export const BODY_LEADING_PT = 14
+// Nudged 14 -> 15pt (2026-07-27): user reported the overall leading read as slightly cramped.
+export const BODY_LEADING_PT = 15
 export const PT_TO_MM = 0.3528
 
 // Calibration factor: treating every character as a full em-square (CHAR_WIDTH_MM = fontSize)
@@ -55,7 +56,9 @@ export const SECTION_TITLE_MARGIN_MM = 5
 // expressible; nothing in the fixed-constraint checklist requires text to avoid the margins.
 export const GRID_COLUMNS = 6
 export const GRID_ROWS = 12
-export const GRID_GUTTER_MM = 4
+// Widened 2026-07-27 alongside GridPresetManager's per-column gutter table -- was visibly too
+// narrow on real output.
+export const GRID_GUTTER_MM = 4.5
 
 // Section-opener title page (used only when the user supplies a title).
 export const TITLE_FONT_SIZE_PT = 28
@@ -79,22 +82,31 @@ export const ROLE_FONT_SIZE_PT = {
   case_title_en: 10,
   case_body: BODY_FONT_SIZE_PT,
   credit: 7,
+  caption: 6.5,
   label: 14,
   body: BODY_FONT_SIZE_PT,
 }
 // Kept in sync with page_style_template.sty's heading-role leading fix (2026-07-27): every
 // bold heading role now uses >=1.25x its font size (was as low as 1.14x, visibly cramped once a
 // heading wraps to 2+ lines).
+// Nudged up by 1pt per role 2026-07-27 (alongside BODY_LEADING_PT) for the same "slightly cramped"
+// feedback, plus a second-order fix: a heading split into two stacked blocks (e.g. a Korean heading
+// line directly followed by its English counterpart, no blank line between them) used to look
+// tighter or looser than the SAME heading wrapped as one intrinsic multi-line block, because the
+// two rendering paths used unrelated spacing math. Bumping the intrinsic leading here moves the
+// single-block case closer to the custom inter-block gap in repairContentGroupLayout.js, so both
+// read at roughly the same line-to-line rhythm instead of one being visibly tighter.
 export const ROLE_LEADING_PT = {
   title: TITLE_LEADING_PT,
-  section_title: 18,
-  section_label: 18,
-  case_title: 14,
-  case_title_ko: 14,
-  case_title_en: 13,
+  section_title: 19,
+  section_label: 19,
+  case_title: 15,
+  case_title_ko: 15,
+  case_title_en: 14,
   case_body: BODY_LEADING_PT,
   credit: 9,
-  label: 18,
+  caption: 8,
+  label: 19,
   body: BODY_LEADING_PT,
 }
 // Roles rendered \bfseries in the .sty run measurably wider per character than the same point
