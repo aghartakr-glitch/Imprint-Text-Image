@@ -69,3 +69,20 @@ test('unknown page_size/margin_preset ("custom") falls back to A5/recommended de
   assert.equal(widthMm, 148)
   assert.equal(margins.top, 16)
 })
+
+test('resolveGridSettings accepts UI snake_case page and margin keys', () => {
+  const { grid_spec: gridSpec, page_width_mm: widthMm, page_height_mm: heightMm } = resolveGridSettings({
+    page_size: 'B5', margin_preset: 'recommended', columns: 6, grid_mode: 'strict',
+  })
+  assert.equal(gridSpec.page_size, 'B5')
+  assert.equal(gridSpec.margin_preset, 'recommended')
+  assert.equal(gridSpec.grid_mode, 'strict')
+  assert.equal(widthMm, 176)
+  assert.equal(heightMm, 250)
+})
+test('columns=5 resolves to a real five-column preset instead of mixing 5 columns with the 4-column fallback', () => {
+  const { grid_spec: gridSpec } = resolveGridSettings({ columns: 5 })
+  assert.equal(gridSpec.preset, 'five_column_editorial')
+  assert.equal(gridSpec.columns, 5)
+  assert.equal(gridSpec.gutter_mm, 5)
+})

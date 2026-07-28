@@ -1,10 +1,29 @@
 {
   "stage": "refined",
-  "page_count": 1,
-  "image_count": 0,
-  "text_block_count": 1,
-  "image_ids": [],
+  "page_count": 11,
+  "image_count": 8,
+  "text_block_count": 11,
+  "image_ids": [
+    "image_1",
+    "image_1",
+    "image_1",
+    "image_1",
+    "image_1",
+    "image_1",
+    "image_1",
+    "image_1"
+  ],
   "text_block_ids": [
-    "body_overflow"
+    "para_1",
+    "para_2",
+    "para_3",
+    "para_4",
+    "para_5",
+    "para_6",
+    "para_7",
+    "body_overflow_0",
+    "body_overflow_1",
+    "body_overflow_2",
+    "body_overflow_3"
   ]
 }

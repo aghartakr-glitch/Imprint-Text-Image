@@ -452,7 +452,7 @@ test('rejects bleed:"full" combined with another element on the same page', () =
   plan.pages[0].elements[0].bleed = 'full'
   const result = validateLayoutPlan(plan, { imageCount: 2 })
   assert.equal(result.passed, false)
-  assert.ok(result.issues.some((i) => i.includes('다른 요소가 없을 때만')))
+  assert.ok(result.issues.some((i) => i.includes('text may only continue below')))
 })
 
 test('rejects an out-of-vocabulary bleed value', () => {
@@ -758,6 +758,65 @@ test('rejects an image placed on a different page from its own group text', () =
 
   const result = validateLayoutPlan(plan, { imageCount: 1, contentGroupModel: groupModel() })
   assert.equal(result.passed, false)
+  assert.ok(result.issues.some((i) => i.includes('콘텐츠 그룹 분리')), JSON.stringify(result.issues))
+})
+
+// Regression + explicit user decision (2026-07-28, "텍스트 우선"): a body paragraph too long to
+// fit on the image's own page at any span must be allowed to continue onto a fresh page without
+// tripping the separation check -- text must never be truncated. This is NOT a blanket exemption:
+// it only applies when the image's page still holds the start of the same text_source, and every
+// other page touched by the group holds ONLY a continuation of that same text_source.
+test('allows an image-bearing group to continue its overlong body onto a fresh page without flagging separation', () => {
+  const plan = validPlan({
+    pages: [
+      {
+        page: 1,
+        elements: [
+          gmImg('image_1', { col_start: 1, col_span: 6, row_start: 1, row_span: 5 }),
+          gmTxt('t1', 'paragraph_1', { col_start: 1, col_span: 6, row_start: 6, row_span: 6 }),
+        ],
+      },
+      {
+        page: 2,
+        elements: [
+          gmTxt('t1b', 'paragraph_1', { col_start: 1, col_span: 6, row_start: 1, row_span: 8 }),
+        ],
+      },
+    ],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 1,
+    contentGroupModel: {
+      groupByTextSource: new Map([['paragraph_1', 0]]),
+      groupByImageId: new Map([['image_1', 0]]),
+    },
+  })
+  assert.ok(!result.issues.some((i) => i.includes('콘텐츠 그룹 분리')), JSON.stringify(result.issues))
+})
+
+// The exception must not swallow a genuine separation: if the OTHER page holds unrelated content
+// (not a continuation of the same text_source that started on the image's page), it's still flagged.
+test('still rejects separation when the other page is not actually a continuation of the same text', () => {
+  const plan = validPlan({
+    pages: [
+      { page: 1, elements: [gmImg('image_1', { col_start: 1, col_span: 6, row_start: 1, row_span: 5 })] },
+      {
+        page: 2,
+        elements: [
+          gmTxt('t1', 'paragraph_1', { col_start: 1, col_span: 6, row_start: 1, row_span: 4 }),
+        ],
+      },
+    ],
+  })
+
+  const result = validateLayoutPlan(plan, {
+    imageCount: 1,
+    contentGroupModel: {
+      groupByTextSource: new Map([['paragraph_1', 0]]),
+      groupByImageId: new Map([['image_1', 0]]),
+    },
+  })
   assert.ok(result.issues.some((i) => i.includes('콘텐츠 그룹 분리')), JSON.stringify(result.issues))
 })
 

@@ -1,14 +1,15 @@
 // Spec section 10: after reconstruction, refine the result before it becomes LaTeX.
 //
-// Image fitting is COVER-CROP (2026-07-27, user decision): an image fills its grid box exactly --
-// aspect ratio preserved, the overflowing dimension cropped, object_position choosing which part
-// survives the crop. The previous behavior was letterbox-contain with centering: the image shrank
-// inside its box and was then centered, which produced two visible defects the user circled on real
-// output -- side-by-side images with ragged, unequal tops/bottoms (each centered vertically to a
-// different fitted height), and a mysterious "indent" before portrait images (horizontal centering
-// pushed a 42.9mm-wide fit 6.5mm into its 56mm column). Filling the box removes both causes
-// outright: every image edge lands exactly on its grid lines.
-import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM, TEXT_IMAGE_MIN_GAP_MM } from './layoutConstants.js'
+// Image fitting is conditional. Explicit fit:"cover" images still receive cover-crop metadata,
+// but the default/editorial fallback is contain: do not crop a portrait or product image just
+// because the grid cell has a different aspect ratio. Content-group repair emits contain images by
+// default, preserving the source image unless a layout explicitly asks for cover.
+import {
+  COLUMN_GUTTER_MM,
+  TEXT_BOX_WIDTH_MM,
+  TEXT_BOX_HEIGHT_MM,
+  TEXT_IMAGE_MIN_GAP_MM,
+} from './layoutConstants.js'
 
 // Keeps the grid box exactly as planned and attaches the render/crop numbers buildLatex.js needs to
 // draw the image covering it: render at `renderWMm` wide (aspect preserved), then trim
@@ -56,14 +57,162 @@ function coverImageInBox(img, ratio) {
   }
 }
 
+function containBoxWithin(xMm, yMm, maxWMm, maxHMm, ratio) {
+  if (!Number.isFinite(ratio) || ratio <= 0) return { xMm, yMm, wMm: maxWMm, hMm: maxHMm }
+  const maxRatio = maxWMm / maxHMm
+  if (ratio > maxRatio) {
+    return { xMm, yMm, wMm: maxWMm, hMm: maxWMm / ratio }
+  }
+  return { xMm, yMm, wMm: maxHMm * ratio, hMm: maxHMm }
+}
+
+function shouldCoverCrop(img) {
+  return img.fit === 'cover' || img.renderFit === 'cover' || img.crop === true
+}
+
+function readImageRatio(img, imagePaths, imageAspectRatios) {
+  const idx = imagePaths.indexOf(img.path)
+  const ratio = idx >= 0 ? imageAspectRatios[idx] : null
+  if (Number.isFinite(ratio) && ratio > 0) return ratio
+  const fallback = img.wMm / img.hMm
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : null
+}
+
 function getTextBlocksForPage(page) {
   return Array.isArray(page.textBlocks) && page.textBlocks.length > 0
     ? page.textBlocks
     : (page.textZone ? [{ zone: page.textZone, slice: page.textSlice }] : [])
 }
 
+function setTextBlocksForPage(page, textBlocks) {
+  if (Array.isArray(page.textBlocks) && page.textBlocks.length > 0) return { ...page, textBlocks }
+  if (textBlocks.length === 1) return { ...page, textZone: textBlocks[0].zone, textSlice: textBlocks[0].slice }
+  return { ...page, textBlocks }
+}
 
-function upscaleSparseSpreadImages(pages, { imagePaths = [], imageAspectRatios = [] } = {}) {
+function columnWidthMm(boxWidthMm, columns, gutterMm) {
+  if (!Number.isFinite(columns) || columns <= 1) return boxWidthMm
+  return (boxWidthMm - gutterMm * (columns - 1)) / columns
+}
+
+function spanWidthMm(columns, span, boxWidthMm, gutterMm) {
+  const colWidth = columnWidthMm(boxWidthMm, columns, gutterMm)
+  return colWidth * span + gutterMm * Math.max(0, span - 1)
+}
+
+function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd
+}
+
+function boxesOverlap(a, b, gapMm = 0) {
+  return rangesOverlap(a.xMm - gapMm, a.xMm + a.wMm + gapMm, b.xMm, b.xMm + b.wMm)
+    && rangesOverlap(a.yMm - gapMm, a.yMm + a.hMm + gapMm, b.yMm, b.yMm + b.hMm)
+}
+
+function isBodyLikeTextBlock(tb) {
+  return !tb.role || tb.role === 'body' || tb.role === 'case_body' || tb.role === 'paragraph'
+}
+
+function promoteColumnTrappedImages(pages, {
+  imagePaths = [],
+  imageAspectRatios = [],
+  boxWidthMm = TEXT_BOX_WIDTH_MM,
+  boxHeightMm = TEXT_BOX_HEIGHT_MM,
+  columns = 3,
+  gutterMm = COLUMN_GUTTER_MM,
+} = {}) {
+  if (!Number.isFinite(columns) || columns < 2) return { pages, adjusted: false }
+
+  let adjusted = false
+  const oneCol = columnWidthMm(boxWidthMm, columns, gutterMm)
+  const oneColMax = oneCol * 1.2
+
+  const nextPages = pages.map((page) => {
+    const images = Array.isArray(page.images) ? page.images.map((img) => ({ ...img })) : []
+    const regularImages = images
+      .map((img, imageIndex) => ({ img, imageIndex }))
+      .filter(({ img }) => !img.fullBleed)
+    const textBlocks = getTextBlocksForPage(page)
+      .map((tb) => ({ ...tb, zone: tb.zone ? { ...tb.zone } : tb.zone }))
+      .filter((tb) => tb.zone)
+
+    if (regularImages.length !== 1 || textBlocks.length === 0) return { ...page, images }
+
+    const { img, imageIndex } = regularImages[0]
+    if (img.wMm > oneColMax) return { ...page, images }
+
+    const bodyBlocks = textBlocks.filter(isBodyLikeTextBlock)
+    if (bodyBlocks.length === 0) return { ...page, images }
+
+    const ratio = readImageRatio(img, imagePaths, imageAspectRatios)
+    if (!ratio) return { ...page, images }
+
+    const otherTextBlocks = textBlocks.filter((tb) => !isBodyLikeTextBlock(tb))
+    const headingAreaBottom = otherTextBlocks.reduce((max, tb) => Math.max(max, tb.zone.yMm + tb.zone.hMm), 0)
+    const availableTop = headingAreaBottom > 0 ? headingAreaBottom + TEXT_IMAGE_MIN_GAP_MM : 0
+
+    const preferredImageSpan = columns >= 5 ? 3 : (columns >= 3 ? 2 : 1)
+    const imageSpan = Math.max(1, Math.min(columns - 1, preferredImageSpan))
+    const textSpan = columns - imageSpan
+    if (textSpan < 1) return { ...page, images }
+
+    const imageMaxW = spanWidthMm(columns, imageSpan, boxWidthMm, gutterMm)
+    const textX = imageMaxW + gutterMm
+    const textW = boxWidthMm - textX
+    if (textW < oneCol * 0.85) return { ...page, images }
+
+    const imageMaxH = boxHeightMm - availableTop
+    if (imageMaxH < 45) return { ...page, images }
+
+    const imageBox = containBoxWithin(0, availableTop, imageMaxW, imageMaxH, ratio)
+    if (imageBox.wMm * imageBox.hMm <= img.wMm * img.hMm * 1.25) return { ...page, images }
+
+    const promotedImageBox = { ...imageBox, xMm: 0, yMm: availableTop }
+    const sideTextBox = {
+      xMm: textX,
+      yMm: availableTop,
+      wMm: textW,
+      hMm: boxHeightMm - availableTop,
+    }
+
+    if (otherTextBlocks.some((tb) => boxesOverlap(sideTextBox, tb.zone, TEXT_IMAGE_MIN_GAP_MM))) {
+      return { ...page, images }
+    }
+
+    images[imageIndex] = {
+      ...img,
+      ...promotedImageBox,
+      fit: img.fit || 'contain',
+      cover: undefined,
+    }
+
+    const bodyHeight = sideTextBox.hMm / bodyBlocks.length
+    let bodyIndex = 0
+    const movedTextBlocks = textBlocks.map((tb) => {
+      if (!isBodyLikeTextBlock(tb)) return tb
+      const yMm = sideTextBox.yMm + bodyIndex * bodyHeight
+      bodyIndex += 1
+      return {
+        ...tb,
+        zone: {
+          xMm: sideTextBox.xMm,
+          yMm,
+          wMm: sideTextBox.wMm,
+          hMm: bodyHeight - (bodyIndex < bodyBlocks.length ? TEXT_IMAGE_MIN_GAP_MM : 0),
+        },
+      }
+    })
+
+    adjusted = true
+    return setTextBlocksForPage({ ...page, images }, movedTextBlocks)
+  })
+
+  return { pages: nextPages, adjusted }
+}
+
+function upscaleSparseSpreadImages(pages, {
+  imagePaths = [], imageAspectRatios = [], boxWidthMm = TEXT_BOX_WIDTH_MM, boxHeightMm = TEXT_BOX_HEIGHT_MM,
+} = {}) {
   let adjusted = false
   const nextPages = pages.map((page) => ({
     ...page,
@@ -89,8 +238,7 @@ function upscaleSparseSpreadImages(pages, { imagePaths = [], imageAspectRatios =
     const minSparseArea = 2200
     if (currentArea >= minSparseArea) continue
 
-    const imagePathIndex = imagePaths.indexOf(img.path)
-    const ratio = imagePathIndex >= 0 ? imageAspectRatios[imagePathIndex] : (img.wMm / img.hMm)
+    const ratio = readImageRatio(img, imagePaths, imageAspectRatios)
     if (!Number.isFinite(ratio) || ratio <= 0) continue
 
     const page = nextPages[item.pageIndex]
@@ -102,33 +250,41 @@ function upscaleSparseSpreadImages(pages, { imagePaths = [], imageAspectRatios =
     ].reduce((max, bottom) => Math.max(max, bottom), 0)
 
     const yMm = occupiedBottom > 0 ? occupiedBottom + TEXT_IMAGE_MIN_GAP_MM : 0
-    const availableHeight = TEXT_BOX_HEIGHT_MM - yMm
+    const availableHeight = boxHeightMm - yMm
     if (availableHeight < 35) continue
 
-    // Cover-crop into the full remaining area: the enlarged image takes the whole available box
-    // (edges on the grid), with the overflowing dimension cropped, same as every other image.
-    const nextArea = TEXT_BOX_WIDTH_MM * availableHeight
+    const contained = containBoxWithin(0, yMm, boxWidthMm, availableHeight, ratio)
+    const nextArea = contained.wMm * contained.hMm
     if (nextArea <= currentArea * 1.35) continue
 
-    page.images[item.imageIndex] = coverImageInBox({
-      ...img, xMm: 0, yMm, wMm: TEXT_BOX_WIDTH_MM, hMm: availableHeight,
-    }, ratio)
+    page.images[item.imageIndex] = {
+      ...img,
+      ...contained,
+      fit: img.fit || 'contain',
+    }
     adjusted = true
   }
 
   return { pages: nextPages, adjusted }
 }
 
-export function refineLayout(resolvedPages, { imagePaths = [], imageAspectRatios = [] } = {}) {
+export function refineLayout(resolvedPages, {
+  imagePaths = [],
+  imageAspectRatios = [],
+  boxWidthMm = TEXT_BOX_WIDTH_MM,
+  boxHeightMm = TEXT_BOX_HEIGHT_MM,
+  columns = 3,
+  gutterMm = COLUMN_GUTTER_MM,
+} = {}) {
   const notes = []
   let objectPositionAdjusted = false
 
   const refinedPages = resolvedPages.map((page, pageIndex) => {
-    const images = page.images.map((img) => {
+    const pageImages = Array.isArray(page.images) ? page.images : []
+    const images = pageImages.map((img) => {
       if (img.fullBleed) return img
-      const idx = imagePaths.indexOf(img.path)
-      const ratio = idx >= 0 ? imageAspectRatios[idx] : null
-      if (!ratio) return img
+      const ratio = readImageRatio(img, imagePaths, imageAspectRatios)
+      if (!ratio || !shouldCoverCrop(img)) return { ...img, fit: img.fit || 'contain' }
       objectPositionAdjusted = true
       return coverImageInBox(img, ratio)
     })
@@ -149,12 +305,22 @@ export function refineLayout(resolvedPages, { imagePaths = [], imageAspectRatios
     return { ...page, images }
   })
 
-  const sparseImageResult = upscaleSparseSpreadImages(refinedPages, { imagePaths, imageAspectRatios })
+  const promotedImageResult = promoteColumnTrappedImages(refinedPages, {
+    imagePaths,
+    imageAspectRatios,
+    boxWidthMm,
+    boxHeightMm,
+    columns,
+    gutterMm,
+  })
+
+  const sparseImageResult = upscaleSparseSpreadImages(promotedImageResult.pages, { imagePaths, imageAspectRatios, boxWidthMm, boxHeightMm })
 
   return {
     resolvedPages: sparseImageResult.pages,
     refinements: {
       object_position_adjusted: objectPositionAdjusted,
+      column_trapped_images_promoted: promotedImageResult.adjusted,
       sparse_spread_images_upscaled: sparseImageResult.adjusted,
       continuation_pages_added: resolvedPages.filter((p) => p.images.length === 0 && p.textZone).length,
       notes,

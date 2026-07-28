@@ -2,22 +2,19 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { refineLayout } from './refineLayout.js'
 
-function pageWithImage(box, objectPosition) {
+function pageWithImage(box, objectPosition, fit = 'cover') {
   return {
     type: 'layout-plan-page',
     images: [{
-      path: '/img0.jpg', ...box, fullBleed: false, objectPosition,
+      path: '/img0.jpg', ...box, fullBleed: false, objectPosition, fit,
     }],
     textZone: null,
     textSlice: null,
   }
 }
 
-// Cover-crop semantics (2026-07-27, user decision): the image box stays EXACTLY the planned grid
-// box -- aspect ratio is preserved by rendering oversize and cropping the spill, never by shrinking
-// the box. The previous letterbox-contain behavior shrank and centered the image, which produced
-// ragged tops/bottoms between side-by-side images and a phantom "indent" before portrait images
-// (both circled by the user on real output).
+// Cover-crop is now opt-in. Explicit fit:"cover" images keep the box and crop the spill; default
+// fit:"contain" images preserve the whole source image without crop metadata.
 test('a wide image (ratio 2) in a square box keeps the box and crops the horizontal spill evenly', () => {
   const box = {
     xMm: 10, yMm: 10, wMm: 60, hMm: 60,
@@ -49,6 +46,21 @@ test('object_position=top keeps the top of a tall image and crops only the botto
   assert.equal(img.cover.trimTopMm, 0)
   assert.ok(Math.abs(img.cover.trimBottomMm - 60) < 1e-9)
 })
+
+
+
+test('a contain image keeps the planned box without cover-crop metadata', () => {
+  const box = { xMm: 10, yMm: 10, wMm: 60, hMm: 60 }
+  const result = refineLayout([pageWithImage(box, 'center', 'contain')], { imagePaths: ['/img0.jpg'], imageAspectRatios: [0.5] })
+  const img = result.resolvedPages[0].images[0]
+  assert.equal(img.xMm, 10)
+  assert.equal(img.yMm, 10)
+  assert.equal(img.wMm, 60)
+  assert.equal(img.hMm, 60)
+  assert.equal(img.cover, undefined)
+  assert.equal(result.refinements.object_position_adjusted, false)
+})
+
 
 test('a full-bleed image (e.g. title-page has none, but any fullBleed image) is left untouched', () => {
   const page = {
@@ -86,9 +98,76 @@ test('a tiny single image in a spread is enlarged into available page whitespace
     },
   ]
 
-  const result = refineLayout(pages, { imagePaths: ['/img0.jpg'], imageAspectRatios: [1.5] })
+  const result = refineLayout(pages, { imagePaths: ['/img0.jpg'], imageAspectRatios: [1.5], columns: 1 })
   const img = result.resolvedPages[1].images[0]
   assert.ok(img.wMm * img.hMm > 30 * 20 * 1.35, 'image should be materially larger than the thumbnail placement')
   assert.ok(img.yMm >= 124, 'image should stay below the existing text with the text-image gap')
+  assert.equal(img.cover, undefined)
+  assert.ok(Math.abs((img.wMm / img.hMm) - 1.5) < 1e-9, 'upscaled sparse image should preserve source ratio')
   assert.equal(result.refinements.sparse_spread_images_upscaled, true)
+})
+test('a one-column contain image with nearby body text is promoted to a multi-column editorial image', () => {
+  const pages = [{
+    type: 'layout-plan-page',
+    images: [{ path: '/img0.jpg', xMm: 0, yMm: 0, wMm: 55.333, hMm: 95.625, fullBleed: false, fit: 'contain' }],
+    textBlocks: [{
+      id: 'body',
+      role: 'body',
+      zone: { xMm: 0, yMm: 101.625, wMm: 55.333, hMm: 100 },
+      slice: '본문'.repeat(80),
+    }],
+  }]
+
+  const result = refineLayout(pages, {
+    imagePaths: ['/img0.jpg'],
+    imageAspectRatios: [0.58],
+    boxWidthMm: 178,
+    boxHeightMm: 265,
+    columns: 3,
+    gutterMm: 6,
+  })
+
+  const page = result.resolvedPages[0]
+  const img = page.images[0]
+  const body = page.textBlocks[0]
+
+  assert.ok(img.wMm > 100, 'image should be promoted beyond a single 3-column track')
+  assert.ok(img.hMm > 170, 'portrait image should remain visible instead of a small tile')
+  assert.equal(img.cover, undefined)
+  assert.equal(img.fit, 'contain')
+  assert.ok(Math.abs((img.wMm / img.hMm) - 0.58) < 0.01, 'promoted image should preserve source ratio')
+  assert.ok(body.zone.xMm > img.xMm + img.wMm, 'body should move into the remaining side column')
+  assert.ok(body.zone.hMm > 250, 'body should use the page height beside the image')
+  assert.equal(result.refinements.column_trapped_images_promoted, true)
+})
+
+test('a one-column image in a five-column grid is promoted to a three-column image with two columns for body text', () => {
+  const pages = [{
+    type: 'layout-plan-page',
+    images: [{ path: '/img0.jpg', xMm: 0, yMm: 0, wMm: 31.6, hMm: 54.6, fullBleed: false, fit: 'contain' }],
+    textBlocks: [{
+      id: 'body',
+      role: 'body',
+      zone: { xMm: 0, yMm: 60, wMm: 31.6, hMm: 100 },
+      slice: '본문'.repeat(80),
+    }],
+  }]
+
+  const result = refineLayout(pages, {
+    imagePaths: ['/img0.jpg'],
+    imageAspectRatios: [0.58],
+    boxWidthMm: 178,
+    boxHeightMm: 265,
+    columns: 5,
+    gutterMm: 5,
+  })
+
+  const page = result.resolvedPages[0]
+  const img = page.images[0]
+  const body = page.textBlocks[0]
+
+  assert.ok(img.wMm > 100, '5-column image should span about three columns, not stay in one narrow column')
+  assert.ok(body.zone.wMm > 60, 'body should receive the remaining two-column reading measure')
+  assert.ok(body.zone.xMm > img.xMm + img.wMm, 'body should sit beside the promoted image')
+  assert.equal(result.refinements.column_trapped_images_promoted, true)
 })

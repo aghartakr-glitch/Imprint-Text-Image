@@ -1,4 +1,4 @@
-import { GRID_COLUMNS, GRID_ROWS, TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM } from './layoutConstants.js'
+import { GRID_COLUMNS, GRID_ROWS, resolvePageGeometry } from './layoutConstants.js'
 import { decideOutputUnit } from './outputUnit.js'
 import { parseTextBlocks } from './text/parseTextBlocks.js'
 import { flowTextAcrossColumns, makeContinuationFlowRegion } from './text/ColumnFlowEngine.js'
@@ -425,8 +425,15 @@ export function buildGridFallbackPlan({
   const { grid_spec: gridSpecRaw, resolved_grid_settings: resolved } = gridSettings
   const columns = gridSpecRaw.columns
   const rows = gridSpecRaw.rows
+  const pageGeometry = resolvePageGeometry(gridSpecRaw.page_size, gridSpecRaw.margin_preset)
   const gridSpec = {
-    columns, rows, gutterMm: gridSpecRaw.gutter_mm, boxWidthMm: TEXT_BOX_WIDTH_MM, boxHeightMm: TEXT_BOX_HEIGHT_MM,
+    columns,
+    rows,
+    gutterMm: gridSpecRaw.gutter_mm,
+    boxWidthMm: pageGeometry.textBoxWidthMm,
+    boxHeightMm: pageGeometry.textBoxHeightMm,
+    pageWidthMm: pageGeometry.pageWidthMm,
+    pageHeightMm: pageGeometry.pageHeightMm,
   }
 
   // Real aspect ratios drive each image's column span (see imageBandsFor) so images are never

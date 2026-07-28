@@ -64,6 +64,73 @@ function hasInterleaving(groupPlacements, allPlacements) {
   return allPlacements.some((p) => p.group_id !== groupId && p.order > minOrder && p.order < maxOrder)
 }
 
+function rangesOverlap(aStart, aSpan, bStart, bSpan) {
+  return aStart <= bStart + bSpan - 1 && bStart <= aStart + aSpan - 1
+}
+
+function elementsOverlap(a, b) {
+  return rangesOverlap(a.col_start, a.col_span, b.col_start, b.col_span)
+    && rangesOverlap(a.row_start, a.row_span, b.row_start, b.row_span)
+}
+
+function groupHeight(sources) {
+  return sources.reduce((height, sourceInfo) => {
+    const span = isBodyLikeRole(sourceInfo.role)
+      ? Math.max(2, Math.min(4, Math.ceil((sourceInfo.char_count || 80) / 110)))
+      : 1
+    return height + span + (isBodyLikeRole(sourceInfo.role) ? 1 : 0)
+  }, 0)
+}
+
+function buildGroupElements(expectedSources, templateBySource, fallbackTemplate, columns, rows, startRow, colStart, colSpan) {
+  let row = startRow
+  return expectedSources.map((sourceInfo, index) => {
+    const template = templateBySource.get(sourceInfo.source) || fallbackTemplate
+    const el = makeElementForSource(sourceInfo, template, row, index, columns, rows)
+    el.col_start = colStart
+    el.col_span = colSpan
+    row += el.row_span + (isBodyLikeRole(sourceInfo.role) ? 1 : 0)
+    return el
+  })
+}
+
+function findPlacementOnPage(page, expectedSources, templateBySource, fallbackTemplate, columns, rows) {
+  const neededHeight = Math.min(rows, groupHeight(expectedSources))
+  const colCandidates = [
+    { colStart: 1, colSpan: columns },
+    { colStart: 1, colSpan: Math.max(1, Math.floor(columns / 2)) },
+    { colStart: Math.floor(columns / 2) + 1, colSpan: columns - Math.floor(columns / 2) },
+  ].filter((c) => c.colSpan > 0 && c.colStart + c.colSpan - 1 <= columns)
+
+  const existing = (page.elements || [])
+  for (const candidate of colCandidates) {
+    for (let rowStart = 1; rowStart <= rows - neededHeight + 1; rowStart += 1) {
+      const groupBox = {
+        col_start: candidate.colStart,
+        col_span: candidate.colSpan,
+        row_start: rowStart,
+        row_span: neededHeight,
+      }
+      if (existing.some((el) => elementsOverlap(groupBox, el))) continue
+      return buildGroupElements(expectedSources, templateBySource, fallbackTemplate, columns, rows, rowStart, candidate.colStart, candidate.colSpan)
+    }
+  }
+
+  return null
+}
+
+function findNearbyPlacement(pages, preferredPageIdx, expectedSources, templateBySource, fallbackTemplate, columns, rows) {
+  const candidates = [preferredPageIdx, preferredPageIdx - 1, preferredPageIdx + 1]
+    .filter((idx, i, arr) => idx >= 0 && idx < pages.length && arr.indexOf(idx) === i)
+
+  for (const pageIdx of candidates) {
+    const elements = findPlacementOnPage(pages[pageIdx], expectedSources, templateBySource, fallbackTemplate, columns, rows)
+    if (elements) return { pageIdx, elements }
+  }
+
+  return null
+}
+
 function makeElementForSource(sourceInfo, template, rowStart, sequence, columns, rows) {
   const role = sourceRoleToElementRole(sourceInfo.role)
   const wantedRowSpan = role === 'body'
@@ -149,27 +216,35 @@ export function repairContentGroups(plan, textBlocks = []) {
       })
     })
 
-    let row = 1
-    const repairedElements = expectedSources.map((sourceInfo, index) => {
-      const template = templateBySource.get(sourceInfo.source) || fallbackTemplate
-      const el = makeElementForSource(sourceInfo, template, row, index, columns, rows)
-      row += el.row_span + (isBodyLikeRole(sourceInfo.role) ? 1 : 0)
-      if (row > rows) row = rows + 1
-      return el
-    })
+    const nearbyPlacement = findNearbyPlacement(workingPlan.pages, targetPageIdx, expectedSources, templateBySource, fallbackTemplate, columns, rows)
 
-    const dedicatedPage = {
-      page: 0,
-      elements: repairedElements,
+    if (nearbyPlacement) {
+      workingPlan.pages[nearbyPlacement.pageIdx].elements = [
+        ...(workingPlan.pages[nearbyPlacement.pageIdx].elements || []),
+        ...nearbyPlacement.elements,
+      ].sort((a, b) => (a.row_start - b.row_start) || (a.col_start - b.col_start))
+
+      actions.push({
+        action: 'rebuild_content_group_nearby',
+        group_id: groupId,
+        page: nearbyPlacement.pageIdx + 1,
+        text_sources: expectedSources.map((info) => info.source),
+      })
+    } else {
+      const repairedElements = buildGroupElements(expectedSources, templateBySource, fallbackTemplate, columns, rows, 1, 1, columns)
+      const dedicatedPage = {
+        page: 0,
+        elements: repairedElements,
+      }
+      workingPlan.pages.splice(Math.min(targetPageIdx + 1, workingPlan.pages.length), 0, dedicatedPage)
+
+      actions.push({
+        action: 'rebuild_content_group_on_dedicated_page',
+        group_id: groupId,
+        after_page: targetPageIdx + 1,
+        text_sources: expectedSources.map((info) => info.source),
+      })
     }
-    workingPlan.pages.splice(Math.min(targetPageIdx + 1, workingPlan.pages.length), 0, dedicatedPage)
-
-    actions.push({
-      action: 'rebuild_content_group_on_dedicated_page',
-      group_id: groupId,
-      after_page: targetPageIdx + 1,
-      text_sources: expectedSources.map((info) => info.source),
-    })
 
     placements = collectPlacements(workingPlan, bySource)
   })

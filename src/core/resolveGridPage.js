@@ -15,7 +15,7 @@ export function resolveGridPage(elements, imagePaths, textSlicesByElementId = {}
   elements.forEach((el) => {
     if (el.type === 'image') {
       const isFullBleed = el.bleed === 'full'
-      const box = isFullBleed ? gridToMmFullBleed() : gridToMm(el, gridSpec)
+      const box = isFullBleed ? gridToMmFullBleed(gridSpec?.pageWidthMm, gridSpec?.pageHeightMm) : gridToMm(el, gridSpec)
       const match = /^image_(\d+)$/.exec(el.id || '')
       const idx = match ? Number(match[1]) - 1 : -1
       const path = imagePaths[idx]
@@ -33,9 +33,15 @@ export function resolveGridPage(elements, imagePaths, textSlicesByElementId = {}
       textBlocks.push({
         zone: box,
         slice: textSlicesByElementId[el.id] ?? null,
-        role: el.role,  // ← Pass role for LaTeX styling
+        // render_role carries a finer typographic role than the plan's own vocabulary allows. The
+        // plan's `role` must stay inside the six validated values, but a credit/caption line needs
+        // credit styling, not body styling -- so the layout stage sets render_role and the plan
+        // keeps a legal role for validation.
+        role: el.render_role || el.role,
         id: el.id,
         text_source: el.text_source,
+        group_id: el.group_id,
+        flow_group_id: el.flow_group_id,
       })
     }
   })

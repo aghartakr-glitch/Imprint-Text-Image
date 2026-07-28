@@ -17,8 +17,15 @@
 import { estimateTextCapacityMm } from '../estimateTextCapacity.js'
 import { gridToMm } from '../gridToMm.js'
 import {
-  GRID_COLUMNS, GRID_ROWS, ROLE_LEADING_PT, BODY_LEADING_PT, PT_TO_MM, TEXT_BOX_HEIGHT_MM,
-  MIN_READABLE_COLUMN_WIDTH_MM,
+  BODY_LIKE_ROLES,
+  estimateLineCount,
+  isBodyLikeRole,
+  leadingMmFor,
+  textHeightMmForLines,
+} from '../textMeasure.js'
+import {
+  GRID_COLUMNS, GRID_ROWS, TEXT_BOX_HEIGHT_MM,
+  MIN_READABLE_COLUMN_WIDTH_MM, resolvePageGeometry,
 } from '../layoutConstants.js'
 
 // Gaps INSIDE one content group, in mm. These are deliberately far smaller than a grid row pitch
@@ -34,13 +41,12 @@ import {
 // shrinks, and the multi-line safety padding below no longer applies to single-line heading
 // entries, whose full box height was previously inflated by 35% for no reason (that padding exists
 // to protect a wrapped line's descender, which a one-line heading never has).
-const GAP_AFTER_HEADING_MM = 1
+// Nudged 1mm -> 2mm (2026-07-28): 1mm read too tight overall across every title/subtitle pair in
+// real output ("전체적으로 제목+소제목 간격이 너무 좁다"). Keep in sync by hand with buildLatex.js's
+// gapAfterTextRole(), which must match this value for the flowTextBlock() rendering path.
+const GAP_AFTER_HEADING_MM = 2
 const GAP_AFTER_BODY_MM = 3
 const GAP_AFTER_IMAGE_MM = 3
-
-function leadingMmFor(role) {
-  return (ROLE_LEADING_PT[role] ?? BODY_LEADING_PT) * PT_TO_MM
-}
 
 // Tight mm heights for a group's text stack, bypassing grid-row quantization. The grid box stays on
 // the element (validation is grid-based); box_mm is what resolveGridPage actually renders, so the
@@ -75,15 +81,14 @@ function tightBoxesFor(entries, xMm, wMm, startYMm) {
       }
     }
 
-    const charsPerLine = Math.max(1, estimateTextCapacityMm(wMm, leading, role))
-    const lines = Math.max(1, Math.ceil((el.__charCount ?? 0) / charsPerLine))
+    const lines = estimateLineCount({ text: el.__text || '', charCount: el.__charCount ?? 0, role, wMm })
     // Extra headroom only for text that actually wraps onto a 2nd+ line, so a descender is never
     // clipped -- a single-line heading has no wrapped line to protect and was previously getting
     // this padding for nothing, which is what made stacked headings read looser than one intrinsic
     // wrapped block.
-    const h = lines > 1 ? lines * leading + leading * 0.35 : leading
+    const h = textHeightMmForLines(lines, role)
     const box = { xMm, yMm: y, wMm, hMm: h }
-    const isHeading = !['body', 'continuation_body', 'quote', 'lead', 'list_item'].includes(role)
+    const isHeading = !isBodyLikeRole(role)
     y += h + (isHeading ? GAP_AFTER_HEADING_MM : GAP_AFTER_BODY_MM)
     return box
   })
@@ -133,15 +138,36 @@ function charCountOf(block) {
 
 // Rows a text element needs at the given band width, from the real capacity model rather than a flat
 // guess -- an under-estimate here reintroduces the text-overflow failures fixed elsewhere.
-function rowsNeededForText(charCount, role, colSpan, gridSpec) {
+function maxTokenLength(text) {
+  return String(text || '').split(/\s+/).reduce((max, token) => Math.max(max, token.length), 0)
+}
+
+function textHasOverwideToken(block, role, colSpan, gridSpec) {
+  const tokenLength = maxTokenLength(block?.text)
+  if (!tokenLength) return false
+  const { wMm } = gridToMm(
+    { col_start: 1, col_span: colSpan, row_start: 1, row_span: 1 },
+    gridSpec, // carries boxWidthMm/boxHeightMm from the plan's real page_size (2026-07-28)
+  )
+  const charsPerLine = estimateTextCapacityMm(wMm, leadingMmFor(role), role)
+  return tokenLength > charsPerLine
+}
+
+function rowsNeededForText(charCount, role, colSpan, gridSpec, text = '') {
   if (!charCount) return 1
   for (let span = 1; span <= gridSpec.rows; span += 1) {
     const box = gridToMm(
       {
         col_start: 1, col_span: colSpan, row_start: 1, row_span: span,
       },
-      { columns: gridSpec.columns, rows: gridSpec.rows, gutterMm: gridSpec.gutterMm },
+      gridSpec, // carries boxWidthMm/boxHeightMm from the plan's real page_size (2026-07-28)
     )
+    if (!isBodyLikeRole(role) && text) {
+      const lines = estimateLineCount({ text, charCount, role, wMm: box.wMm })
+      const neededMm = textHeightMmForLines(lines, role)
+      if (box.hMm >= neededMm) return span
+      continue
+    }
     if (estimateTextCapacityMm(box.wMm, box.hMm, role) >= charCount) {
       // A body paragraph of any real length in a single row renders as one-character fragments, and
       // the validator rejects it outright. Never hand back a 1-row box for such a paragraph.
@@ -163,9 +189,18 @@ function sizeGroup(group, colSpan, gridSpec, textBlocks, lookup, forcedIds = new
     const el = existing || {
       id: imageId, type: 'image', role: 'support', fit: 'contain', object_position: 'center',
     }
-    const wanted = Number.isFinite(el.row_span) ? el.row_span : 4
+    // When the model didn't give an image its own row_span, it defaulted to a flat 4 rows (~33%
+    // of a 12-row grid) with a floor of just 2 rows (~17%) -- consistently small regardless of how
+    // much room was actually available next to it, since nothing here scales with the group's
+    // real text length (confirmed 2026-07-28: real generations produced small images throughout
+    // whenever the LLM omitted row_span, "지면 대비 이미지가 너무 작다"). Raised the no-hint
+    // default and the floor so an image never renders as an afterthought; the upper cap (still
+    // ~60% of the grid) is unchanged so text-heavy groups don't lose all their body room to a
+    // single image.
+    const wanted = Number.isFinite(el.row_span) ? el.row_span : Math.ceil(gridSpec.rows * 0.55)
+    const minRows = Math.max(2, Math.ceil(gridSpec.rows * 0.35))
     entries.push({
-      el, sourceRole: null, rows: Math.max(2, Math.min(wanted, Math.floor(gridSpec.rows * 0.6))),
+      el: { ...el, group_id: group.group }, sourceRole: null, rows: Math.max(minRows, Math.min(wanted, Math.floor(gridSpec.rows * 0.6))),
     })
   })
 
@@ -177,9 +212,16 @@ function sizeGroup(group, colSpan, gridSpec, textBlocks, lookup, forcedIds = new
       id: `text_${source}`, type: 'text', role: toOutputRole(sourceRole), text_source: source,
     }
     entries.push({
-      el: { ...el, __charCount: charCountOf(block) },
+      el: {
+        ...el,
+        group_id: group.group,
+        flow_group_id: group.group,
+        __charCount: charCountOf(block),
+        __text: block?.text || '',
+      },
       sourceRole,
-      rows: rowsNeededForText(charCountOf(block), sourceRole, colSpan, gridSpec),
+      rows: rowsNeededForText(charCountOf(block), sourceRole, colSpan, gridSpec, block?.text || ''),
+      overwideToken: textHasOverwideToken(block, sourceRole, colSpan, gridSpec),
     })
   })
 
@@ -194,29 +236,125 @@ function sizeGroup(group, colSpan, gridSpec, textBlocks, lookup, forcedIds = new
 // leave a readable measure wins. A 6-column A5 yields 2 bands (56mm each) while a 6-column A4
 // yields 3 (56.6mm each), and picking 1단 or 2단 is honored exactly.
 function chooseBands(gridSpec) {
-  for (let bandCount = gridSpec.columns; bandCount >= 1; bandCount -= 1) {
+  for (let bandCount = gridSpec.columns; bandCount >= 2; bandCount -= 1) {
     if (gridSpec.columns % bandCount !== 0) continue
     const bandSpan = gridSpec.columns / bandCount
     const { wMm } = gridToMm(
       {
         col_start: 1, col_span: bandSpan, row_start: 1, row_span: 1,
       },
-      { columns: gridSpec.columns, rows: gridSpec.rows, gutterMm: gridSpec.gutterMm },
+      gridSpec, // carries boxWidthMm/boxHeightMm from the plan's real page_size (2026-07-28)
     )
     if (wMm >= MIN_READABLE_COLUMN_WIDTH_MM) return { bandCount, bandSpan }
   }
+
+  // Prime-ish grids such as 5 columns cannot be divided into equal readable bands. Treat the grid
+  // as alignment scaffolding, not a command to use identical strips: a 5-column page should be able
+  // to compose as 3+2 (or 2+3) instead of collapsing to one full-width band.
+  if (gridSpec.columns === 5) {
+    const twoCol = spanMeasureMm(2, gridSpec)
+    const threeCol = spanMeasureMm(3, gridSpec)
+    if (twoCol >= MIN_READABLE_COLUMN_WIDTH_MM && threeCol >= MIN_READABLE_COLUMN_WIDTH_MM) {
+      return {
+        bandCount: 2,
+        bandSpan: 3,
+        bands: [
+          { colStart: 1, colSpan: 3 },
+          { colStart: 4, colSpan: 2 },
+        ],
+      }
+    }
+  }
+
   return { bandCount: 1, bandSpan: gridSpec.columns }
+}
+
+function uniqueSortedSpans(spans, columns) {
+  return [...new Set(spans
+    .filter((span) => Number.isInteger(span) && span >= 1 && span <= columns))]
+    .sort((a, b) => a - b)
+}
+
+function spanMeasureMm(span, gridSpec) {
+  return gridToMm({ col_start: 1, col_span: span, row_start: 1, row_span: 1 }, gridSpec).wMm
+}
+
+function groupTextStats(group, textBlocks) {
+  let bodyChars = 0
+  let totalChars = 0
+  let hasHeading = false
+  let hasBody = false
+  let maxToken = 0
+
+  group.text_sources.forEach((source) => {
+    const block = blockForSource(textBlocks, source)
+    const role = block?.role || 'body'
+    const chars = charCountOf(block)
+    totalChars += chars
+    maxToken = Math.max(maxToken, maxTokenLength(block?.text || ''))
+    if (isBodyLikeRole(role)) {
+      hasBody = true
+      bodyChars += chars
+    } else {
+      hasHeading = true
+    }
+  })
+
+  return { bodyChars, totalChars, hasHeading, hasBody, maxToken }
+}
+
+function preferredMinimumSpanForGroup(group, baseSpan, gridSpec, textBlocks, lookup, forcedIds) {
+  const inlineImageCount = group.images.filter((id) => !forcedIds.has(id)).length
+  const stats = groupTextStats(group, textBlocks)
+
+  if (gridSpec.columns <= 2) return baseSpan
+  if (inlineImageCount > 0) return Math.min(gridSpec.columns, gridSpec.columns >= 5 ? 3 : 2)
+
+  const base = sizeGroup(group, baseSpan, gridSpec, textBlocks, lookup, forcedIds)
+  if (base.entries.some((entry) => entry.overwideToken)) return gridSpec.columns
+
+  if (stats.hasHeading && stats.hasBody && stats.bodyChars <= 700) {
+    return Math.min(gridSpec.columns, gridSpec.columns >= 5 ? 3 : 2)
+  }
+  if (stats.hasBody && stats.bodyChars > 0 && stats.bodyChars <= 320) {
+    return Math.min(gridSpec.columns, 2)
+  }
+  if (base.totalRows > gridSpec.rows * 0.75) {
+    return Math.min(gridSpec.columns, gridSpec.columns >= 5 ? 3 : 2)
+  }
+
+  return baseSpan
+}
+
+function chooseResponsiveGroupSpan(group, baseSpan, gridSpec, textBlocks, lookup, forcedIds) {
+  const desired = preferredMinimumSpanForGroup(group, baseSpan, gridSpec, textBlocks, lookup, forcedIds)
+  const candidates = uniqueSortedSpans([
+    baseSpan,
+    desired,
+    desired + 1,
+    Math.ceil(gridSpec.columns / 2),
+    gridSpec.columns,
+  ], gridSpec.columns).filter((span) => span >= desired && spanMeasureMm(span, gridSpec) >= MIN_READABLE_COLUMN_WIDTH_MM)
+
+  if (candidates.length === 0) return { colSpan: baseSpan, ...sizeGroup(group, baseSpan, gridSpec, textBlocks, lookup, forcedIds) }
+
+  const measured = candidates.map((span) => ({
+    colSpan: span,
+    ...sizeGroup(group, span, gridSpec, textBlocks, lookup, forcedIds),
+  }))
+  return measured.find((candidate) => candidate.totalRows <= gridSpec.rows) || measured[measured.length - 1]
 }
 
 // Packs groups in document order into column bands. A group always lands whole, on one page, in one
 // band; a group too tall for a single band is widened to full width (which reduces the rows its
 // text needs) before being given its own page.
-function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set()) {
-  const { bandCount, bandSpan } = chooseBands(gridSpec)
-  const bands = Array.from({ length: bandCount }, (_, i) => ({
-    colStart: i * bandSpan + 1,
-    colSpan: bandSpan,
+function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set(), imageAspectRatios = []) {
+  const bandChoice = chooseBands(gridSpec)
+  const bands = bandChoice.bands || Array.from({ length: bandChoice.bandCount }, (_, i) => ({
+    colStart: i * bandChoice.bandSpan + 1,
+    colSpan: bandChoice.bandSpan,
   }))
+  const bandCount = bands.length
 
   const pages = []
   let currentElements = []
@@ -234,25 +372,124 @@ function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set())
   // to, so it reads as that group's opener. This is the one case where an image is deliberately
   // separated from its own text: the explicit user instruction outranks group cohesion, and the
   // cohesion validator excludes these images for the same reason.
+  const containedRowsForFullBleed = (imageId) => {
+    const match = /^image_(\d+)$/.exec(imageId || '')
+    const ratio = match ? imageAspectRatios[Number(match[1]) - 1] : null
+    if (!Number.isFinite(ratio) || ratio <= 0) return gridSpec.rows
+    // Real page aspect ratio from the plan's own page_size (2026-07-28) -- was hardcoded to A5's
+    // 148/210 regardless of the actual page, which would size a forced full-bleed image's
+    // contained height wrong on any other page size.
+    const pageRatio = (gridSpec.pageWidthMm ?? 148) / (gridSpec.pageHeightMm ?? 210)
+    const renderedHeightRatio = ratio > pageRatio ? pageRatio / ratio : 1
+    return Math.max(1, Math.ceil(gridSpec.rows * renderedHeightRatio))
+  }
+
+  const fullBleedEntry = (imageId) => {
+    const existing = lookup.imageById.get(imageId) || {}
+    return {
+      ...existing,
+      id: imageId,
+      type: 'image',
+      role: existing.role || 'hero',
+      fit: existing.fit || 'contain',
+      object_position: existing.object_position || 'center',
+      bleed: 'full',
+      col_start: 1,
+      col_span: gridSpec.columns,
+      row_start: 1,
+      row_span: containedRowsForFullBleed(imageId),
+    }
+  }
+
   const emitFullBleedPage = (imageId) => {
     flushPage()
-    const existing = lookup.imageById.get(imageId) || {}
     pages.push({
       page: pages.length + 1,
-      elements: [{
-        ...existing,
-        id: imageId,
-        type: 'image',
-        role: existing.role || 'hero',
-        fit: existing.fit || 'contain',
-        object_position: existing.object_position || 'center',
-        bleed: 'full',
-        col_start: 1,
-        col_span: gridSpec.columns,
-        row_start: 1,
-        row_span: gridSpec.rows,
-      }],
+      elements: [fullBleedEntry(imageId)],
     })
+  }
+
+  const isBodyEntry = (entry) => {
+    const role = entry.sourceRole || entry.el.role
+    return entry.el.type === 'text' && BODY_LIKE_ROLES.has(role)
+  }
+
+  const splitTextOnlyGroupForRows = (entries, maxRows, colSpan) => {
+    if (maxRows <= 2) return null
+    const firstBodyIndex = entries.findIndex(isBodyEntry)
+    if (firstBodyIndex < 0) return null
+
+    const prefix = entries.slice(0, firstBodyIndex)
+    const prefixRows = prefix.reduce((sum, entry) => sum + entry.rows, 0)
+    const bodyRowsAvailable = maxRows - prefixRows
+    if (bodyRowsAvailable < 2) return null
+
+    const firstBody = entries[firstBodyIndex]
+    const bodyRows = Math.min(firstBody.rows, bodyRowsAvailable)
+    const totalChars = Number.isFinite(firstBody.el.__charCount) ? firstBody.el.__charCount : null
+    // Without a real character count there is no reliable way to tell how much text the reduced
+    // `bodyRows` actually covers, so don't guess -- bail out of the split entirely rather than risk
+    // it (the caller's other branches place the group whole instead, which cannot duplicate text).
+    if (totalChars == null) return null
+
+    // Use the SAME real capacity function rowsNeededForText() uses, not a linear rows-ratio
+    // estimate. Confirmed 2026-07-28 from a real generation: the old
+    // `totalChars * (bodyRows / firstBody.rows)` guess overshot the real capacity by ~25% (652
+    // chars estimated to fit a box whose real capacity was 520), because capacity doesn't scale
+    // perfectly linearly with row count (line-height rounding, per-box padding). Computing the
+    // actual mm box for `bodyRows` and asking estimateTextCapacityMm() directly is exact by
+    // construction -- it's the same function validateLayoutTextCapacity() checks against.
+    const bodyRole = firstBody.sourceRole || firstBody.el.role || 'body'
+    const fitBox = gridToMm(
+      {
+        col_start: 1, col_span: colSpan, row_start: 1, row_span: bodyRows,
+      },
+      gridSpec,
+    )
+    const realCapacity = estimateTextCapacityMm(fitBox.wMm, fitBox.hMm, bodyRole)
+    const fitChars = Math.max(1, Math.min(totalChars, realCapacity))
+    // Confirmed 2026-07-28 from a real generation: when `bodyRows` is only slightly below
+    // `firstBody.rows`, a rows-ratio estimate can round fitChars up to the FULL totalChars even
+    // though bodyRows alone didn't cover every row the text originally needed. The old code then
+    // decided whether to emit a "remaining" entry using `firstBody.rows > bodyRowsAvailable` -- a
+    // *rows* comparison -- while `remainingBody` itself was built from a *character-count*
+    // comparison (`remainingChars == null` -> reuse `firstBody` verbatim, uncompressed). Those two
+    // conditions can disagree: rows said "doesn't fully fit" while chars said "nothing is left
+    // over", so the leftover branch fell back to the ENTIRE original entry (full rows, full text) as
+    // "remaining" -- duplicating the whole paragraph on a second page/band alongside the
+    // already-placed, correctly-shrunk copy in fitEntries. The fix: whether anything remains must be
+    // decided by the same signal (character count) that builds the remaining entry, not by rows.
+    const hasRemainingChars = fitChars < totalChars
+    const remainingChars = hasRemainingChars ? totalChars - fitChars : null
+    // A remaining chunk must never be pushed to its own fresh page (see the fix above) just to
+    // hold one leftover sentence -- that wastes an almost-blank page for a fragment. If what would
+    // be left over is too small to be worth a page of its own, don't split at all: returning null
+    // here makes the caller fall through to moving the WHOLE paragraph together instead (confirmed
+    // 2026-07-28 from a real generation: "조절하는 능동적인 구성 요소로 사용되었다." -- the tail end
+    // of a much longer paragraph -- landed alone on an otherwise empty page).
+    const MIN_WORTHWHILE_REMAINING_CHARS = 60
+    if (hasRemainingChars && remainingChars < MIN_WORTHWHILE_REMAINING_CHARS) return null
+    const fitEntries = [...prefix, { ...firstBody, rows: bodyRows, el: { ...firstBody.el, __charCount: fitChars } }]
+    // The leftover's row count must also come from the real capacity function, not from
+    // subtracting rows (firstBody.rows - bodyRows + 1) -- that arithmetic assumes the SAME
+    // per-row capacity applies on the continuation page as it did in the original (possibly
+    // narrower or image-sharing) box, which isn't guaranteed. rowsNeededForText() already knows
+    // how to find the minimal row count for a real character count at this colSpan; reuse it here.
+    const remainingRowsNeeded = hasRemainingChars
+      ? rowsNeededForText(remainingChars, bodyRole, colSpan, gridSpec)
+      : null
+    const remainingEntries = hasRemainingChars
+      ? [
+        {
+          ...firstBody,
+          rows: remainingRowsNeeded,
+          el: { ...firstBody.el, __charCount: remainingChars },
+        },
+        ...entries.slice(firstBodyIndex + 1),
+      ]
+      : entries.slice(firstBodyIndex + 1)
+
+    return { fitEntries, remainingEntries }
   }
 
   const place = (entries, colStart, colSpan, startRow) => {
@@ -268,7 +505,7 @@ function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set())
         {
           col_start: colStart, col_span: colSpan, row_start: cursor, row_span: rowSpan,
         },
-        { columns: gridSpec.columns, rows: gridSpec.rows, gutterMm: gridSpec.gutterMm },
+        gridSpec, // carries boxWidthMm/boxHeightMm from the plan's real page_size (2026-07-28)
       )
       const packed = {
         ...entry.el, col_start: colStart, col_span: colSpan, row_start: cursor, row_span: rowSpan,
@@ -299,7 +536,9 @@ function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set())
       placed.forEach(({ packed, gridBox }, i) => {
         const box = boxes[i]
         // Never let the tightened stack run past the page; fall back to the grid box if it would.
-        const fits = box.yMm + box.hMm <= TEXT_BOX_HEIGHT_MM
+        // gridSpec.boxHeightMm reflects the plan's real page_size (falls back to A5's
+        // TEXT_BOX_HEIGHT_MM only when the caller didn't supply one, e.g. an older test fixture).
+        const fits = box.yMm + box.hMm <= (gridSpec.boxHeightMm ?? TEXT_BOX_HEIGHT_MM)
         const { __overlay: isOverlay, ...boxMm } = box
         packed.box_mm = fits ? boxMm : gridBox
         // Credit lines pinned onto an image render with credit styling, while the plan keeps a
@@ -313,38 +552,120 @@ function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set())
   }
 
   groups.forEach((group) => {
-    group.images.filter((id) => forcedIds.has(id)).forEach(emitFullBleedPage)
+    const forcedGroupImages = group.images.filter((id) => forcedIds.has(id))
+    forcedGroupImages.forEach((imageId) => {
+      flushPage()
+      const imageEntry = fullBleedEntry(imageId)
+      currentElements.push(imageEntry)
+      rowCursor = imageEntry.row_span + 1
+      bandIndex = 0
+      if (rowCursor > gridSpec.rows - 1) flushPage()
+    })
 
     let { entries, totalRows } = sizeGroup(group, bands[0].colSpan, gridSpec, textBlocks, lookup, forcedIds)
+    let groupContinued = false
+    let forcedBand = null
+    let continuedFromBleedPage = false
     if (entries.length === 0) return
 
-    // Too tall for a half-width band: re-measure at full width, and give it a clean page.
-    if (totalRows > gridSpec.rows && bandCount > 1) {
+    if (bandCount > 1) {
+      const responsive = chooseResponsiveGroupSpan(group, bands[0].colSpan, gridSpec, textBlocks, lookup, forcedIds)
+      if (responsive.entries.length > 0 && responsive.colSpan > bands[0].colSpan) {
+        if (currentElements.length > 0 && rowCursor > 1) flushPage()
+        entries = responsive.entries
+        totalRows = responsive.totalRows
+        forcedBand = { colStart: 1, colSpan: responsive.colSpan }
+      }
+    }
+
+    if (bandCount > 1 && entries.some((entry) => entry.overwideToken)) {
       const wide = sizeGroup(group, gridSpec.columns, gridSpec, textBlocks, lookup, forcedIds)
-      if (wide.totalRows <= gridSpec.rows) {
+      if (wide.entries.length > 0) {
+        if (currentElements.length > 0 && rowCursor > 1) flushPage()
+        entries = wide.entries
+        totalRows = wide.totalRows
+        forcedBand = { colStart: 1, colSpan: gridSpec.columns }
+      }
+    }
+
+    if (rowCursor + totalRows - 1 > gridSpec.rows) {
+      const band = forcedBand || bands[bandIndex]
+      const remainingRows = gridSpec.rows - rowCursor + 1
+      const hasInlineImages = group.images.some((id) => !forcedIds.has(id))
+      // Splitting a group's overlong body across pages used to be refused outright whenever the
+      // group had an inline image, on the assumption that cohesion (image+text same page) must
+      // always win. splitTextOnlyGroupForRows() already handles a leading image correctly -- it's
+      // kept as a fixed, unsplit `prefix` -- so that guard's only effect was leaving a group with
+      // an image AND a body too long to fit at ANY span (even full page width) with no recovery
+      // at all: hard validation failure, no repair (confirmed 2026-07-28 from a real generation: a
+      // 1566-character paragraph needed 1320 characters' worth of room even at the maximum
+      // page-sized box). Per explicit user decision (2026-07-28): text must never be cut off, so
+      // this is now allowed to split -- but ONLY as an absolute last resort for image-bearing
+      // groups. Simply not fitting the CURRENT narrow band is not enough reason to break cohesion:
+      // check first whether promoting to full page width (the "too tall" branch below already does
+      // this) would let the whole group fit on one page with no split at all.
+      const allowSplit = !hasInlineImages
+        || sizeGroup(group, gridSpec.columns, gridSpec, textBlocks, lookup, forcedIds).totalRows > gridSpec.rows
+      if (allowSplit && remainingRows >= 2) {
+        const split = splitTextOnlyGroupForRows(entries, remainingRows, band.colSpan)
+        if (split && split.fitEntries.length > 0) {
+          const cursor = place(split.fitEntries, band.colStart, band.colSpan, rowCursor)
+          rowCursor = cursor + 1
+          entries = split.remainingEntries
+          groupContinued = entries.length > 0
+          continuedFromBleedPage = groupContinued && currentElements.some((el) => el.bleed === 'full')
+          totalRows = entries.reduce((sum, entry) => sum + entry.rows, 0)
+          if (entries.length === 0) return
+        }
+      }
+
+      // A continued group (groupContinued) must never resume in a DIFFERENT band on the SAME
+      // page as the chunk just placed. The cohesion validator computes each group's occupied
+      // region as one bounding rectangle over all its elements -- a chunk at the bottom of band 0
+      // and its continuation at the top of band 1 makes that rectangle span the entire page width
+      // and height, which then wrongly reports every OTHER group's element on that page as
+      // "inside" it, even though nothing actually overlaps on screen (confirmed 2026-07-28 from a
+      // real generation: a title+subtitle group was flagged as intruding into a body paragraph's
+      // group purely because the body's second half landed in the opposite band/corner). Only a
+      // fresh page keeps a continued group's bounding rectangle sane.
+      if (continuedFromBleedPage || groupContinued) {
+        flushPage()
+      } else {
+        bandIndex += 1
+        rowCursor = 1
+        if (bandIndex >= bands.length) flushPage()
+      }
+    }
+
+    // Too tall for a half-width band: re-measure at full width, and give the continuation a clean page.
+    if (totalRows > gridSpec.rows && bandCount > 1) {
+      const remainingSources = entries.map((entry) => entry.el.text_source).filter(Boolean)
+      const remainingImages = entries
+        .filter((entry) => entry.el.type === 'image')
+        .map((entry) => entry.el.id)
+        .filter(Boolean)
+      const wide = sizeGroup({ ...group, images: remainingImages, text_sources: remainingSources }, gridSpec.columns, gridSpec, textBlocks, lookup, forcedIds)
+      if (wide.entries.length > 0 && wide.totalRows <= gridSpec.rows) {
         flushPage()
         place(wide.entries, 1, gridSpec.columns, 1)
         flushPage()
         return
       }
-      entries = wide.entries
-      totalRows = wide.totalRows
+      if (wide.entries.length > 0) {
+        entries = wide.entries
+        totalRows = wide.totalRows
+      }
       flushPage()
       place(entries, 1, gridSpec.columns, 1)
       flushPage()
       return
     }
 
-    if (rowCursor + totalRows - 1 > gridSpec.rows) {
-      bandIndex += 1
-      rowCursor = 1
-      if (bandIndex >= bands.length) flushPage()
-    }
-
-    const band = bands[bandIndex]
+    const band = forcedBand || bands[bandIndex]
     const cursor = place(entries, band.colStart, band.colSpan, rowCursor)
     // One blank row between groups so adjacent groups read as separate units.
     rowCursor = cursor + 1
+    if (groupContinued) flushPage()
   })
   flushPage()
 
@@ -366,10 +687,24 @@ function buildLookup(plan) {
 }
 
 function gridSpecOf(plan, fallback = {}) {
+  // boxWidthMm/boxHeightMm/pageWidthMm/pageHeightMm from the plan's own page_size/margin_preset
+  // (2026-07-28) -- without these, every gridToMm/estimateTextCapacityMm call in this file
+  // silently fell back to A5 dimensions regardless of the plan's actual page_size (confirmed from
+  // a real B5 generation measured against A5's smaller content box throughout this repacker).
+  // buildContentGroupPlan() (the from-scratch builder) has no `plan` yet -- it passes page_size/
+  // margin_preset via `fallback` instead, so both callers resolve correctly.
+  const geometry = resolvePageGeometry(
+    plan?.grid_spec?.page_size ?? fallback.pageSize,
+    plan?.grid_spec?.margin_preset ?? fallback.marginPreset,
+  )
   return {
     columns: plan?.grid_spec?.columns ?? plan?.grid?.columns ?? fallback.columns ?? GRID_COLUMNS,
     rows: plan?.grid_spec?.rows ?? plan?.grid?.rows ?? fallback.rows ?? GRID_ROWS,
     gutterMm: plan?.grid_spec?.gutter_mm ?? fallback.gutterMm ?? 4,
+    boxWidthMm: geometry.textBoxWidthMm,
+    boxHeightMm: geometry.textBoxHeightMm,
+    pageWidthMm: geometry.pageWidthMm,
+    pageHeightMm: geometry.pageHeightMm,
   }
 }
 
@@ -377,7 +712,7 @@ function gridSpecOf(plan, fallback = {}) {
  * Repairs an existing plan by repacking its content groups. Preserves each element's identity,
  * role, text_source, and image fit/object_position; decides only which page and rectangle it gets.
  */
-export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = [], forcedFullBleedImages = []) {
+export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = [], forcedFullBleedImages = [], options = {}) {
   const groups = contentGroupModel?.groups
   if (!plan || !Array.isArray(plan.pages) || !Array.isArray(groups) || groups.length === 0) {
     return { plan, repaired: false, actions: [] }
@@ -388,7 +723,7 @@ export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = [
   if (usable.length === 0) return { plan, repaired: false, actions: [] }
 
   const forcedIds = new Set((forcedFullBleedImages || []).map((n) => `image_${n}`))
-  const { pages, bandCount } = packGroups(usable, gridSpec, textBlocks, buildLookup(plan), forcedIds)
+  const { pages, bandCount } = packGroups(usable, gridSpec, textBlocks, buildLookup(plan), forcedIds, options.imageAspectRatios || [])
   if (pages.length === 0) return { plan, repaired: false, actions: [] }
 
   return {
@@ -410,7 +745,7 @@ export function repairContentGroupLayout(plan, contentGroupModel, textBlocks = [
  */
 export function buildContentGroupPlan({
   contentGroupModel, textBlocks = [], gridSettings = {}, outputUnit = 'single_page',
-  forcedFullBleedImages = [],
+  forcedFullBleedImages = [], imageAspectRatios = [],
 } = {}) {
   const groups = contentGroupModel?.groups
   if (!Array.isArray(groups) || groups.length === 0) return null
@@ -419,6 +754,8 @@ export function buildContentGroupPlan({
     columns: gridSettings.columns,
     rows: gridSettings.rows,
     gutterMm: gridSettings.gutter_mm,
+    pageSize: gridSettings.page_size,
+    marginPreset: gridSettings.margin_preset,
   })
 
   const usable = groups.filter((g) => g.images.length > 0 || g.text_sources.length > 0)
@@ -426,7 +763,7 @@ export function buildContentGroupPlan({
 
   const forcedIds = new Set((forcedFullBleedImages || []).map((n) => `image_${n}`))
   const { pages } = packGroups(
-    usable, gridSpec, textBlocks, { imageById: new Map(), textBySource: new Map() }, forcedIds,
+    usable, gridSpec, textBlocks, { imageById: new Map(), textBySource: new Map() }, forcedIds, imageAspectRatios,
   )
   if (pages.length === 0) return null
 

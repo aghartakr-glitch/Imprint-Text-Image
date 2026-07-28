@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   PAGE_WIDTH_MM, PAGE_HEIGHT_MM, MARGIN_TOP_MM, MARGIN_BOTTOM_MM,
   MARGIN_INNER_MM, MARGIN_OUTER_MM, TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM,
-  CHAR_WIDTH_MM, LINE_HEIGHT_MM,
+  CHAR_WIDTH_MM, LINE_HEIGHT_MM, resolvePageGeometry,
 } from './layoutConstants.js'
 
 test('page and text-box dimensions match PRD 4.6', () => {
@@ -23,4 +23,18 @@ test('char/line size derived from 9pt/15pt typography', () => {
   assert.ok(Math.abs(CHAR_WIDTH_MM - 9 * 0.3528 * 0.9) < 1e-9)
   // 15pt (was 14pt) -- bumped 2026-07-27, see layoutConstants.js's BODY_LEADING_PT comment.
   assert.ok(Math.abs(LINE_HEIGHT_MM - 15 * 0.3528) < 1e-9)
+})
+
+test('resolvePageGeometry resolves B5 recommended dimensions', () => {
+  const geometry = resolvePageGeometry('B5', 'recommended')
+  assert.deepEqual(geometry, {
+    pageWidthMm: 176,
+    pageHeightMm: 250,
+    marginTopMm: 16,
+    marginBottomMm: 16,
+    marginInnerMm: 18,
+    marginOuterMm: 14,
+    textBoxWidthMm: 144,
+    textBoxHeightMm: 218,
+  })
 })

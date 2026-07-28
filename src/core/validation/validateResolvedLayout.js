@@ -9,8 +9,8 @@ import {
 // text box using the newly-available extra 2mm failed with a false "exceeds bottom boundary" error
 // (confirmed 2026-07-27: "TextBlock exceeds bottom boundary (y+h=177.8 > 176)"). Import the single
 // source of truth instead of duplicating it, so this can't drift again.
-const CONTENT_WIDTH_MM = TEXT_BOX_WIDTH_MM
-const CONTENT_HEIGHT_MM = TEXT_BOX_HEIGHT_MM
+const DEFAULT_CONTENT_WIDTH_MM = TEXT_BOX_WIDTH_MM
+const DEFAULT_CONTENT_HEIGHT_MM = TEXT_BOX_HEIGHT_MM
 
 function rectsOverlap(r1, r2) {
   return (
@@ -42,7 +42,9 @@ function isBodyRole(role) {
   return (role || 'body') === 'body' || role === 'continuation_body'
 }
 
-export function validateResolvedLayout(resolvedPages) {
+export function validateResolvedLayout(resolvedPages, { contentWidthMm = DEFAULT_CONTENT_WIDTH_MM, contentHeightMm = DEFAULT_CONTENT_HEIGHT_MM } = {}) {
+  const CONTENT_WIDTH_MM = contentWidthMm
+  const CONTENT_HEIGHT_MM = contentHeightMm
   const issues = []
   const textSourcePlacements = new Map()
 
@@ -372,7 +374,9 @@ export function validateResolvedLayout(resolvedPages) {
   }
 }
 
-export function assertResolvedPagesInsideBounds(resolvedPages) {
+export function assertResolvedPagesInsideBounds(resolvedPages, { contentWidthMm = DEFAULT_CONTENT_WIDTH_MM, contentHeightMm = DEFAULT_CONTENT_HEIGHT_MM } = {}) {
+  const CONTENT_WIDTH_MM = contentWidthMm
+  const CONTENT_HEIGHT_MM = contentHeightMm
   const issues = []
 
   resolvedPages.forEach((page, pageIdx) => {

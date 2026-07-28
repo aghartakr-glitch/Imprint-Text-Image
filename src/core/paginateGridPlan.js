@@ -102,6 +102,13 @@ function buildOverflowPages(segments, gridSpec) {
 
   const sameGroupGapMm = 1.2
   const newGroupGapMm = 5
+  // gridSpec.boxWidthMm/boxHeightMm reflect the plan's real page_size (2026-07-28) -- this
+  // function used to ignore its own gridSpec parameter entirely and hardcode A5's
+  // TEXT_BOX_WIDTH_MM/TEXT_BOX_HEIGHT_MM everywhere below, so overflow/continuation pages for a
+  // B5 or A4 document were paginated as if they were A5, capping how much text fit per page far
+  // below what the real, larger page could actually hold.
+  const boxWidthMm = gridSpec?.boxWidthMm ?? TEXT_BOX_WIDTH_MM
+  const boxHeightMm = gridSpec?.boxHeightMm ?? TEXT_BOX_HEIGHT_MM
 
   function flushPage() {
     if (currentPageElements.length > 0) {
@@ -122,7 +129,7 @@ function buildOverflowPages(segments, gridSpec) {
     let prev = null
     for (let i = startIndex; i < queue.length && queue[i].group_id === groupId; i += 1) {
       if (prev != null) height += sameGroupGapMm
-      height += estimateTextHeightMm(queue[i].text, queue[i].role)
+      height += estimateTextHeightMm(queue[i].text, queue[i].role, boxWidthMm)
       prev = queue[i]
     }
     return height
@@ -131,25 +138,25 @@ function buildOverflowPages(segments, gridSpec) {
   while (queue.length > 0) {
     const seg = queue[0]
     const gapMm = currentPageElements.length === 0 ? 0 : (seg.group_id != null && seg.group_id === lastGroupId ? sameGroupGapMm : newGroupGapMm)
-    const neededGroupHeight = seg.group_id != null ? groupHeight(0, seg.group_id) : estimateTextHeightMm(seg.text, seg.role)
+    const neededGroupHeight = seg.group_id != null ? groupHeight(0, seg.group_id) : estimateTextHeightMm(seg.text, seg.role, boxWidthMm)
 
-    if (currentPageElements.length > 0 && seg.group_id !== lastGroupId && yCursor + gapMm + neededGroupHeight <= TEXT_BOX_HEIGHT_MM) {
+    if (currentPageElements.length > 0 && seg.group_id !== lastGroupId && yCursor + gapMm + neededGroupHeight <= boxHeightMm) {
       // fits as a full group here; continue normally
-    } else if (currentPageElements.length > 0 && seg.group_id !== lastGroupId && neededGroupHeight <= TEXT_BOX_HEIGHT_MM && yCursor + gapMm + neededGroupHeight > TEXT_BOX_HEIGHT_MM) {
+    } else if (currentPageElements.length > 0 && seg.group_id !== lastGroupId && neededGroupHeight <= boxHeightMm && yCursor + gapMm + neededGroupHeight > boxHeightMm) {
       flushPage()
       continue
     }
 
     const yMm = yCursor + gapMm
-    const remainingHeight = TEXT_BOX_HEIGHT_MM - yMm
+    const remainingHeight = boxHeightMm - yMm
     if (remainingHeight <= 0) {
       flushPage()
       continue
     }
 
-    const desiredHeight = estimateTextHeightMm(seg.text, seg.role)
+    const desiredHeight = estimateTextHeightMm(seg.text, seg.role, boxWidthMm)
     const hMm = Math.min(desiredHeight, remainingHeight)
-    const capacity = estimateTextCapacityMm(TEXT_BOX_WIDTH_MM, hMm, seg.role)
+    const capacity = estimateTextCapacityMm(boxWidthMm, hMm, seg.role)
     const { slice, consumed } = desiredHeight <= remainingHeight
       ? { slice: seg.text, consumed: seg.text.length }
       : sliceAtWordBoundary(seg.text, Math.max(1, capacity))
@@ -165,7 +172,7 @@ function buildOverflowPages(segments, gridSpec) {
       id,
       type: 'text',
       role: seg.role,
-      box_mm: { xMm: 0, yMm, wMm: TEXT_BOX_WIDTH_MM, hMm },
+      box_mm: { xMm: 0, yMm, wMm: boxWidthMm, hMm },
     })
     currentPageSlices[id] = slice
     yCursor = yMm + hMm

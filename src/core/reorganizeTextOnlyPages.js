@@ -3,21 +3,56 @@ import {
   MIN_READABLE_COLUMN_WIDTH_MM,
 } from './layoutConstants.js'
 import { sliceAtWordBoundary } from './paginateGridPlan.js'
+import { isBodyLikeRole, textHeightMm } from './textMeasure.js'
 
 const BLOCK_GAP_MM = 3
 
 // Reorganize text-only pages into multi-column layouts. May return MORE pages than it was given
 // (a single page can spill into several once its text is re-fit into narrower columns), so callers
 // must treat the return value as the full replacement page list, not a 1:1 map.
-export function reorganizeTextOnlyPages(resolvedPages, userLayoutSettings = {}) {
-  return resolvedPages.flatMap((page) => {
-    if (Array.isArray(page.images) && page.images.length === 0 && Array.isArray(page.textBlocks) && page.textBlocks.length > 0) {
-      return createMultiColumnTextLayout(page, userLayoutSettings)
+export function reorganizeTextOnlyPages(resolvedPages, userLayoutSettings = {}, { contentWidthMm = TEXT_BOX_WIDTH_MM, contentHeightMm = TEXT_BOX_HEIGHT_MM } = {}) {
+  const output = []
+  let textOnlyRun = []
+
+  function flushTextOnlyRun() {
+    if (textOnlyRun.length === 0) return
+    output.push(...createMultiColumnTextLayoutForRun(textOnlyRun, userLayoutSettings, { contentWidthMm, contentHeightMm }))
+    textOnlyRun = []
+  }
+
+  resolvedPages.forEach((page) => {
+    const isTextOnly = Array.isArray(page.images) && page.images.length === 0 && Array.isArray(page.textBlocks) && page.textBlocks.length > 0
+    if (isTextOnly) {
+      textOnlyRun.push(page)
+      return
     }
-    return [page]
+    flushTextOnlyRun()
+    output.push(page)
   })
+  flushTextOnlyRun()
+
+  return breakConsecutiveImageOnlyPages(output)
 }
 
+function isImageOnlyPage(page) {
+  return Array.isArray(page.images) && page.images.length > 0 && (!Array.isArray(page.textBlocks) || page.textBlocks.length === 0)
+}
+
+function isPureTextPage(page) {
+  return Array.isArray(page.images) && page.images.length === 0 && Array.isArray(page.textBlocks) && page.textBlocks.length > 0
+}
+
+function breakConsecutiveImageOnlyPages(pages) {
+  const arranged = [...pages]
+  for (let i = 0; i < arranged.length - 1; i += 1) {
+    if (!isImageOnlyPage(arranged[i]) || !isImageOnlyPage(arranged[i + 1])) continue
+    const textIdx = arranged.findIndex((page, index) => index > i + 1 && isPureTextPage(page))
+    if (textIdx < 0) continue
+    const [textPage] = arranged.splice(textIdx, 1)
+    arranged.splice(i + 1, 0, textPage)
+  }
+  return arranged
+}
 // Only role: 'body' blocks are re-flowed into columns here. This function's character-capacity
 // math (CHAR_WIDTH_MM/LINE_HEIGHT_MM) assumes 9pt body text; heading-style roles (section_label,
 // case_title_ko, etc.) render much larger and bold via buildLatex.js's styleCommandForRole, so
@@ -44,7 +79,118 @@ function charsForHeight(heightMm, columnWidthMm) {
   return charsPerLine * lines
 }
 
-function createMultiColumnTextLayout(page, userLayoutSettings = {}) {
+function resolveReadableColumnCount(userLayoutSettings = {}, contentWidthMm = TEXT_BOX_WIDTH_MM) {
+  let columnCount = userLayoutSettings.columns || 2
+  if (columnCount < 1) columnCount = 1
+  if (columnCount > 6) columnCount = 6
+
+  const gutter = COLUMN_GUTTER_MM
+  const maxReadableColumns = Math.max(
+    1,
+    Math.floor((contentWidthMm + gutter) / (MIN_READABLE_COLUMN_WIDTH_MM + gutter)),
+  )
+  return Math.min(columnCount, maxReadableColumns)
+}
+
+function gapBetweenBlocks(prev, next) {
+  if (!prev) return 0
+  const prevGroup = prev.flow_group_id ?? prev.group_id
+  const nextGroup = next.flow_group_id ?? next.group_id
+  return prevGroup != null && nextGroup != null && prevGroup === nextGroup ? 1.2 : BLOCK_GAP_MM
+}
+
+function createMultiColumnTextLayoutForRun(pages, userLayoutSettings = {}, { contentWidthMm = TEXT_BOX_WIDTH_MM, contentHeightMm = TEXT_BOX_HEIGHT_MM } = {}) {
+  const allBlocks = pages.flatMap((page) => page.textBlocks || []).filter((block) => block.slice)
+  if (allBlocks.length === 0) return pages
+
+  const templatePage = pages[0]
+  const columnCount = resolveReadableColumnCount(userLayoutSettings, contentWidthMm)
+  const gutter = COLUMN_GUTTER_MM
+  const columnWidth = (contentWidthMm - gutter * (columnCount - 1)) / columnCount
+  const outputPages = []
+  let currentBlocks = []
+  let colIdx = 0
+  let yMm = 0
+  let prevPlaced = null
+
+  function flushPage() {
+    if (currentBlocks.length > 0) {
+      outputPages.push({ ...templatePage, images: [], textBlocks: currentBlocks })
+    }
+    currentBlocks = []
+    colIdx = 0
+    yMm = 0
+    prevPlaced = null
+  }
+
+  function advanceColumn() {
+    colIdx += 1
+    yMm = 0
+    prevPlaced = null
+    if (colIdx >= columnCount) flushPage()
+  }
+
+  function placeBlock(block, slice, hMm) {
+    const placed = {
+      ...block,
+      zone: {
+        xMm: colIdx * (columnWidth + gutter),
+        yMm,
+        wMm: columnWidth,
+        hMm,
+      },
+      slice,
+    }
+    currentBlocks.push(placed)
+    yMm += hMm
+    prevPlaced = placed
+  }
+
+  allBlocks.forEach((block) => {
+    const role = block.role || 'body'
+    let remaining = block.slice || ''
+    if (!remaining) return
+
+    while (remaining.length > 0) {
+      const gap = gapBetweenBlocks(prevPlaced, block)
+      if (yMm + gap >= contentHeightMm) advanceColumn()
+      else yMm += gap
+
+      if (!isBodyLikeRole(role)) {
+        const hMm = textHeightMm({ text: remaining, charCount: remaining.length, role, wMm: columnWidth })
+        if (currentBlocks.length > 0 && yMm + hMm > contentHeightMm) {
+          yMm -= gap
+          advanceColumn()
+          continue
+        }
+        placeBlock(block, remaining, Math.min(hMm, contentHeightMm))
+        remaining = ''
+        continue
+      }
+
+      const availableHeight = contentHeightMm - yMm
+      if (availableHeight < LINE_HEIGHT_MM) {
+        yMm -= gap
+        advanceColumn()
+        continue
+      }
+      const capacity = Math.max(1, charsForHeight(availableHeight, columnWidth))
+      const { slice, consumed } = sliceAtWordBoundary(remaining, capacity)
+      if (!slice) {
+        yMm -= gap
+        advanceColumn()
+        continue
+      }
+      const hMm = Math.min(textHeightMm({ text: slice, charCount: slice.length, role, wMm: columnWidth }), availableHeight)
+      placeBlock(block, slice, hMm)
+      remaining = remaining.slice(consumed)
+    }
+  })
+
+  flushPage()
+  return outputPages.length > 0 ? outputPages : pages
+}
+function createMultiColumnTextLayout(page, userLayoutSettings = {}, { contentWidthMm = TEXT_BOX_WIDTH_MM, contentHeightMm = TEXT_BOX_HEIGHT_MM } = {}) {
   // Heading-style roles (section_label, case_title_ko, title, etc.) keep whatever position/size
   // the LLM's own grid placement already gave them -- only body text gets re-flowed here.
   const nonBodyBlocks = page.textBlocks.filter((b) => !isReflowableBody(b))
@@ -54,13 +200,6 @@ function createMultiColumnTextLayout(page, userLayoutSettings = {}) {
     return [page]
   }
 
-  // Mixed heading/body overflow pages already carry deliberate source order from
-  // paginateGridPlan. Reflowing only the body blocks into columns while leaving headings behind
-  // separates a heading from its paragraph and can create orphan fragments like "제품입니다.".
-  // Keep these pages as a vertical reading sequence; reserve this reflow pass for pure body pages.
-  if (nonBodyBlocks.length > 0) {
-    return [page]
-  }
 
   // Body text starts below the lowest untouched heading, not at yMm=0 -- otherwise a reflowed
   // body column can land directly on top of a heading block occupying the same column (confirmed
@@ -71,29 +210,14 @@ function createMultiColumnTextLayout(page, userLayoutSettings = {}) {
     ? Math.max(...nonBodyBlocks.map((b) => b.zone.yMm + b.zone.hMm)) + BLOCK_GAP_MM
     : 0
 
-  // Determine column count: use user setting, or auto-detect based on text density
-  let columnCount = userLayoutSettings.columns || 2
-  if (columnCount < 1) columnCount = 1
-  if (columnCount > 6) columnCount = 6
-
+  const columnCount = resolveReadableColumnCount(userLayoutSettings, contentWidthMm)
   const gutter = COLUMN_GUTTER_MM
-
-  // The grid column count is an alignment guide for images/headings, not a mandate that body text
-  // must flow that narrow -- cap it so no column drops below MIN_READABLE_COLUMN_WIDTH_MM. A high
-  // grid setting (e.g. 5-6, chosen for image layout) still yields full-width or half-width body
-  // text when that's all the readable-width budget allows; a low setting (1-2) passes through
-  // unchanged since it was never going to be too narrow.
-  const maxReadableColumns = Math.max(
-    1,
-    Math.floor((TEXT_BOX_WIDTH_MM + gutter) / (MIN_READABLE_COLUMN_WIDTH_MM + gutter)),
-  )
-  columnCount = Math.min(columnCount, maxReadableColumns)
 
   // Gutter-aware: columnCount columns plus (columnCount-1) gutters must fit inside
   // TEXT_BOX_WIDTH_MM, otherwise the last column's right edge sails past the margin (confirmed
   // 2026-07-16: columns=5 put column 4's right edge at 132mm against a 116mm content box).
-  const columnWidth = (TEXT_BOX_WIDTH_MM - gutter * (columnCount - 1)) / columnCount
-  const pageHeight = TEXT_BOX_HEIGHT_MM
+  const columnWidth = (contentWidthMm - gutter * (columnCount - 1)) / columnCount
+  const pageHeight = contentHeightMm
   const blockPerColumn = Math.ceil(bodyBlocks.length / columnCount)
 
   const outputPages = []

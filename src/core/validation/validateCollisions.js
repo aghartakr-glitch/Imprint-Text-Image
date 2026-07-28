@@ -8,10 +8,9 @@ import {
   TEXT_IMAGE_MIN_GAP_MM,
   TEXT_TEXT_MIN_GAP_MM,
   IMAGE_IMAGE_MIN_GAP_MM,
-  PAGE_WIDTH_MM,
-  PAGE_HEIGHT_MM,
   GRID_COLUMNS,
   GRID_ROWS,
+  resolvePageGeometry,
 } from '../layoutConstants.js'
 
 // Get expanded bounding box with safe margins (mm)
@@ -20,9 +19,10 @@ import {
 // candidate correctly laid out on e.g. a user-chosen 4-column grid gets its col_start/col_span
 // mis-converted to mm using the hardcoded 6-column assumption, producing false collisions
 // between elements that don't actually overlap (confirmed 2026-07-09).
-function getExpandedBox(el, safeMarginMm = 1.5, columns = GRID_COLUMNS, rows = GRID_ROWS) {
+function getExpandedBox(el, safeMarginMm = 1.5, gridOptions = {}) {
+  const { columns = GRID_COLUMNS, rows = GRID_ROWS, gutterMm, boxWidthMm, boxHeightMm } = gridOptions
   // Use unified gridToMm conversion for consistency with renderer
-  const mmBox = gridToMm(el, { columns, rows })
+  const mmBox = gridToMm(el, { columns, rows, gutterMm, boxWidthMm, boxHeightMm })
 
   // For text boxes, add inner padding
   const innerPadding = el.type === 'text' ? TEXT_BOX_INNER_PADDING_MM : 0
@@ -115,6 +115,14 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
   const pages = Array.isArray(plan.pages) ? plan.pages : []
   const activeColumns = plan.grid_spec?.columns ?? plan.grid?.columns ?? GRID_COLUMNS
   const activeRows = plan.grid_spec?.rows ?? plan.grid?.rows ?? GRID_ROWS
+  const pageGeometry = resolvePageGeometry(plan.grid_spec?.page_size, plan.grid_spec?.margin_preset)
+  const gridOptions = {
+    columns: activeColumns,
+    rows: activeRows,
+    gutterMm: plan.grid_spec?.gutter_mm,
+    boxWidthMm: pageGeometry.textBoxWidthMm,
+    boxHeightMm: pageGeometry.textBoxHeightMm,
+  }
 
   // Minimum gaps (in grid units; will be converted to mm later)
   const MIN_GAP_STRICT = 1 // at least 1 gutter
@@ -138,8 +146,8 @@ export function validateCollisions(plan, { gridMode = 'strict', useExpandedBbox 
 
         // Phase 5: Use expanded bounding box collision check (mm coordinates)
         if (useExpandedBbox) {
-          const boxA = getExpandedBox(a, 1.5, activeColumns, activeRows)
-          const boxB = getExpandedBox(b, 1.5, activeColumns, activeRows)
+          const boxA = getExpandedBox(a, 1.5, gridOptions)
+          const boxB = getExpandedBox(b, 1.5, gridOptions)
 
           if (expandedBoxesOverlap(boxA, boxB)) {
             // Determine minimum required gap

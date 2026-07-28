@@ -93,19 +93,16 @@ function test4() {
   console.log('✓ Test 4: Column count validation')
 }
 
-// Test 5: Multiple blocks distributed across columns
+// Test 5: Multiple short blocks are packed vertically before opening a new column
 function test5() {
   const result = reorganizeTextOnlyPages(fixture3, { columns: 2 })
   assert.strictEqual(result[0].textBlocks.length, 3, 'Should preserve all text blocks')
-  // With 3 blocks and 2 columns: ceil(3/2) = 2 blocks per column
-  // Column 0: blocks 0-1; Column 1: block 2
   const block0 = result[0].textBlocks[0]
-  const block2 = result[0].textBlocks[2] // Third block should be in second column
-  const colWidth = (TEXT_BOX_WIDTH_MM - 4 * 1) / 2 // gutter-aware
-  const expectedBlock2X = 1 * (colWidth + 4) // col 1: position = col_index * (width + gutter)
+  const block2 = result[0].textBlocks[2]
   assert.strictEqual(block0.zone.xMm, 0, 'First block should start at x=0')
-  assert.strictEqual(block2.zone.xMm, expectedBlock2X, `Third block should be in second column at x=${expectedBlock2X}`)
-  console.log('✓ Test 5: Multiple blocks distributed across columns')
+  assert.strictEqual(block2.zone.xMm, 0, 'Short blocks should keep filling the first column while vertical space remains')
+  assert.ok(block2.zone.yMm > block0.zone.yMm, 'Later short blocks should stack below earlier blocks')
+  console.log('✓ Test 5: Multiple short blocks pack vertically before opening a new column')
 }
 
 // Test 6: Column spacing (gutter). columns=1 is never affected by the readable-width cap, so this
@@ -158,10 +155,7 @@ function test9() {
   console.log('✓ Test 9: a column count that was already readable is left unchanged')
 }
 
-// Test 10: heading-role blocks are left untouched (position/size), only role: 'body' is reflowed
-// (confirmed 2026-07-16: reflowing a section_label block with 9pt body-text capacity math gave it
-// a box too narrow for its actual bold 14pt rendering, which then visually overflowed into the
-// next column)
+// Test 10: heading-role blocks are reflowed with role-aware height, not body metrics.
 function test10() {
   const page = {
     type: 'layout-plan-page',
@@ -174,9 +168,9 @@ function test10() {
   }
   const result = reorganizeTextOnlyPages([page], { columns: 5 })
   const headingBlocks = result[0].textBlocks.filter((b) => b.role === 'section_label')
-  assert.deepEqual(headingBlocks.find((b) => b.id === 'p10').zone, { xMm: 0, yMm: 0, wMm: 20, hMm: 19.76 }, 'heading zone should be untouched')
-  assert.deepEqual(headingBlocks.find((b) => b.id === 'p11').zone, { xMm: 24, yMm: 0, wMm: 20, hMm: 9.88 }, 'heading zone should be untouched')
-  console.log('✓ Test 10: heading-role blocks keep their original position/size, unreflowed')
+  assert.ok(headingBlocks.every((b) => b.zone.wMm >= MIN_READABLE_COLUMN_WIDTH_MM), 'headings should use readable column width')
+  assert.ok(headingBlocks.every((b) => b.zone.hMm >= 3), 'headings should reserve role-aware height')
+  console.log('✓ Test 10: heading-role blocks reflow with role-aware height')
 }
 
 // Test 11: reflowed body text never overlaps an untouched heading block on the same page
@@ -204,20 +198,35 @@ function test11() {
 }
 
 
-// Test 12: mixed heading/body overflow pages preserve source order and are not body-only reflowed
+// Test 12: mixed heading/body pages reflow together, preserving order and adjacency.
 function test12() {
   const page = {
     type: 'layout-plan-page',
     images: [],
     textBlocks: [
-      { zone: { xMm: 0, yMm: 0, wMm: 116, hMm: 8 }, slice: 'DESIGN', role: 'section_label', id: 'h1' },
-      { zone: { xMm: 0, yMm: 11, wMm: 116, hMm: 30 }, slice: '제목 바로 아래에 붙어 있어야 하는 본문입니다.', role: 'body', id: 'b1' },
+      { zone: { xMm: 0, yMm: 0, wMm: 116, hMm: 8 }, slice: 'DESIGN', role: 'section_label', id: 'h1', group_id: 1 },
+      { zone: { xMm: 0, yMm: 11, wMm: 116, hMm: 30 }, slice: '제목 바로 아래에 붙어 있어야 하는 본문입니다.', role: 'body', id: 'b1', group_id: 1 },
     ],
   }
   const result = reorganizeTextOnlyPages([page], { columns: 2 })
-  assert.strictEqual(result.length, 1, 'mixed pages should remain a single page')
-  assert.deepStrictEqual(result[0].textBlocks, page.textBlocks, 'mixed heading/body pages should not be reflowed into detached body columns')
-  console.log('✓ Test 12: mixed heading/body text-only pages preserve source order')
+  assert.strictEqual(result.length, 1, 'mixed pages should remain a single page when content fits')
+  assert.deepStrictEqual(result[0].textBlocks.map((b) => b.id), ['h1', 'b1'])
+  assert.ok(result[0].textBlocks[1].zone.yMm > result[0].textBlocks[0].zone.yMm, 'body should stay after heading')
+  console.log('✓ Test 12: mixed heading/body text-only pages reflow together')
+}
+
+// Test 13: consecutive image-only pages are interrupted by the next available text-only page.
+function test13() {
+  const pages = [
+    { type: 'image-only', images: [{ path: '/1.jpg' }], textBlocks: [] },
+    { type: 'image-only', images: [{ path: '/2.jpg' }], textBlocks: [] },
+    { type: 'text-only', images: [], textBlocks: [{ zone: { xMm: 0, yMm: 0, wMm: 116, hMm: 30 }, slice: 'Text should interrupt image clustering.', role: 'body', id: 'b1' }] },
+  ]
+  const result = reorganizeTextOnlyPages(pages, { columns: 2 })
+  assert.strictEqual(result[0].images.length, 1)
+  assert.strictEqual(result[1].images.length, 0)
+  assert.strictEqual(result[2].images.length, 1)
+  console.log('✓ Test 13: consecutive image-only pages are interrupted by text')
 }
 // Run all tests
 try {
@@ -233,6 +242,7 @@ try {
   test10()
   test11()
   test12()
+  test13()
   console.log('\n✓ All reorganizeTextOnlyPages tests passed')
 } catch (err) {
   console.error('\n✗ Test failed:', err.message)

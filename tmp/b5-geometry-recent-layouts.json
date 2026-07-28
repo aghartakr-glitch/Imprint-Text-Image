@@ -1,0 +1,14 @@
+[
+  {
+    "layoutFamily": "balanced",
+    "compositionStrategy": "image_above_text"
+  },
+  {
+    "layoutFamily": "balanced",
+    "compositionStrategy": "image_above_text"
+  },
+  {
+    "layoutFamily": "balanced",
+    "compositionStrategy": "image_above_text"
+  }
+]

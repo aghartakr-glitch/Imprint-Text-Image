@@ -64,7 +64,7 @@ test('removes duplicate heading sources and rebuilds split content groups', () =
 })
 
 
-test('rebuilds a split group on a dedicated page instead of colliding with images', () => {
+test('rebuilds a split group in nearby free space without colliding with images', () => {
   const plan = basePlan([
     {
       page: 1,
@@ -87,5 +87,32 @@ test('rebuilds a split group on a dedicated page instead of colliding with image
   assert.equal(result.passed, true, JSON.stringify(result.issues))
   const groupPage = repaired.pages.find((page) => page.elements.some((el) => el.text_source === 'paragraph_4'))
   assert.ok(groupPage)
-  assert.equal(groupPage.elements.some((el) => el.type === 'image'), false)
+  assert.equal(groupPage.elements.some((el) => el.text_source === 'paragraph_5'), true)
+  assert.equal(groupPage.elements.some((el) => el.text_source === 'paragraph_6'), true)
+})
+
+
+test('uses a dedicated page only when nearby pages have no free space', () => {
+  const plan = basePlan([
+    {
+      page: 1,
+      elements: [
+        { id: 'image_1', type: 'image', role: 'hero', col_start: 1, col_span: 6, row_start: 1, row_span: 12, fit: 'contain', object_position: 'center' },
+        { id: 'g2_title_a', type: 'text', role: 'section_label', col_start: 1, col_span: 6, row_start: 1, row_span: 1, text_source: 'paragraph_4' },
+      ],
+    },
+    {
+      page: 2,
+      elements: [
+        { id: 'image_2', type: 'image', role: 'hero', col_start: 1, col_span: 6, row_start: 1, row_span: 12, fit: 'contain', object_position: 'center' },
+        { id: 'g2_body', type: 'text', role: 'body', col_start: 1, col_span: 6, row_start: 11, row_span: 2, text_source: 'paragraph_6' },
+      ],
+    },
+  ])
+
+  const { plan: repaired, repaired: didRepair, actions } = repairContentGroups(plan, textBlocks)
+  assert.equal(didRepair, true)
+  assert.ok(actions.some((action) => action.action === 'rebuild_content_group_on_dedicated_page'))
+  const result = validateLayoutPlan(repaired, { imageCount: 2, textBlocks })
+  assert.equal(result.passed, true, JSON.stringify(result.issues))
 })

@@ -12,6 +12,7 @@
 // never shrunk, summarized, or dropped.
 import { gridToMm } from '../gridToMm.js'
 import { estimateTextCapacityMm } from '../estimateTextCapacity.js'
+import { resolvePageGeometry } from '../layoutConstants.js'
 
 const OVERFLOW_TOLERANCE = 1.05 // must match validateLayoutTextCapacity's ratio threshold
 
@@ -67,8 +68,19 @@ export function repairTextOverflow(plan, textBlocks = []) {
   const columns = plan.grid_spec?.columns ?? plan.grid?.columns ?? 6
   const rows = plan.grid_spec?.rows ?? plan.grid?.rows ?? 12
   const gridSpec = plan.grid_spec || plan.grid
+  // boxWidthMm/boxHeightMm from the plan's own page_size/margin_preset (2026-07-28) -- without
+  // this, every capacity check here silently used gridToMm's A5 defaults regardless of the
+  // plan's actual page_size, so a real box that fits a B5/A4 page could still be "repaired" (or
+  // rejected as unfixable) using the wrong, smaller A5 numbers.
+  const pageGeometry = resolvePageGeometry(gridSpec?.page_size, gridSpec?.margin_preset)
   const gridOptions = gridSpec?.columns && gridSpec?.rows
-    ? { columns: gridSpec.columns, rows: gridSpec.rows, gutterMm: gridSpec.gutter_mm }
+    ? {
+      columns: gridSpec.columns,
+      rows: gridSpec.rows,
+      gutterMm: gridSpec.gutter_mm,
+      boxWidthMm: pageGeometry.textBoxWidthMm,
+      boxHeightMm: pageGeometry.textBoxHeightMm,
+    }
     : undefined
   const charCountMap = buildCharCountMap(textBlocks)
 
@@ -111,8 +123,17 @@ export function repairTextOverflow(plan, textBlocks = []) {
       const fallback = findFullPageSpan(el, charCount, columns, rows, gridOptions)
       if (fallback) {
         page.elements = page.elements.filter((e) => e !== el)
+        // The immediate next page in the array is very often NOT blank -- e.g. this document's
+        // "page_gallery" composition alternates full-bleed hero image pages with text pages, so
+        // pages[pageIndex + 1] can already hold a full-bleed image. Reusing that page and stamping
+        // the overflowing text across its full row/col span used to land the text directly on top
+        // of the image at identical coordinates (confirmed 2026-07-28: repro showed a moved
+        // body paragraph placed at the exact same box as an existing full-bleed hero image),
+        // which downstream collision repair then splayed into multiple full-height side-by-side
+        // copies. Only reuse the next page if it's genuinely empty; otherwise always insert a
+        // fresh blank page, matching this function's own "never touches neighboring content" intent.
         let nextPage = workingPlan.pages[pageIndex + 1]
-        if (!nextPage) {
+        if (!nextPage || nextPage.elements.length > 0) {
           nextPage = { page: page.page + 1, elements: [] }
           workingPlan.pages.splice(pageIndex + 1, 0, nextPage)
         }

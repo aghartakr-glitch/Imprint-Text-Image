@@ -27,9 +27,12 @@ export function gridToMm(element, {
 // Full-bleed box: ignores col/row placement entirely and spans the literal physical page edge to
 // edge, not just the margin-constrained text box. Paired with buildLatex.js's `image.fullBleed`
 // branch, which places these xMm/yMm as absolute physical-page coordinates instead of adding the
-// margin offset it uses for every other (grid-placed) element.
-export function gridToMmFullBleed() {
+// margin offset it uses for every other (grid-placed) element. pageWidthMm/pageHeightMm default to
+// A5 (this file's existing default) but should be passed explicitly whenever the plan's own
+// page_size is known, so a full-bleed image on a B5/A4 page actually bleeds to the real physical
+// edge instead of the A5 one (2026-07-28).
+export function gridToMmFullBleed(pageWidthMm = PAGE_WIDTH_MM, pageHeightMm = PAGE_HEIGHT_MM) {
   return {
-    xMm: 0, yMm: 0, wMm: PAGE_WIDTH_MM, hMm: PAGE_HEIGHT_MM,
+    xMm: 0, yMm: 0, wMm: pageWidthMm, hMm: pageHeightMm,
   }
 }

@@ -50,7 +50,7 @@
           "col_start": 2,
           "col_span": 3,
           "row_start": 2,
-          "row_span": 4
+          "row_span": 2
         },
         {
           "id": "p2_body",
@@ -60,7 +60,7 @@
           "col_start": 1,
           "col_span": 3,
           "row_start": 4,
-          "row_span": 4
+          "row_span": 2
         },
         {
           "id": "p3_label",
@@ -69,8 +69,8 @@
           "text_source": "paragraph_3",
           "col_start": 2,
           "col_span": 3,
-          "row_start": 3,
-          "row_span": 3
+          "row_start": 1,
+          "row_span": 2
         }
       ]
     }

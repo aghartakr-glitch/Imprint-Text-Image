@@ -7,6 +7,7 @@ import { repairTextOverflow } from './validation/repairTextOverflow.js'
 import { repairParagraphOrder } from './validation/repairParagraphOrder.js'
 import { compactOversizedTextSpans } from './validation/compactOversizedTextSpans.js'
 import { repairDuplicateHeadingSources } from './validation/repairDuplicateHeadingSources.js'
+import { repairMissingImages } from './validation/repairMissingImages.js'
 import { repairContentGroupLayout } from './validation/repairContentGroupLayout.js'
 import { repairCollisions } from './validation/repairCollisions.js'
 import { enforceGridOccupancy } from './validation/enforceGridOccupancy.js'
@@ -88,13 +89,20 @@ function processCandidate(rawPlan, index, validationOpts) {
     })
     if (didRepairDefaults) candidatePlan = defaultsRepaired
 
+    const { plan: imagesRepaired, repaired: didRepairImages } = repairMissingImages(candidatePlan, {
+      imageCount: validationOpts.imageCount,
+      contentGroupModel: validationOpts.contentGroupModel,
+      forcedFullBleedImages: validationOpts.forcedFullBleedImages,
+    })
+    if (didRepairImages) candidatePlan = imagesRepaired
+
     const { plan: overflowRepaired, repaired: didRepairOverflow } = repairTextOverflow(candidatePlan, textBlocks)
     if (didRepairOverflow) candidatePlan = overflowRepaired
 
     const { plan: orderRepaired, repaired: didRepairOrder } = repairParagraphOrder(candidatePlan)
     if (didRepairOrder) candidatePlan = orderRepaired
 
-    if (didRepairDefaults || didRepairOverflow || didRepairOrder) {
+    if (didRepairDefaults || didRepairImages || didRepairOverflow || didRepairOrder) {
       candidateResult = validateLayoutPlan(candidatePlan, validationOpts)
       repaired = true
     }
@@ -167,6 +175,7 @@ function processCandidate(rawPlan, index, validationOpts) {
     if (!candidateResult.passed && validationOpts.contentGroupModel) {
       const { plan: regrouped, repaired: didRegroup } = repairContentGroupLayout(
         candidatePlan, validationOpts.contentGroupModel, textBlocks, validationOpts.forcedFullBleedImages,
+        { imageAspectRatios: validationOpts.imageAspectRatios || [] },
       )
       if (didRegroup) {
         const revalidated = validateLayoutPlan(regrouped, validationOpts)
@@ -210,12 +219,12 @@ function processCandidate(rawPlan, index, validationOpts) {
 // -- this returns fallbackUsed=true and leaves the deterministic fallback plan to the caller
 // (runGeneration.mjs). Never throws.
 export async function callLayoutLLM({
-  promptContext, imageCount, textBlocks, contentGroupModel,
+  promptContext, imageCount, textBlocks, contentGroupModel, imageAspectRatios = [],
 }, options = {}) {
   const forcedFullBleedImages = promptContext?.userLayoutSettings?.forced_full_bleed_images ?? []
   const allowUnforcedFullBleed = promptContext?.userLayoutSettings?.allow_unforced_full_bleed !== false
   const validationOpts = {
-    imageCount, textBlocks, contentGroupModel, forcedFullBleedImages, allowUnforcedFullBleed,
+    imageCount, textBlocks, contentGroupModel, forcedFullBleedImages, allowUnforcedFullBleed, imageAspectRatios,
   }
   const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY
   const mockMode = options.mockMode ?? process.env.MOCK_MODE === 'true'

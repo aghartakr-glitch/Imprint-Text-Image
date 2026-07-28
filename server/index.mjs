@@ -5,7 +5,9 @@ import {
 } from 'node:fs'
 import { join, extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { unlink } from 'node:fs/promises'
 import Busboy from 'busboy'
+import sharp from 'sharp'
 import { runGeneration } from './runGeneration.mjs'
 import { ROOT, OUTPUTS_DIR } from './env.mjs'
 
@@ -32,6 +34,24 @@ const MIME_TYPES = {
   '.pdf': 'application/pdf', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
 }
 
+// XeLaTeX (via graphicx/xdvipdfmx) only reads a BoundingBox out of png/jpg/pdf/eps -- any other
+// uploaded format (webp, heic, gif, bmp, tiff, avif, ...) compiles with "Cannot determine size of
+// graphic ... (no BoundingBox)" and kills the whole run after real API cost was already spent
+// (confirmed 2026-07-28 from a real generation's main.log). Convert anything outside that supported
+// set to png right after upload, before it ever reaches the LLM/LaTeX pipeline.
+const LATEX_SUPPORTED_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.pdf'])
+
+async function normalizeImageFormat(filePath) {
+  const ext = extname(filePath)
+  if (LATEX_SUPPORTED_IMAGE_EXTENSIONS.has(ext.toLowerCase())) return filePath
+
+  const base = ext ? filePath.slice(0, -ext.length) : filePath
+  const convertedPath = `${base}.png`
+  await sharp(filePath).png().toFile(convertedPath)
+  await unlink(filePath)
+  return convertedPath
+}
+
 function sendJson(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(body))
@@ -46,7 +66,15 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
     // things like a Content-Type of "multipart/form-data" with no boundary= parameter, or a
     // missing/malformed Content-Type entirely. Without this try/catch, that throw is an uncaught
     // exception that crashes the whole Node process on a single bad request.
-    bb = Busboy({ headers: req.headers, limits: { files: 100, fileSize: 30 * 1024 * 1024 } })
+    // defParamCharset defaults to 'latin1' -- browsers send the filename= param as real UTF-8 bytes
+    // (e.g. a Korean filename), so without this every non-ASCII filename is mojibake by the time
+    // info.filename reaches the 'file' handler below, and the sanitizer then strips it down to a
+    // run of underscores (confirmed 2026-07-28: real uploads like "2_2. 데사우 바우하우스 건물
+    // 외관.jpg" were saved as "2_2.______________________________.jpg", losing every Korean
+    // character before any downstream code could ever use the filename for anything).
+    bb = Busboy({
+      headers: req.headers, defParamCharset: 'utf8', limits: { files: 100, fileSize: 30 * 1024 * 1024 },
+    })
   } catch (err) {
     return sendJson(res, 400, { ok: false, error: `잘못된 업로드 요청입니다: ${String(err.message || err)}` })
   }
@@ -128,6 +156,12 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
       return respond(500, { ok: false, error: String(err.message || err) })
     }
     if (imagePaths.length < 1) return respond(400, { ok: false, error: '이미지를 1장 이상 업로드해야 합니다' })
+    let normalizedImagePaths
+    try {
+      normalizedImagePaths = await Promise.all(imagePaths.map(normalizeImageFormat))
+    } catch (err) {
+      return respond(400, { ok: false, error: '이미지 형식을 읽을 수 없습니다: ' + String(err.message || err) })
+    }
     if (!text.trim()) return respond(400, { ok: false, error: '본문 텍스트를 입력해야 합니다' })
     let userControls = {}
     if (userControlsRaw) {
@@ -148,7 +182,7 @@ function handleGenerate(req, res, { uploadsDir, outputsDir, mockMode }) {
     try {
       console.log(`[DEBUG] apiKey received: ${apiKey ? `${apiKey.substring(0, 10)}...` : 'NONE'}, mockMode: ${mockMode}`)
       const result = await runGeneration({
-        imagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode, ...(apiKey && { apiKey }) }, userControls, userLayoutSettings,
+        imagePaths: normalizedImagePaths, text, title, outputsRoot: outputsDir, llmOptions: { mockMode, ...(apiKey && { apiKey }) }, userControls, userLayoutSettings,
       })
       // Phase 5-3: Handle LLM failure (fallback_used=true) → error response, not crash
       if (!result.ok) {

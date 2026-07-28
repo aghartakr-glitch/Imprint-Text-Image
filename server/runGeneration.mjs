@@ -1,6 +1,6 @@
 // server/runGeneration.mjs
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { analyzeInput } from '../src/core/analyzeInput.js'
 import { analyzeContentStructure } from '../src/core/contentStructure.js'
 import { buildImageMetadata, estimateImageHierarchy } from '../src/core/imageHierarchy.js'
@@ -51,7 +51,7 @@ import {
   writeDebugStage, summarizeResolvedPages, coordinateTable, overlapReport,
 } from './debugDump.mjs'
 import {
-  BODY_FONT_SIZE_PT, BODY_LEADING_PT, GRID_COLUMNS, GRID_ROWS,
+  BODY_FONT_SIZE_PT, BODY_LEADING_PT, GRID_COLUMNS, GRID_ROWS, resolvePageGeometry,
 } from '../src/core/layoutConstants.js'
 
 // Compact form sent to the LLM on every call -- the full imprint_pattern_library_v0.2.json (with
@@ -148,9 +148,16 @@ export async function runGeneration({
   // paragraphs, derived from the user's blank-line boundaries. Built from documentStructure's
   // blocks because those carry group_id; textBlocksAnalysis splits on blank lines only and has no
   // group information. Validation reads membership from this, never from the LLM's own output.
+  // imagePaths is index-aligned with image_1..image_N (see resolveGridPage.js's `image_(\d+)`
+  // convention), so its filenames -- which server/index.mjs now preserves correctly after the
+  // busboy UTF-8 filename fix -- double as an optional hint for which paragraph group an image
+  // belongs to when the user has named files to match their content (2026-07-28).
+  const imageFilenames = (imagePaths || []).map((p) => basename(p))
+
   const contentGroupModel = buildContentGroups({
     textBlocks: textBlocksAdvanced,
     imageCount: analysis.imageCount,
+    imageNames: imageFilenames,
   })
 
   // Match images to text blocks based on document structure
@@ -302,6 +309,7 @@ export async function runGeneration({
       textBlocks: textBlocksAdvanced,
       contentGroupModel,
       forcedFullBleedImages: userLayoutSettings.forced_full_bleed_images ?? [],
+      imageAspectRatios: imageRatios,
       allowUnforcedFullBleed: userLayoutSettings.allow_unforced_full_bleed !== false,
     })
     : null
@@ -328,7 +336,7 @@ export async function runGeneration({
       content_understanding: null, image_analysis: [], inferred_image_text_relations: [], reference_principles: null, layout_strategy_reasoning: null,
     }
     : await callLayoutLLM({
-      promptContext, imageCount: analysis.imageCount, textBlocks: textBlocksAdvanced, contentGroupModel,
+      promptContext, imageCount: analysis.imageCount, textBlocks: textBlocksAdvanced, contentGroupModel, imageAspectRatios: imageRatios,
     }, llmOptions)
 
   // LLM succeeded (or was skipped) - candidates available
@@ -368,6 +376,7 @@ export async function runGeneration({
       gridSettings: { ...gridSettings.resolved_grid_settings, ...gridSettings.grid_spec },
       outputUnit,
       forcedFullBleedImages: userLayoutSettings.forced_full_bleed_images ?? [],
+      imageAspectRatios: imageRatios,
     })
     const deterministicValidation = deterministicPlan
       ? validateLayoutPlan(deterministicPlan, {
@@ -439,6 +448,16 @@ export async function runGeneration({
 
   // 11-13. Layout Reconstructor -> Layout Refiner -> Layout Estimator, for every validated candidate
   // CRITICAL: Filter out candidates that fail resolved layout validation (hard-block)
+  const resolvedValidationFailures = []
+  function summarizeResolvedIssue(issue) {
+    return {
+      page: issue.page,
+      type: issue.type,
+      element_id: issue.element_id,
+      message: issue.message,
+    }
+  }
+
   const scoredCandidates = validatedCandidates.map((c, candidateIdx) => {
     const debugThisCandidate = candidateIdx === 0 // instrumentation only follows the first candidate
 
@@ -447,6 +466,8 @@ export async function runGeneration({
     const rawImageElementCount = (c.plan.pages || []).reduce(
       (sum, p) => sum + (p.elements || []).filter((el) => el.type === 'image').length, 0,
     )
+
+    const pageGeometry = resolvePageGeometry(c.plan.grid_spec?.page_size, c.plan.grid_spec?.margin_preset)
 
     const reconstructed = reconstructLayout({
       layoutPlan: c.plan, imagePaths, text, title, textBlocks: textBlocksAdvanced,
@@ -459,7 +480,14 @@ export async function runGeneration({
       throw new Error(`IMAGE_LOST_DURING_RECONSTRUCTION: candidate plan had ${rawImageElementCount} image element(s), 0 remain after reconstructLayout`)
     }
 
-    const { resolvedPages: refinedPages, refinements } = refineLayout(reconstructed, { imagePaths, imageAspectRatios: imageRatios })
+    const { resolvedPages: refinedPages, refinements } = refineLayout(reconstructed, {
+      imagePaths,
+      imageAspectRatios: imageRatios,
+      boxWidthMm: pageGeometry.textBoxWidthMm,
+      boxHeightMm: pageGeometry.textBoxHeightMm,
+      columns: c.plan.grid_spec?.columns,
+      gutterMm: c.plan.grid_spec?.gutter_mm,
+    })
     if (debugThisCandidate) {
       writeDebugStage('04-refined-pages.json', refinedPages)
       writeDebugStage('04-refined-summary.json', summarizeResolvedPages(refinedPages, 'refined'))
@@ -474,14 +502,20 @@ export async function runGeneration({
     // 2026-07-10: a large_100 rescale to full page width overrode a col_span=3 hero image,
     // pushing it into an adjacent column's text and failing collision validation).
     // Reorganize text-only pages into multi-column layouts
-    let finalResolvedPages = reorganizeTextOnlyPages(refinedPages, userLayoutSettings)
+    let finalResolvedPages = reorganizeTextOnlyPages(refinedPages, userLayoutSettings, {
+      contentWidthMm: pageGeometry.textBoxWidthMm,
+      contentHeightMm: pageGeometry.textBoxHeightMm,
+    })
     // Snapshot the pre-repair state (repair reassigns finalResolvedPages below, so this is the only
     // chance to capture what validation actually saw on the first pass).
     const preRepairPages = finalResolvedPages
 
     // Validation gate: check resolved mm-coordinates after distribution scaling
     console.log('[STEP] first resolved validation start')
-    let resolvedValidation = validateResolvedLayout(finalResolvedPages)
+    let resolvedValidation = validateResolvedLayout(finalResolvedPages, {
+      contentWidthMm: pageGeometry.textBoxWidthMm,
+      contentHeightMm: pageGeometry.textBoxHeightMm,
+    })
     console.log('[STEP] first resolved validation', resolvedValidation.passed ? 'PASSED' : `FAILED (${resolvedValidation.error_issues?.length || 0} errors)`)
 
     const firstValidationIssues = resolvedValidation.error_issues ? [...resolvedValidation.error_issues] : []
@@ -495,6 +529,8 @@ export async function runGeneration({
       // Try to repair
       const repairResult = repairResolvedLayout({
         resolvedPages: finalResolvedPages,
+        contentWidthMm: pageGeometry.textBoxWidthMm,
+        contentHeightMm: pageGeometry.textBoxHeightMm,
       })
 
       console.log(`[STEP] repair actions: ${repairResult.actions.length}`)
@@ -519,7 +555,10 @@ export async function runGeneration({
 
       // Re-validate after repair
       console.log('[STEP] second resolved validation start')
-      resolvedValidation = validateResolvedLayout(finalResolvedPages)
+      resolvedValidation = validateResolvedLayout(finalResolvedPages, {
+        contentWidthMm: pageGeometry.textBoxWidthMm,
+        contentHeightMm: pageGeometry.textBoxHeightMm,
+      })
       console.log('[STEP] second resolved validation', resolvedValidation.passed ? 'PASSED' : `FAILED (${resolvedValidation.error_issues?.length || 0} errors)`)
       secondValidationIssues = resolvedValidation.error_issues ? [...resolvedValidation.error_issues] : []
 
@@ -532,6 +571,14 @@ export async function runGeneration({
             console.error(`    - Page ${issue.page}: ${issue.type} (${issue.element_id}): ${issue.message}`)
           })
         }
+        const finalIssues = resolvedValidation.error_issues || []
+        resolvedValidationFailures.push({
+          candidate: c.candidateId,
+          first_validation: firstValidationIssues.slice(0, 5).map(summarizeResolvedIssue),
+          repair_actions: repairActions.slice(0, 8),
+          repair_unresolved: repairUnresolvedIssues.slice(0, 5),
+          second_validation: finalIssues.slice(0, 5).map(summarizeResolvedIssue),
+        })
         if (debugThisCandidate) writeDebugStage('06-validation-report.json', buildValidationReport())
         // Return undefined candidate
         return null
@@ -626,9 +673,13 @@ export async function runGeneration({
   // 15. LaTeX Renderer
   // CRITICAL: Final validation before LaTeX generation
   const finalPages = selected.resolvedPages
+  const selectedPageGeometry = resolvePageGeometry(selected.plan.grid_spec?.page_size, selected.plan.grid_spec?.margin_preset)
 
   // Assert: no pages exceed bounds
-  const boundaryIssues = assertResolvedPagesInsideBounds(finalPages)
+  const boundaryIssues = assertResolvedPagesInsideBounds(finalPages, {
+    contentWidthMm: selectedPageGeometry.textBoxWidthMm,
+    contentHeightMm: selectedPageGeometry.textBoxHeightMm,
+  })
   if (boundaryIssues.length > 0) {
     const errorMsg = `Final boundary check failed:\n${boundaryIssues.join('\n')}`
     console.error(`[GENERATION FAILED] ${errorMsg}`)
@@ -651,8 +702,12 @@ export async function runGeneration({
     }
   }
 
-  const mainTex = buildMainTex({ resolvedPages: finalPages, runningHeadText: userLayoutSettings.running_head_text })
-  const styleTex = buildStyleTex({ fontsDir })
+  const mainTex = buildMainTex({
+    resolvedPages: finalPages,
+    runningHeadText: userLayoutSettings.running_head_text,
+    geometry: selectedPageGeometry,
+  })
+  const styleTex = buildStyleTex({ fontsDir, geometry: selectedPageGeometry })
 
   const bestLayoutDir = writeBestLayoutSources(runDir, {
     mainTex,

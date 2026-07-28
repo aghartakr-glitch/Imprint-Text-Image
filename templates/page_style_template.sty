@@ -62,6 +62,16 @@
 % under full justification because TeX has only a handful of justifiable spaces per line to work
 % with. Ragged-right avoids that stretching entirely; line-break quality is otherwise unaffected.
 \newcommand{\NoHyphenRaggedRight}{\raggedright\hyphenpenalty=10000\exhyphenpenalty=10000\lefthyphenmin=64\righthyphenmin=64}
+% Heading-only variant: still never invents a hyphenation point mid-word (hyphenpenalty stays
+% maxed), but leaves \exhyphenpenalty at its normal low default so a REAL hyphen already in the
+% text (e.g. "MOHOLY-NAGY") remains a valid line break. Headings render far larger than body text
+% and are sometimes packed into a narrow half-width column next to an image -- a single
+% unbreakable hyphenated compound word can then be wider than the column itself and overflow past
+% the grid margin with nowhere to break (confirmed 2026-07-28: "LÁSZLÓ MOHOLY-NAGY" placed in a
+% ~55mm half-column overflowed because \exhyphenpenalty=10000 blocked the break at its own literal
+% hyphen). Body text keeps the fully-disabled \NoHyphenRaggedRight since a paragraph's many
+% available word-break points make this a non-issue there.
+\newcommand{\HeadingRaggedRight}{\raggedright\hyphenpenalty=10000\lefthyphenmin=64\righthyphenmin=64}
 \newcommand{\BodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont\NoHyphenRaggedRight #1\par}
 
 % Role-based text styles for modular paragraph layouts
@@ -74,9 +84,19 @@
 % Leading nudged +1pt again 2026-07-27 to match layoutConstants.js's ROLE_LEADING_PT bump (must be
 % kept in sync by hand) -- a single heading wrapped by LaTeX itself into two lines and two separate
 % heading blocks stacked by repairContentGroupLayout.js are now much closer in visual rhythm.
-\newcommand{\SectionTitleText}[1]{\fontsize{14pt}{19pt}\selectfont\bfseries\NoHyphenRaggedRight #1\par}
-\newcommand{\CaseTitleKoText}[1]{\fontsize{11pt}{15pt}\selectfont\bfseries\NoHyphenRaggedRight #1\par}
-\newcommand{\CaseTitleEnText}[1]{\fontsize{10pt}{14pt}\selectfont\bfseries\NoHyphenRaggedRight\MakeUppercase{#1}\par}
+% Every bold heading command below wraps its body in its OWN outer {...} group (matching
+% \TitleText's existing double-brace pattern) so \bfseries never escapes past the command that set
+% it. Without this, \bfseries set here stays active for the REST of the enclosing TeX group -- and
+% when a heading and its body text share one minipage (buildLatex.js's flowTextBlock(), used
+% whenever multiple text blocks belong to the same content group), that minipage IS one shared
+% group, so the heading's bold silently carried over into the following \BodyText call, which only
+% re-selects the SIZE (\selectfont), not the series -- rendering body text bold with no visual cue
+% why (confirmed 2026-07-28 from a real page: "전시 포스터와 인쇄물" section's body paragraph
+% rendered entirely in bold, immediately after its bold section-label heading, in the same
+% minipage). Body text must never be bold regardless of what heading precedes it in the same box.
+\newcommand{\SectionTitleText}[1]{{\fontsize{14pt}{19pt}\selectfont\bfseries\HeadingRaggedRight #1\par}}
+\newcommand{\CaseTitleKoText}[1]{{\fontsize{11pt}{15pt}\selectfont\bfseries\HeadingRaggedRight #1\par}}
+\newcommand{\CaseTitleEnText}[1]{{\fontsize{10pt}{14pt}\selectfont\bfseries\HeadingRaggedRight\MakeUppercase{#1}\par}}
 \newcommand{\CaseBodyText}[1]{\fontsize{{{BODY_FONT_SIZE}}pt}{{{BODY_LEADING}}pt}\selectfont\NoHyphenRaggedRight #1\par}
 \newcommand{\CreditText}[1]{\fontsize{7pt}{9pt}\selectfont\itshape #1\par}
 % 사진 출처 캡션: 이미지 우하단에 얹히므로 배경 칩을 깔아 사진 위에서도 읽히게 한다.
@@ -94,7 +114,7 @@
   Path = {{{FONTS_DIR}}/}, Extension = .{{HEADING_FONT_FILE_EXT}}, BoldFont = {{{HEADING_FONT_FILE_KR_BOLD}}},
 ]
 \newcommand{\HeadingFontSet}{\HeadingENFace\HeadingKRFace}
-\newcommand{\TitleText}[1]{{\HeadingFontSet\bfseries\fontsize{{{TITLE_FONT_SIZE}}pt}{{{TITLE_LEADING}}pt}\selectfont\NoHyphenRaggedRight #1\par}}
+\newcommand{\TitleText}[1]{{\HeadingFontSet\bfseries\fontsize{{{TITLE_FONT_SIZE}}pt}{{{TITLE_LEADING}}pt}\selectfont\HeadingRaggedRight #1\par}}
 
 \pagestyle{empty}
 \endinput

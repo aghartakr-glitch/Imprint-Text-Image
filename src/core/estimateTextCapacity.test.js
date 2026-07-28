@@ -95,3 +95,72 @@ test('does not flag a text_source element that fits comfortably within its box',
   const issues = validateLayoutTextCapacity(plan, textBlocks)
   assert.deepEqual(issues, [])
 })
+
+test('B5 grid_spec uses the larger B5 text box for overflow validation', () => {
+  const textBlocks = [{ id: 'p1', text: '가'.repeat(1566), char_count: 1566 }]
+  const basePlan = {
+    grid_spec: {
+      columns: 6, rows: 12, gutter_mm: 4, margin_preset: 'recommended',
+    },
+    pages: [{
+      page: 1,
+      elements: [{
+        id: 'body', type: 'text', role: 'body', text_source: 'p1', col_start: 1, col_span: 6, row_start: 1, row_span: 12,
+      }],
+    }],
+  }
+
+  const a5Issues = validateLayoutTextCapacity({
+    ...basePlan,
+    grid_spec: { ...basePlan.grid_spec, page_size: 'A5' },
+  }, textBlocks)
+  const b5Issues = validateLayoutTextCapacity({
+    ...basePlan,
+    grid_spec: { ...basePlan.grid_spec, page_size: 'B5' },
+  }, textBlocks)
+
+  assert.equal(a5Issues.length, 1)
+  assert.deepEqual(b5Issues, [])
+})
+test('allows overlong body text_source to continue when body overflow policy is enabled', () => {
+  const plan = {
+    overflow_policy: { body_overflow: 'continue_to_next_page' },
+    grid_spec: {
+      columns: 6, rows: 12, gutter_mm: 4, page_size: 'A5', margin_preset: 'recommended',
+    },
+    pages: [{
+      page: 1,
+      elements: [
+        {
+          id: 'body_start', type: 'text', role: 'body', text_source: 'paragraph_1', col_start: 1, col_span: 3, row_start: 1, row_span: 12,
+        },
+      ],
+    }],
+  }
+  const textBlocks = [{ id: 'p1', role: 'body', text: '가'.repeat(1566), char_count: 1566 }]
+
+  const issues = validateLayoutTextCapacity(plan, textBlocks)
+  assert.deepEqual(issues, [])
+})
+
+test('still flags overlong headings even when body overflow policy is enabled', () => {
+  const plan = {
+    overflow_policy: { body_overflow: 'continue_to_next_page' },
+    grid_spec: {
+      columns: 6, rows: 12, gutter_mm: 4, page_size: 'A5', margin_preset: 'recommended',
+    },
+    pages: [{
+      page: 1,
+      elements: [
+        {
+          id: 'heading_tight', type: 'text', role: 'section_label', text_source: 'paragraph_1', col_start: 1, col_span: 1, row_start: 1, row_span: 1,
+        },
+      ],
+    }],
+  }
+  const textBlocks = [{ id: 'p1', role: 'section_label', text: 'VERY LONG HEADING '.repeat(20), char_count: 360 }]
+
+  const issues = validateLayoutTextCapacity(plan, textBlocks)
+  assert.equal(issues.length, 1)
+  assert.equal(issues[0].elementId, 'heading_tight')
+})

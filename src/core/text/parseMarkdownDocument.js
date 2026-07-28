@@ -3,6 +3,36 @@
 // CRITICAL: Removes heading markers at INPUT stage, before layout.json creation
 // Outputs: textBlocks with role, cleanedText (no markers), markdown_level
 
+// A source/credit line ("Sweaty Betty", "Nike N7", "João Marcos Moreira") that the user typed on
+// its own line at the END of a paragraph, with no blank line separating it. Split out as its own
+// block so the layout stage can set it against its image instead of leaving it dangling at the end
+// of the body copy (2026-07-27: the user asked for these to sit on the image's bottom-right).
+// Detected by SHAPE only -- short, no sentence-ending punctuation, and not the paragraph's only
+// line -- so it works for any brand, artist, or institution in any language.
+const CREDIT_MAX_LENGTH = 34
+const SENTENCE_END = /[.!?。！？…]\s*$/
+
+// The break before a credit is whichever the user typed: a real newline, or the <br> the spec
+// defines as "line break inside the same text box" (confirmed 2026-07-27 against the real input --
+// every credit arrived as "...디자인했습니다.<br>Sweaty Betty", so a newline-only check found none).
+const LINE_BREAK = /\n|<br\s*\/?>/i
+
+function splitTrailingCreditLine(paragraphText) {
+  const parts = paragraphText.split(new RegExp(LINE_BREAK.source, 'gi'))
+  if (parts.length < 2) return null
+  const last = parts[parts.length - 1].trim()
+  if (!last || last.length > CREDIT_MAX_LENGTH || SENTENCE_END.test(last)) return null
+
+  // Require the preceding content to actually be prose, so a two-line heading is never split apart.
+  // The head is rebuilt from the original string (not re-joined from parts) so any other <br> the
+  // user placed mid-paragraph survives exactly as typed.
+  const lastBreak = paragraphText.search(new RegExp(`(?:${LINE_BREAK.source})(?![\\s\\S]*(?:${LINE_BREAK.source}))`, 'i'))
+  if (lastBreak < 0) return null
+  const head = paragraphText.slice(0, lastBreak).trim()
+  if (head.length < CREDIT_MAX_LENGTH * 2) return null
+  return { head, credit: last }
+}
+
 export function parseMarkdownDocument({ title, text }) {
   const titleStr = (typeof title === 'string' ? title.trim() : '').trim()
   const textStr = (typeof text === 'string' ? text : '').trim()
@@ -29,23 +59,48 @@ export function parseMarkdownDocument({ title, text }) {
     let currentParagraphDowngradedHeadingLevel = null
     let groupId = 0
 
+    // Single flush point for a completed paragraph, so the trailing-credit split applies wherever a
+    // paragraph ends (blank line, following heading, or end of input) rather than only in one of
+    // the three places this used to be duplicated.
+    const flushParagraph = () => {
+      if (currentParagraph.length === 0) return
+      const text = currentParagraph.join('\n').trim()
+      const split = currentParagraphRole === 'body' ? splitTrailingCreditLine(text) : null
+      if (split) {
+        textBlocks.push({
+          role: currentParagraphRole,
+          text: split.head,
+          markdown_level: null,
+          downgraded_heading_level: currentParagraphDowngradedHeadingLevel,
+          group_id: groupId,
+        })
+        textBlocks.push({
+          role: 'caption',
+          text: split.credit,
+          markdown_level: null,
+          downgraded_heading_level: null,
+          group_id: groupId,
+        })
+      } else {
+        textBlocks.push({
+          role: currentParagraphRole,
+          text,
+          markdown_level: null,
+          downgraded_heading_level: currentParagraphDowngradedHeadingLevel,
+          group_id: groupId,
+        })
+      }
+      currentParagraph = []
+      currentParagraphDowngradedHeadingLevel = null
+    }
+
     lines.forEach((line, lineIdx) => {
       const trimmed = line.trim()
 
       // Blank line = paragraph boundary AND group boundary
       if (!trimmed) {
-        if (currentParagraph.length > 0) {
-          textBlocks.push({
-            role: currentParagraphRole,
-            text: currentParagraph.join('\n').trim(),
-            markdown_level: null, // Already stripped
-            downgraded_heading_level: currentParagraphDowngradedHeadingLevel,
-            group_id: groupId,
-          })
-          currentParagraph = []
-          currentParagraphRole = 'body'
-          currentParagraphDowngradedHeadingLevel = null
-        }
+        flushParagraph()
+        currentParagraphRole = 'body'
         groupId += 1
         return
       }
@@ -55,17 +110,7 @@ export function parseMarkdownDocument({ title, text }) {
 
       if (parsed.type === 'heading') {
         // Flush current paragraph if exists (still the same group -- no blank line was hit)
-        if (currentParagraph.length > 0) {
-          textBlocks.push({
-            role: currentParagraphRole,
-            text: currentParagraph.join('\n').trim(),
-            markdown_level: null,
-            downgraded_heading_level: currentParagraphDowngradedHeadingLevel,
-            group_id: groupId,
-          })
-          currentParagraph = []
-          currentParagraphDowngradedHeadingLevel = null
-        }
+        flushParagraph()
 
         // Add heading as its own block
         const role = roleFromMarkdownLevel(parsed.markdown_level)
@@ -88,15 +133,7 @@ export function parseMarkdownDocument({ title, text }) {
     })
 
     // Flush remaining paragraph
-    if (currentParagraph.length > 0) {
-      textBlocks.push({
-        role: currentParagraphRole,
-        text: currentParagraph.join('\n').trim(),
-        markdown_level: null,
-        downgraded_heading_level: currentParagraphDowngradedHeadingLevel,
-        group_id: groupId,
-      })
-    }
+    flushParagraph()
   }
 
   return {

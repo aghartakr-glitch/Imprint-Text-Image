@@ -241,7 +241,12 @@ export function validateLayoutPlan(plan, {
           issues.push(`요소 ${el.id}: bleed는 "full"이거나 아예 없어야 합니다 (받은 값: ${el.bleed})`)
         }
         if (el.bleed === 'full' && elements.length > 1) {
-          issues.push(`요소 ${el.id}: bleed:"full"(전면 이미지)은 해당 페이지에 다른 요소가 없을 때만 사용할 수 있습니다 (page ${page.page}에 요소 ${elements.length}개 존재)`)
+          const imageBottomRow = el.row_start + el.row_span - 1
+          const otherElements = elements.filter((other) => other !== el)
+          const allOthersBelow = otherElements.every((other) => other.row_start > imageBottomRow)
+          if (!allOthersBelow) {
+            issues.push(`element ${el.id}: bleed:"full" cannot overlap or sit beside other elements (page ${page.page}); text may only continue below the contained full-page image.`)
+          }
         }
         const match = /^image_(\d+)$/.exec(el.id || '')
         if (match) {
@@ -500,10 +505,33 @@ export function validateLayoutPlan(plan, {
       // contains an image -- text-only group splitting is already covered by the group_id checks
       // above (and is downgraded there while its repair is rebuilt), whereas an image separated
       // from its own caption/heading is the specific failure this section exists to catch.
+      //
+      // Exception (2026-07-28, user decision): a body paragraph too long to fit in the same page
+      // as its image at ANY span -- even the full page -- has no other legal placement. Text must
+      // never be truncated or dropped, so overflow continuation wins over strict cohesion in this
+      // one case. This is NOT a blanket exemption for images: it only applies when (a) the image's
+      // own page still holds at least one of the group's text elements (the image isn't stranded
+      // alone), and (b) every OTHER page the group touches holds ONLY text whose text_source also
+      // appears on the image's page (proving it's a continuation of an overflowing paragraph, not
+      // an unrelated scatter of the group's content).
       const pagesUsed = [...new Set(placements.map((p) => p.page))]
       const hasImage = placements.some((p) => p.el.type === 'image')
       if (pagesUsed.length > 1 && hasImage) {
-        issues.push(`❌ 콘텐츠 그룹 분리: 그룹 ${gid}의 이미지와 관련 텍스트가 서로 다른 페이지(${pagesUsed.join(', ')})에 배치되었습니다. 이미지와 그 이미지에 대한 제목·본문·출처는 같은 페이지에 함께 두세요.`)
+        const imagePage = placements.find((p) => p.el.type === 'image').page
+        const onImagePage = placements.filter((p) => p.page === imagePage)
+        const imagePageHasText = onImagePage.some((p) => p.el.type === 'text')
+        const imagePageTextSources = new Set(
+          onImagePage.filter((p) => p.el.type === 'text' && p.el.text_source).map((p) => p.el.text_source),
+        )
+        const otherPagesAreContinuationOnly = pagesUsed
+          .filter((pageNo) => pageNo !== imagePage)
+          .every((pageNo) => placements
+            .filter((p) => p.page === pageNo)
+            .every((p) => p.el.type === 'text' && imagePageTextSources.has(p.el.text_source)))
+
+        if (!imagePageHasText || !otherPagesAreContinuationOnly) {
+          issues.push(`❌ 콘텐츠 그룹 분리: 그룹 ${gid}의 이미지와 관련 텍스트가 서로 다른 페이지(${pagesUsed.join(', ')})에 배치되었습니다. 이미지와 그 이미지에 대한 제목·본문·출처는 같은 페이지에 함께 두세요.`)
+        }
       }
 
       // Rule 2: nothing foreign inside the group's rectangle, evaluated per page.

@@ -112,7 +112,11 @@ test('buildStyleTex disables hyphenation and keeps all title/body roles ragged-r
   const tex = buildStyleTex({ fontsDir: '/abs/path/assets/fonts' })
   assert.match(tex, /\\RequirePackage\[none\]\{hyphenat\}/)
   assert.match(tex, /\\newcommand\{\\NoHyphenRaggedRight\}/)
-  assert.match(tex, /\\newcommand\{\\TitleText\}\[1\]\{\{[^\n]*\\NoHyphenRaggedRight/)
+  // Heading commands (TitleText) use \HeadingRaggedRight, not \NoHyphenRaggedRight -- headings
+  // still allow a break at a REAL hyphen already in the text (e.g. "MOHOLY-NAGY"), which body
+  // text's fully-disabled variant intentionally blocks (see page_style_template.sty).
+  assert.match(tex, /\\newcommand\{\\HeadingRaggedRight\}/)
+  assert.match(tex, /\\newcommand\{\\TitleText\}\[1\]\{\{[^\n]*\\HeadingRaggedRight/)
   assert.match(tex, /\\newcommand\{\\BodyText\}\[1\]\{[^\n]*\\NoHyphenRaggedRight/)
 })
 
@@ -231,4 +235,83 @@ test('buildPagesLatex falls back to plain contain rendering when no crop data is
 test('buildStyleTex loads trimclip so \\clipbox is defined', () => {
   const tex = buildStyleTex({ fontsDir: '/abs/path/assets/fonts' })
   assert.match(tex, /\\RequirePackage\{trimclip\}/)
+})
+
+test('buildPagesLatex flows same-group text blocks inside one outer textblock', () => {
+  const resolvedPages = [{
+    type: 'layout-plan-page',
+    images: [],
+    textBlocks: [
+      {
+        zone: { xMm: 0, yMm: 20, wMm: 56, hMm: 8 },
+        slice: '포토그램과 새로운 사진',
+        role: 'case_title_ko',
+        flow_group_id: 'group_7',
+      },
+      {
+        zone: { xMm: 0, yMm: 23, wMm: 56, hMm: 8 },
+        slice: '타이포포토',
+        role: 'case_title_ko',
+        flow_group_id: 'group_7',
+      },
+    ],
+  }]
+  const body = buildPagesLatex(resolvedPages)
+  const textblockCount = (body.match(/\\begin\{textblock\*\}/g) || []).length
+  assert.equal(textblockCount, 2, 'two same-group text blocks plus the page number should render as one content textblock')
+  // 2mm, matching repairContentGroupLayout.js's GAP_AFTER_HEADING_MM -- gapAfterTextRole() must
+  // stay in sync with the box_mm path's calibrated heading gap, not carry its own separate number.
+  assert.match(body, /\\CaseTitleKoText\{포토그램과 새로운 사진\}\\vspace\{2mm\}\n    \\CaseTitleKoText\{타이포포토\}/)
+})
+
+// Regression (2026-07-28, real generation): flow_group_id is a 0-based index, so the document's
+// very first group (flow_group_id: 0) is falsy in JS. flowKeyForTextBlock() used to check
+// `!tb?.flow_group_id`, so group 0's title+subtitle silently skipped the flowTextBlock() grouping
+// every OTHER group used, rendering with different (tighter, box_mm-derived) spacing than every
+// later group's title+subtitle pair -- confirmed from a real document where the first section's
+// title/subtitle gap visibly differed from the second section's, despite identical structure.
+test('a group with flow_group_id 0 (the document\'s first group) still flows into one textblock', () => {
+  const resolvedPages = [{
+    type: 'layout-plan-page',
+    images: [],
+    textBlocks: [
+      {
+        zone: {
+          xMm: 0, yMm: 0, wMm: 55.25, hMm: 12,
+        },
+        slice: 'JOHANNES ITTEN',
+        role: 'title',
+        flow_group_id: 0,
+      },
+      {
+        zone: {
+          xMm: 0, yMm: 13, wMm: 55.25, hMm: 6,
+        },
+        slice: '색채를 체계화한 교육자',
+        role: 'section_label',
+        flow_group_id: 0,
+      },
+    ],
+  }]
+  const body = buildPagesLatex(resolvedPages)
+  const textblockCount = (body.match(/\\begin\{textblock\*\}/g) || []).length
+  assert.equal(textblockCount, 2, 'the group-0 pair plus the page number should render as one content textblock, same as any other group')
+  assert.match(body, /\\TitleText\{JOHANNES ITTEN\}\\vspace\{2mm\}\n    \\SectionTitleText\{색채를 체계화한 교육자\}/)
+})
+
+test('buildStyleTex uses supplied page geometry instead of A5 defaults', () => {
+  const geometry = {
+    pageWidthMm: 176,
+    pageHeightMm: 250,
+    marginTopMm: 16,
+    marginBottomMm: 16,
+    marginInnerMm: 18,
+    marginOuterMm: 14,
+    textBoxWidthMm: 144,
+    textBoxHeightMm: 218,
+  }
+  const tex = buildStyleTex({ fontsDir: '/abs/path/assets/fonts', geometry })
+  assert.match(tex, /paperwidth=176mm/)
+  assert.match(tex, /paperheight=250mm/)
+  assert.doesNotMatch(tex, /paperwidth=148mm/)
 })

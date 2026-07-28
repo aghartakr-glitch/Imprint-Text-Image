@@ -1,3 +1,6 @@
+// A5 remains the default/fallback page size -- every constant below still describes A5 exactly as
+// before, so any caller that doesn't know about a specific generation's page_size (tests, legacy
+// call sites) keeps its old behavior unchanged.
 export const PAGE_WIDTH_MM = 148
 export const PAGE_HEIGHT_MM = 210
 
@@ -11,6 +14,53 @@ export const MARGIN_OUTER_MM = 14
 
 export const TEXT_BOX_WIDTH_MM = PAGE_WIDTH_MM - MARGIN_INNER_MM - MARGIN_OUTER_MM
 export const TEXT_BOX_HEIGHT_MM = PAGE_HEIGHT_MM - MARGIN_TOP_MM - MARGIN_BOTTOM_MM
+
+// Single source of truth for page_size/margin_preset -> real mm dimensions. Previously duplicated
+// (GridPresetManager.js kept its own separate copy) AND, critically, never actually consumed by
+// anything downstream of grid_spec generation -- every text-capacity/row-sizing calculation
+// (gridToMm, estimateTextCapacityMm, repairTextOverflow.js, repairContentGroupLayout.js) and even
+// the final rendered PDF (buildLatex.js's `\geometry{}`) used the hardcoded A5 constants above
+// regardless of what page_size was actually chosen. Confirmed 2026-07-28: a real generation with
+// page_size:"B5" (176x250mm, a genuinely larger page) was still measured against A5's 116x178mm
+// content box, so a paragraph that would fit comfortably on the real B5 page was rejected as
+// "overflowing" a box the layout was never actually going to use -- B5/A4 were selectable in the
+// UI but silently produced wrong results everywhere except the metadata field itself.
+export const PAGE_SIZES_MM = {
+  A5: { widthMm: 148, heightMm: 210 },
+  A4: { widthMm: 210, heightMm: 297 },
+  B5: { widthMm: 176, heightMm: 250 },
+}
+
+export const MARGIN_PRESETS_MM = {
+  recommended: {
+    top: 16, bottom: 16, inner: 18, outer: 14,
+  },
+  narrow: {
+    top: 12, bottom: 12, inner: 14, outer: 10,
+  },
+  wide: {
+    top: 20, bottom: 20, inner: 22, outer: 18,
+  },
+}
+
+// Resolves a plan's grid_spec.page_size/margin_preset into the real mm geometry every downstream
+// calculation needs. Unknown/missing values fall back to A5/recommended (this project's default),
+// so a plan that omits page_size entirely (legacy shape, or a test fixture) behaves exactly as it
+// did before this function existed.
+export function resolvePageGeometry(pageSize, marginPreset) {
+  const page = PAGE_SIZES_MM[pageSize] ?? PAGE_SIZES_MM.A5
+  const margins = MARGIN_PRESETS_MM[marginPreset] ?? MARGIN_PRESETS_MM.recommended
+  return {
+    pageWidthMm: page.widthMm,
+    pageHeightMm: page.heightMm,
+    marginTopMm: margins.top,
+    marginBottomMm: margins.bottom,
+    marginInnerMm: margins.inner,
+    marginOuterMm: margins.outer,
+    textBoxWidthMm: page.widthMm - margins.inner - margins.outer,
+    textBoxHeightMm: page.heightMm - margins.top - margins.bottom,
+  }
+}
 
 export const BODY_FONT_SIZE_PT = 9
 // Nudged 14 -> 15pt (2026-07-27): user reported the overall leading read as slightly cramped.
@@ -112,8 +162,18 @@ export const ROLE_LEADING_PT = {
 // Roles rendered \bfseries in the .sty run measurably wider per character than the same point
 // size in regular weight; padding the assumed character width keeps the readable-width estimate
 // from under-shooting for bold headings.
+// title's factor is measured, not guessed: a real XeLaTeX \settowidth compile of \TitleText
+// (28pt bold NotoSansKR, all-caps Latin) measured the 26-letter alphabet at 483.25pt = 170.5mm,
+// i.e. ~6.56mm/char average -- but the old 1.1 factor (assuming bold is WIDER than the shared
+// body-text calibration) predicted ~9.78mm/char, a 46% overestimate. That made any title over
+// ~11 characters ("BAUHAUS BUILDING", "WALTER GROPIUS") get predicted as needing 2 lines and
+// sized ~2.35x taller than its real 1-line render, leaving a large empty gap before the subtitle
+// below it -- confirmed 2026-07-28 from real output where short titles ("BAUHAUS", "CATHEDRAL")
+// stayed tight against their subtitle but longer ones visibly floated away from it, even though
+// the coded box-to-box gap was identical (1mm) in both cases. Solved for the factor that makes
+// the estimate match the measured 6.56mm/char: 6.56 / (28 * PT_TO_MM * CHAR_WIDTH_CALIBRATION_FACTOR).
 export const ROLE_BOLD_WIDTH_FACTOR = {
-  title: 1.1,
+  title: 0.74,
   section_title: 1.1,
   section_label: 1.1,
   case_title: 1.1,

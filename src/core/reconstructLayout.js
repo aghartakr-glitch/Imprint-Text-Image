@@ -1,6 +1,6 @@
 import { paginateGridPlan } from './paginateGridPlan.js'
 import { resolveGridPage } from './resolveGridPage.js'
-import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM } from './layoutConstants.js'
+import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM, resolvePageGeometry } from './layoutConstants.js'
 import { stripMarkdownHeadingMarkers } from './text/parseMarkdownDocument.js'
 
 // Spec section 9.2: converts an already-validated grid layout_plan into the actual page
@@ -41,9 +41,23 @@ export function reconstructLayout({
   // down to a handful of characters sized for a much smaller assumed box, then rendered into a
   // completely different, often much larger, real box -- the truncation looked arbitrary because
   // it was computed against a box that was never actually used for rendering).
+  // boxWidthMm/boxHeightMm come from the plan's OWN page_size/margin_preset (2026-07-28) -- gridToMm
+  // otherwise silently falls back to its A5 defaults for every page size, which is exactly how a
+  // real B5 generation got measured against A5's smaller content box everywhere downstream
+  // (confirmed from a real "grid_spec.page_size: B5" candidate: a paragraph that fit fine on B5's
+  // real, larger page was rejected as "overflowing" a box the layout was never going to use).
+  const pageGeometry = layoutPlan.grid_spec
+    ? resolvePageGeometry(layoutPlan.grid_spec.page_size, layoutPlan.grid_spec.margin_preset)
+    : null
   const gridSpec = layoutPlan.grid_spec
     ? {
-      columns: layoutPlan.grid_spec.columns, rows: layoutPlan.grid_spec.rows, gutterMm: layoutPlan.grid_spec.gutter_mm,
+      columns: layoutPlan.grid_spec.columns,
+      rows: layoutPlan.grid_spec.rows,
+      gutterMm: layoutPlan.grid_spec.gutter_mm,
+      boxWidthMm: pageGeometry.textBoxWidthMm,
+      boxHeightMm: pageGeometry.textBoxHeightMm,
+      pageWidthMm: pageGeometry.pageWidthMm,
+      pageHeightMm: pageGeometry.pageHeightMm,
     }
     : undefined
 
@@ -74,7 +88,7 @@ export function reconstructLayout({
       type: 'title-page',
       images: [],
       textZone: {
-        xMm: 0, yMm: 0, wMm: TEXT_BOX_WIDTH_MM, hMm: TEXT_BOX_HEIGHT_MM,
+        xMm: 0, yMm: 0, wMm: pageGeometry?.textBoxWidthMm ?? TEXT_BOX_WIDTH_MM, hMm: pageGeometry?.textBoxHeightMm ?? TEXT_BOX_HEIGHT_MM,
       },
       textSlice: null,
       title: stripMarkdownHeadingMarkers(title.trim()),
