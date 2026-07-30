@@ -62,14 +62,24 @@ test('a contain image keeps the planned box without cover-crop metadata', () => 
 })
 
 
-test('a full-bleed image (e.g. title-page has none, but any fullBleed image) is left untouched', () => {
+test('a full-bleed image is cover-cropped to fill the page edge-to-edge, not letterboxed', () => {
   const page = {
     type: 'full-bleed', images: [{
       path: '/img0.jpg', xMm: 0, yMm: 0, wMm: 148, hMm: 210, fullBleed: true,
     }], textZone: null, textSlice: null,
   }
   const result = refineLayout([page], { imagePaths: ['/img0.jpg'], imageAspectRatios: [1.5] })
-  assert.deepEqual(result.resolvedPages[0].images[0], page.images[0])
+  const img = result.resolvedPages[0].images[0]
+  // Box untouched: a full-bleed image still spans the whole page.
+  assert.equal(img.xMm, 0)
+  assert.equal(img.yMm, 0)
+  assert.equal(img.wMm, 148)
+  assert.equal(img.hMm, 210)
+  // Image (ratio 1.5) is proportionally wider than the page (148/210 ~= 0.70), so it's rendered at
+  // full page height * ratio = 315mm wide and the horizontal overflow is trimmed away, instead of
+  // shrinking to fit width and leaving letterbox bars top/bottom.
+  assert.ok(Math.abs(img.cover.renderWMm - 315) < 1e-9)
+  assert.ok(Math.abs(img.cover.trimLeftMm - 83.5) < 1e-9)
 })
 
 test('flags a page with no images and no text as empty', () => {

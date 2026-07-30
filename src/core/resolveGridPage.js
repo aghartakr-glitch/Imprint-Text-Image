@@ -23,7 +23,18 @@ export function resolveGridPage(elements, imagePaths, textSlicesByElementId = {}
         throw new Error(`이미지 요소 ${el.id}에 대응하는 업로드 이미지가 없습니다`)
       }
       images.push({
-        path, ...box, fullBleed: isFullBleed, objectPosition: el.object_position || 'center',
+        path,
+        ...box,
+        fullBleed: isFullBleed,
+        objectPosition: el.object_position || 'center',
+        // Full-bleed pages are supposed to fill the physical page edge-to-edge -- that's what
+        // "bleed: full" means in print. The LLM's own candidates set fit:"contain" on these
+        // (never "cover"), and resolveGridPage previously dropped el.fit entirely, so every
+        // full-bleed image rendered letterboxed (whichever dimension the image's own aspect ratio
+        // happened to fill first), leaving visible white margins instead of a true bleed. Force
+        // cover-crop for full-bleed regardless of what the plan says; non-full-bleed images keep
+        // whatever fit the plan specified (default to the prior contain behavior).
+        fit: isFullBleed ? 'cover' : (el.fit || 'contain'),
       })
     } else if (el.type === 'text') {
       const box = el.box_mm || gridToMm(el, gridSpec)

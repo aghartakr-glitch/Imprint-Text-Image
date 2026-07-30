@@ -49,7 +49,7 @@ test('bleed:"full" spans the literal physical page, ignoring col/row grid placem
   }]
   const result = resolveGridPage(elements, imagePaths, {})
   assert.deepEqual(result.images[0], {
-    path: '/img0.jpg', xMm: 0, yMm: 0, wMm: PAGE_WIDTH_MM, hMm: PAGE_HEIGHT_MM, fullBleed: true, objectPosition: 'center',
+    path: '/img0.jpg', xMm: 0, yMm: 0, wMm: PAGE_WIDTH_MM, hMm: PAGE_HEIGHT_MM, fullBleed: true, objectPosition: 'center', fit: 'cover',
   })
 })
 
