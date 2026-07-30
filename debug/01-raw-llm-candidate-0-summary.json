@@ -1,0 +1,14 @@
+{
+  "stage": "raw",
+  "page_count": 1,
+  "image_count": 1,
+  "text_block_count": 3,
+  "image_ids": [
+    "image_1"
+  ],
+  "text_block_ids": [
+    "p1_body",
+    "p2_body",
+    "p3_label"
+  ]
+}

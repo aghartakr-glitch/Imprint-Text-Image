@@ -1,0 +1,56 @@
+{
+  "candidate_id": "candidate_3",
+  "style": "Editorial",
+  "output_unit": "single_page",
+  "layout_family": "balanced",
+  "layout_purpose": "case_analysis",
+  "image_hierarchy": "equal_pair",
+  "image_text_relation": "text_explains_image",
+  "composition_strategy": "image_above_text",
+  "base_pattern_reference": "two_equal_images",
+  "layout_intent": "test",
+  "design_sequence": [
+    {
+      "step": 1,
+      "decision_type": "layout_family",
+      "value": "balanced",
+      "reason": "test"
+    }
+  ],
+  "grid": {
+    "columns": 6,
+    "rows": 12
+  },
+  "pages": [
+    {
+      "page": 1,
+      "elements": [
+        {
+          "id": "image_1",
+          "type": "image",
+          "role": "equal",
+          "page": 1,
+          "col_start": 1,
+          "col_span": 6,
+          "row_start": 1,
+          "row_span": 6,
+          "fit": "contain"
+        },
+        {
+          "id": "body_1",
+          "type": "text",
+          "role": "body",
+          "page": 1,
+          "col_start": 1,
+          "col_span": 6,
+          "row_start": 8,
+          "row_span": 5
+        }
+      ]
+    }
+  ],
+  "overflow_policy": {
+    "body_overflow": "continue_to_next_page"
+  },
+  "reason": "test"
+}

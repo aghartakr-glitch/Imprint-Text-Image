@@ -468,6 +468,44 @@ test('an image-bearing group that fits at full width is promoted whole, never sp
   const after = validateLayoutPlan(repacked, { imageCount: 1, textBlocks, contentGroupModel })
   assert.equal(after.issues.length, 0, JSON.stringify(after.issues))
 })
+test('an image-bearing group with many headings shrinks the image so body starts on the image page', () => {
+  const textBlocks = [
+    { id: 'p1', role: 'section_label', char_count: 12, group_id: 0 },
+    { id: 'p2', role: 'section_label', char_count: 12, group_id: 0 },
+    { id: 'p3', role: 'section_label', char_count: 12, group_id: 0 },
+    { id: 'p4', role: 'section_label', char_count: 12, group_id: 0 },
+    { id: 'p5', role: 'section_label', char_count: 12, group_id: 0 },
+    { id: 'p6', role: 'body', char_count: 900, group_id: 0 },
+  ]
+  const contentGroupModel = {
+    groups: [{
+      group: 0,
+      text_sources: ['paragraph_1', 'paragraph_2', 'paragraph_3', 'paragraph_4', 'paragraph_5', 'paragraph_6'],
+      images: ['image_1'],
+      char_count: 960,
+      has_body: true,
+    }],
+    groupByTextSource: new Map([
+      ['paragraph_1', 0], ['paragraph_2', 0], ['paragraph_3', 0],
+      ['paragraph_4', 0], ['paragraph_5', 0], ['paragraph_6', 0],
+    ]),
+    groupByImageId: new Map([['image_1', 0]]),
+  }
+  const plan = {
+    ...planWith([{ page: 1, elements: [] }]),
+    grid: { columns: 3, rows: 12 },
+    grid_spec: { columns: 3, rows: 12, gutter_mm: 6 },
+  }
+
+  const { plan: repacked } = repairContentGroupLayout(plan, contentGroupModel, textBlocks)
+  const placements = repacked.pages.flatMap((page) => page.elements.map((el) => ({ page: page.page, el })))
+  const imagePage = placements.find((p) => p.el.id === 'image_1').page
+  const bodyPlacements = placements.filter((p) => p.el.text_source === 'paragraph_6')
+
+  assert.ok(bodyPlacements.some((p) => p.page === imagePage), 'the body must begin on the image page')
+  const after = validateLayoutPlan(repacked, { imageCount: 1, textBlocks, contentGroupModel })
+  assert.equal(after.issues.length, 0, JSON.stringify(after.issues))
+})
 
 test('returns unchanged when there is no group model to work from', () => {
   const plan = splitPlan()

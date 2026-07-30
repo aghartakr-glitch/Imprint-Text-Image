@@ -419,9 +419,21 @@ function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set(),
     const firstBodyIndex = entries.findIndex(isBodyEntry)
     if (firstBodyIndex < 0) return null
 
-    const prefix = entries.slice(0, firstBodyIndex)
-    const prefixRows = prefix.reduce((sum, entry) => sum + entry.rows, 0)
-    const bodyRowsAvailable = maxRows - prefixRows
+    let prefix = entries.slice(0, firstBodyIndex)
+    let prefixRows = prefix.reduce((sum, entry) => sum + entry.rows, 0)
+    let bodyRowsAvailable = maxRows - prefixRows
+    if (bodyRowsAvailable < 2) {
+      let deficit = 2 - bodyRowsAvailable
+      prefix = prefix.map((entry) => {
+        if (deficit <= 0 || entry.el.type !== 'image') return entry
+        const reducible = Math.max(0, entry.rows - 2)
+        const reduction = Math.min(deficit, reducible)
+        deficit -= reduction
+        return { ...entry, rows: entry.rows - reduction }
+      })
+      prefixRows = prefix.reduce((sum, entry) => sum + entry.rows, 0)
+      bodyRowsAvailable = maxRows - prefixRows
+    }
     if (bodyRowsAvailable < 2) return null
 
     const firstBody = entries[firstBodyIndex]
@@ -551,6 +563,57 @@ function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set(),
     return cursor
   }
 
+  const rowsOf = (someEntries) => someEntries.reduce((sum, entry) => sum + entry.rows, 0)
+
+  const splitAtElementBoundary = (entries, maxRows) => {
+    if (maxRows <= 0 || entries.length === 0) return null
+    let usedRows = 0
+    let splitIndex = 0
+    while (splitIndex < entries.length && usedRows + entries[splitIndex].rows <= maxRows) {
+      usedRows += entries[splitIndex].rows
+      splitIndex += 1
+    }
+    if (splitIndex === 0) {
+      return {
+        fitEntries: [{ ...entries[0], rows: Math.max(1, maxRows) }],
+        remainingEntries: entries.slice(1),
+      }
+    }
+    if (splitIndex >= entries.length) return null
+    return {
+      fitEntries: entries.slice(0, splitIndex),
+      remainingEntries: entries.slice(splitIndex),
+    }
+  }
+
+  const placeEntriesAcrossFreshPages = (initialEntries, colStart, colSpan) => {
+    let remaining = initialEntries
+    let guard = 0
+    while (remaining.length > 0 && guard < 100) {
+      guard += 1
+      flushPage()
+
+      if (rowsOf(remaining) <= gridSpec.rows) {
+        place(remaining, colStart, colSpan, 1)
+        flushPage()
+        return
+      }
+
+      const split = splitTextOnlyGroupForRows(remaining, gridSpec.rows, colSpan)
+        || splitAtElementBoundary(remaining, gridSpec.rows)
+
+      if (!split || split.fitEntries.length === 0) {
+        place(remaining, colStart, colSpan, 1)
+        flushPage()
+        return
+      }
+
+      place(split.fitEntries, colStart, colSpan, 1)
+      remaining = split.remainingEntries
+      flushPage()
+    }
+  }
+
   groups.forEach((group) => {
     const forcedGroupImages = group.images.filter((id) => forcedIds.has(id))
     forcedGroupImages.forEach((imageId) => {
@@ -655,9 +718,13 @@ function packGroups(groups, gridSpec, textBlocks, lookup, forcedIds = new Set(),
         entries = wide.entries
         totalRows = wide.totalRows
       }
-      flushPage()
-      place(entries, 1, gridSpec.columns, 1)
-      flushPage()
+      placeEntriesAcrossFreshPages(entries, 1, gridSpec.columns)
+      return
+    }
+
+    if (totalRows > gridSpec.rows) {
+      const band = forcedBand || bands[bandIndex]
+      placeEntriesAcrossFreshPages(entries, band.colStart, band.colSpan)
       return
     }
 

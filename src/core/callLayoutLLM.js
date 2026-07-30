@@ -74,8 +74,18 @@ function processCandidate(rawPlan, index, validationOpts) {
   let candidateResult = validateLayoutPlan(candidatePlan, validationOpts)
   let repaired = didCompact || didDedup
 
-  // Debug instrumentation (first candidate only): capture exactly what the LLM returned, and what
-  // normalization changed, before any repair touches it. Pure logging -- no effect on the pipeline.
+  // Debug instrumentation: capture exactly what the LLM returned, and what normalization changed,
+  // before any repair touches it. Pure logging -- no effect on the pipeline.
+  // Every candidate gets its own indexed file (not just index 0) -- a generation asks for multiple
+  // candidates (usually 3), and when every one of them fails, the final error message pools
+  // validation issues from ALL of them together (see `issues = processed.flatMap(...)` below). With
+  // only candidate 0 ever dumped, an error mentioning e.g. "group 5 order violation" had no matching
+  // evidence in debug/ whenever that specific issue actually came from candidate 2 or 3, making the
+  // failure look unreproducible even though the data was simply never saved.
+  writeDebugStage(`01-raw-llm-candidate-${index}.json`, rawPlan)
+  writeDebugStage(`01-raw-llm-candidate-${index}-summary.json`, summarizePlan(rawPlan, 'raw'))
+  writeDebugStage(`02-normalized-candidate-${index}.json`, candidatePlan)
+  writeDebugStage(`02-normalized-candidate-${index}-summary.json`, summarizePlan(candidatePlan, 'normalized'))
   if (index === 0) {
     writeDebugStage('01-raw-llm-candidate.json', rawPlan)
     writeDebugStage('01-raw-llm-candidate-summary.json', summarizePlan(rawPlan, 'raw'))
@@ -204,6 +214,13 @@ function processCandidate(rawPlan, index, validationOpts) {
       repaired = true
     }
   }
+
+  // Final state after every repair attempt -- this is what actually gets pooled into the
+  // generation's fallbackReason if every candidate ends up failing, so it's the piece that was
+  // previously unrecoverable for any candidate other than index 0.
+  writeDebugStage(`07-candidate-${index}-final.json`, {
+    candidateId, passed: candidateResult.passed, issues: candidateResult.issues, repaired,
+  })
 
   return {
     candidateId, plan: candidatePlan, validation: candidateResult, repaired,

@@ -160,6 +160,16 @@ export async function runGeneration({
     imageNames: imageFilenames,
   })
 
+  // Debug instrumentation: the real per-paragraph char counts and derived group boundaries were
+  // previously invisible whenever a generation hard-failed before reaching reconstruction (03+
+  // debug stages only get written after a candidate passes validation) -- reproducing a
+  // content-group failure locally required guessing these numbers. Written unconditionally, before
+  // any LLM call, so it's always available regardless of how the generation ends.
+  writeDebugStage('00-text-blocks.json', textBlocksAdvanced.map((b) => ({
+    id: b.id, role: b.role, group_id: b.group_id, char_count: b.text ? b.text.length : 0,
+  })))
+  writeDebugStage('00-content-groups.json', contentGroupModel.groups)
+
   // Match images to text blocks based on document structure
   const imageTextMatching = matchImageToTextBlocks({
     imageCount: analysis.imageCount,

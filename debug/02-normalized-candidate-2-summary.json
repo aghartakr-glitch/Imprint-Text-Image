@@ -1,0 +1,12 @@
+{
+  "stage": "normalized",
+  "page_count": 1,
+  "image_count": 1,
+  "text_block_count": 1,
+  "image_ids": [
+    "image_1"
+  ],
+  "text_block_ids": [
+    "body_1"
+  ]
+}
