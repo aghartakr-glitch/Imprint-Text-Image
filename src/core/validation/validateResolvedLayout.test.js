@@ -122,3 +122,19 @@ test('allows resolved body continuation slices for the same text_source when the
 
   assert.equal(result.passed, true, JSON.stringify(result.error_issues))
 })
+
+// reorganizeTextOnlyPages.js can legitimately split one long paragraph into 3+ column-width
+// slices on a single page (confirmed 2026-07-30: a real run produced exactly this and failed
+// here even though every slice held distinct, non-overlapping text) -- placement count alone must
+// never be the duplicate signal, only a repeated identical slice is.
+test('allows 3+ distinct continuation slices for the same text_source (multi-column reflow)', () => {
+  const result = validateResolvedLayout([{
+    textBlocks: [
+      { id: 'b1', role: 'body', text_source: 'paragraph_4', slice: 'first third', zone: { xMm: 0, yMm: 0, wMm: 50, hMm: 40 } },
+      { id: 'b2', role: 'body', text_source: 'paragraph_4', slice: 'second third', zone: { xMm: 60, yMm: 0, wMm: 50, hMm: 40 } },
+      { id: 'b3', role: 'body', text_source: 'paragraph_4', slice: 'third third', zone: { xMm: 60, yMm: 45, wMm: 50, hMm: 40 } },
+    ],
+  }])
+
+  assert.equal(result.passed, true, JSON.stringify(result.error_issues))
+})

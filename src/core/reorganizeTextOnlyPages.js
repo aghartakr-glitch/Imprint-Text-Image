@@ -1,6 +1,5 @@
 import {
   TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM, COLUMN_GUTTER_MM, CHAR_WIDTH_MM, LINE_HEIGHT_MM,
-  MIN_READABLE_COLUMN_WIDTH_MM,
 } from './layoutConstants.js'
 import { sliceAtWordBoundary } from './paginateGridPlan.js'
 import { isBodyLikeRole, textHeightMm } from './textMeasure.js'
@@ -79,17 +78,16 @@ function charsForHeight(heightMm, columnWidthMm) {
   return charsPerLine * lines
 }
 
-function resolveReadableColumnCount(userLayoutSettings = {}, contentWidthMm = TEXT_BOX_WIDTH_MM) {
+// Used to always silently downgrade to whatever column count fit MIN_READABLE_COLUMN_WIDTH_MM,
+// which meant a user picking 3+ columns on A5 (~116mm content width) got 2 columns back with no
+// explanation -- their explicit choice was second-guessed. Per user decision (2026-08-04): always
+// honor the requested column count; readability at narrow widths is the user's call, not this
+// function's to override.
+function resolveReadableColumnCount(userLayoutSettings = {}, _contentWidthMm = TEXT_BOX_WIDTH_MM) {
   let columnCount = userLayoutSettings.columns || 2
   if (columnCount < 1) columnCount = 1
   if (columnCount > 6) columnCount = 6
-
-  const gutter = COLUMN_GUTTER_MM
-  const maxReadableColumns = Math.max(
-    1,
-    Math.floor((contentWidthMm + gutter) / (MIN_READABLE_COLUMN_WIDTH_MM + gutter)),
-  )
-  return Math.min(columnCount, maxReadableColumns)
+  return columnCount
 }
 
 function gapBetweenBlocks(prev, next) {

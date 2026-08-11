@@ -1,0 +1,140 @@
+[
+  {
+    "id": "p1",
+    "role": "title",
+    "group_id": 0,
+    "char_count": 31
+  },
+  {
+    "id": "p2",
+    "role": "section_label",
+    "group_id": 1,
+    "char_count": 9
+  },
+  {
+    "id": "p3",
+    "role": "case_title_ko",
+    "group_id": 2,
+    "char_count": 25
+  },
+  {
+    "id": "p4",
+    "role": "body",
+    "group_id": 2,
+    "char_count": 260
+  },
+  {
+    "id": "p5",
+    "role": "body",
+    "group_id": 3,
+    "char_count": 351
+  },
+  {
+    "id": "p6",
+    "role": "case_title_ko",
+    "group_id": 4,
+    "char_count": 27
+  },
+  {
+    "id": "p7",
+    "role": "body",
+    "group_id": 4,
+    "char_count": 262
+  },
+  {
+    "id": "p8",
+    "role": "body",
+    "group_id": 5,
+    "char_count": 294
+  },
+  {
+    "id": "p9",
+    "role": "case_title_ko",
+    "group_id": 6,
+    "char_count": 27
+  },
+  {
+    "id": "p10",
+    "role": "body",
+    "group_id": 6,
+    "char_count": 475
+  },
+  {
+    "id": "p11",
+    "role": "body",
+    "group_id": 7,
+    "char_count": 186
+  },
+  {
+    "id": "p12",
+    "role": "case_title_ko",
+    "group_id": 8,
+    "char_count": 19
+  },
+  {
+    "id": "p13",
+    "role": "body",
+    "group_id": 8,
+    "char_count": 213
+  },
+  {
+    "id": "p14",
+    "role": "body",
+    "group_id": 9,
+    "char_count": 424
+  },
+  {
+    "id": "p15",
+    "role": "case_title_ko",
+    "group_id": 10,
+    "char_count": 24
+  },
+  {
+    "id": "p16",
+    "role": "body",
+    "group_id": 10,
+    "char_count": 213
+  },
+  {
+    "id": "p17",
+    "role": "body",
+    "group_id": 11,
+    "char_count": 264
+  },
+  {
+    "id": "p18",
+    "role": "body",
+    "group_id": 12,
+    "char_count": 160
+  },
+  {
+    "id": "p19",
+    "role": "case_title_ko",
+    "group_id": 13,
+    "char_count": 29
+  },
+  {
+    "id": "p20",
+    "role": "body",
+    "group_id": 13,
+    "char_count": 435
+  },
+  {
+    "id": "p21",
+    "role": "body",
+    "group_id": 14,
+    "char_count": 236
+  },
+  {
+    "id": "p22",
+    "role": "body",
+    "group_id": 15,
+    "char_count": 197
+  },
+  {
+    "id": "p23",
+    "role": "body",
+    "group_id": 16,
+    "char_count": 233
+  }
+]

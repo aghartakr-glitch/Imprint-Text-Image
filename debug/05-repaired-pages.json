@@ -1,64 +1,42 @@
 [
   {
     "type": "layout-plan-page",
-    "images": [
-      {
-        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785227446511_6_4._Type_Exhibition_image__7_.jpg",
-        "xMm": 0,
-        "yMm": 84.6875,
-        "wMm": 116.66666666666667,
-        "hMm": 61.75,
-        "fullBleed": false,
-        "objectPosition": "center",
-        "fit": "contain"
-      }
-    ],
+    "images": [],
     "textZone": {
       "xMm": 0,
       "yMm": 0,
       "wMm": 178,
-      "hMm": 27.875
+      "hMm": 12.700800000000001
     },
-    "textSlice": "TYPOGRAPHY: THE VISIBLE FORM OF LANGUAGE",
+    "textSlice": "The Architecture of Remembering",
     "textBlocks": [
       {
         "zone": {
           "xMm": 0,
           "yMm": 0,
-          "wMm": 178,
-          "hMm": 27.875
+          "wMm": 56.666666666666664,
+          "hMm": 55.24848
         },
-        "slice": "TYPOGRAPHY: THE VISIBLE FORM OF LANGUAGE",
+        "slice": "The Architecture of Remembering",
         "role": "title",
-        "id": "para_1",
+        "id": "para_title",
         "text_source": "paragraph_1",
-        "group_id": 0
+        "group_id": 0,
+        "flow_group_id": 0
       },
       {
         "zone": {
           "xMm": 0,
-          "yMm": 50.8125,
-          "wMm": 116.66666666666667,
-          "hMm": 10.9375
+          "yMm": 58.24848,
+          "wMm": 56.666666666666664,
+          "hMm": 6.7032
         },
-        "slice": "LETTERS IN SPACE",
+        "slice": "DO HO SUH",
         "role": "section_label",
         "id": "para_2",
         "text_source": "paragraph_2",
-        "group_id": 0
-      },
-      {
-        "zone": {
-          "xMm": 0,
-          "yMm": 169.375,
-          "wMm": 178,
-          "hMm": 78.6875
-        },
-        "slice": "Typography gives language a visible body. A word is not experienced only through its meaning, but also through its size, weight, spacing, position, and material. On a printed page, letters establish the rhythm of reading. In an exhibition, they become part of the architecture. Large titles attract attention from a distance, while smaller texts invite the viewer to approach and read more carefully. Typography can therefore guide movement, organize information, and shape the atmosphere of a space. When letters move beyond the page, reading becomes a physical experience. A viewer may turn, walk, stop, or change distance in response to the arrangement of text. Scale creates authority, contrast creates visibility, and placement determines the order in which information is encountered. Typography is no longer simply placed inside a space; it actively",
-        "role": "body",
-        "id": "para_3",
-        "text_source": "paragraph_3",
-        "group_id": 1
+        "group_id": 1,
+        "flow_group_id": 1
       }
     ]
   },
@@ -66,80 +44,14 @@
     "type": "layout-plan-page",
     "images": [
       {
-        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785227446424_1_4._Type_Exhibition_image__2_.jpg",
+        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785917446305_1_1__1_.png",
         "xMm": 0,
         "yMm": 0,
         "wMm": 210,
         "hMm": 297,
         "fullBleed": true,
-        "objectPosition": "center"
-      }
-    ],
-    "textZone": null,
-    "textSlice": null,
-    "textBlocks": []
-  },
-  {
-    "type": "layout-plan-page",
-    "images": [
-      {
-        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785227446424_2_4._Type_Exhibition_image__3_.jpg",
-        "xMm": 61.333333333333336,
-        "yMm": 33.875,
-        "wMm": 116.66666666666667,
-        "hMm": 61.75,
-        "fullBleed": false,
         "objectPosition": "center",
         "fit": "contain"
-      }
-    ],
-    "textZone": {
-      "xMm": 0,
-      "yMm": 0,
-      "wMm": 178,
-      "hMm": 10.9375
-    },
-    "textSlice": "THE CONSTRUCTION OF LETTERS",
-    "textBlocks": [
-      {
-        "zone": {
-          "xMm": 0,
-          "yMm": 0,
-          "wMm": 178,
-          "hMm": 10.9375
-        },
-        "slice": "THE CONSTRUCTION OF LETTERS",
-        "role": "section_label",
-        "id": "para_4",
-        "text_source": "paragraph_4",
-        "group_id": 2
-      },
-      {
-        "zone": {
-          "xMm": 0,
-          "yMm": 118.5625,
-          "wMm": 178,
-          "hMm": 129.5
-        },
-        "slice": "Although letters appear familiar and natural, every character is carefully constructed. Vertical strokes, curves, diagonals, and empty spaces must be balanced so that each letter remains recognizable while belonging to the same alphabet. Early type designers often used grids and geometric proportions to establish visual consistency. Yet mathematical equality does not always create optical balance. Circular and diagonal forms frequently require subtle adjustments to appear equal to straight forms. The history of letterforms also reflects the tools used to produce them. The movement of the pen remains visible in serif typefaces, while printing introduced more regular and repeatable forms. Digital technology later transformed letters into flexible systems that can change in weight, width, and proportion. Typography preserves the memory of handwriting, machinery, and software within the shapes of the alphabet. A typeface is not a collection of independent letters. It is a system of uppercase and lowercase characters, numbers, punctuation marks, symbols, and spaces. These elements must share a common visual language while remaining different enough to be clearly recognized. Repeated stroke weights, curves, proportions, and terminals create unity across the entire character set. Consistency does not mean that every glyph should look the same. Readability depends on distinction. Similar letters must contain enough visual difference to prevent confusion, while",
-        "role": "body",
-        "id": "para_5",
-        "text_source": "paragraph_5",
-        "group_id": 2
-      }
-    ]
-  },
-  {
-    "type": "layout-plan-page",
-    "images": [
-      {
-        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785227446426_4_4._Type_Exhibition_image__5_.jpg",
-        "xMm": 0,
-        "yMm": 0,
-        "wMm": 210,
-        "hMm": 297,
-        "fullBleed": true,
-        "objectPosition": "center"
       }
     ],
     "textZone": null,
@@ -149,124 +61,41 @@
   {
     "type": "layout-plan-page",
     "images": [],
-    "textZone": {
-      "xMm": 0,
-      "yMm": 0,
-      "wMm": 178,
-      "hMm": 111.13199999999999
-    },
-    "textSlice": "participates in constructing that space. The surrounding architecture also changes how letters are perceived. A word printed in a book remains within the limits of the page, but a word installed on a wall enters into a relationship with light, surface, distance, and the movement of the viewer. Its meaning is affected by whether it appears above the head, near the floor, across a corner, or behind another structure. The act of reading is therefore shaped by the body as much as by the eye. Typography may slow a visitor down, draw attention toward a particular direction, or establish a sequence between different parts of an exhibition. It can divide a large interior into smaller zones or connect separate spaces through a repeated visual language. In this context, letters function as both information and environment. Their scale can make language feel public and collective, while smaller forms create a more private encounter. A monumental title may announce an institutional voice, whereas handwritten or irregular lettering may suggest intimacy, immediacy, or personal expression. Typography in space is thus never neutral. It establishes relationships between language, authority, architecture, and the people who move through them.",
-    "textBlocks": [
-      {
-        "zone": {
-          "xMm": 0,
-          "yMm": 0,
-          "wMm": 56.666666666666664,
-          "hMm": 265
-        },
-        "slice": "participates in constructing that space. The surrounding architecture also changes how letters are perceived. A word printed in a book remains within the limits of the page, but a word installed on a wall enters into a relationship with light, surface, distance, and the movement of the viewer. Its meaning is affected by whether it appears above the head, near the floor, across a corner, or behind another structure. The act of reading is therefore shaped by the body as much as by the eye. Typography may slow a visitor down, draw attention toward a particular direction, or establish a sequence between different parts of an exhibition. It can divide a large interior into smaller zones or connect separate spaces through a repeated visual language. In this context, letters function as both information and environment. Their scale can make language feel public and collective, while smaller forms create a more private encounter. A monumental",
-        "role": "body",
-        "id": "body_overflow_0"
-      },
-      {
-        "zone": {
-          "xMm": 60.666666666666664,
-          "yMm": 0,
-          "wMm": 56.666666666666664,
-          "hMm": 86.5242
-        },
-        "slice": "title may announce an institutional voice, whereas handwritten or irregular lettering may suggest intimacy, immediacy, or personal expression. Typography in space is thus never neutral. It establishes relationships between language, authority, architecture, and the people who move through them.",
-        "role": "body",
-        "id": "body_overflow_0"
-      },
-      {
-        "zone": {
-          "xMm": 60.666666666666664,
-          "yMm": 89.5242,
-          "wMm": 56.666666666666664,
-          "hMm": 175.4758
-        },
-        "slice": "punctuation and numbers must feel connected to the alphabet around them. Type design is therefore an act of organizing variation: many different signs are brought together without losing their individual functions. The designer must consider not only the appearance of each glyph but also the relationships that emerge when characters are placed beside one another. A letter that appears balanced in isolation may produce an awkward gap or excessive density within a word. For this reason, the construction of type extends beyond drawing outlines. It includes the design of side bearings, kerning pairs, word spaces, line",
-        "role": "body",
-        "id": "body_overflow_1"
-      },
-      {
-        "zone": {
-          "xMm": 121.33333333333333,
-          "yMm": 0,
-          "wMm": 56.666666666666664,
-          "hMm": 265
-        },
-        "slice": "spacing, and the overall color of a paragraph. Typography is shaped as much by empty space as by printed form. The distance between letters, words, lines, and punctuation determines how smoothly a text can be read. Good spacing is rarely achieved by applying identical measurements everywhere. Different shapes create different visual gaps, so the designer must judge space optically rather than mechanically. The space between an uppercase A and V, for example, behaves differently from the space between two vertical forms. Curves, diagonals, and open counters all affect how nearby characters are perceived. The typographer repeatedly corrects these differences so that the final text appears regular, even when its measurements are not. This apparent regularity is the result of numerous small and often invisible decisions. Punctuation also controls the rhythm and tone of language. A comma creates a pause, quotation marks introduce another",
-        "role": "body",
-        "id": "body_overflow_1"
-      }
-    ]
-  },
-  {
-    "type": "layout-plan-page",
-    "images": [
-      {
-        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785227446511_7_4._Type_Exhibition_image__8_.jpg",
-        "xMm": 0,
-        "yMm": 0,
-        "wMm": 210,
-        "hMm": 297,
-        "fullBleed": true,
-        "objectPosition": "center"
-      }
-    ],
-    "textZone": null,
-    "textSlice": null,
-    "textBlocks": []
-  },
-  {
-    "type": "layout-plan-page",
-    "images": [
-      {
-        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785227446511_5_4._Type_Exhibition_image__6_.jpg",
-        "xMm": 0,
-        "yMm": 33.875,
-        "wMm": 178,
-        "hMm": 61.75,
-        "fullBleed": false,
-        "objectPosition": "center",
-        "fit": "contain"
-      }
-    ],
     "textZone": {
       "xMm": 0,
       "yMm": 0,
       "wMm": 116.66666666666667,
-      "hMm": 10.9375
+      "hMm": 5.292
     },
-    "textSlice": "BETWEEN LANGUAGE AND IMAGE",
+    "textSlice": "Specimens of the Everyday",
     "textBlocks": [
       {
         "zone": {
           "xMm": 0,
           "yMm": 0,
-          "wMm": 116.66666666666667,
-          "hMm": 10.9375
+          "wMm": 56.666666666666664,
+          "hMm": 15.75252
         },
-        "slice": "BETWEEN LANGUAGE AND IMAGE",
+        "slice": "Specimens of the Everyday",
         "role": "section_label",
-        "id": "para_6",
-        "text_source": "paragraph_6",
-        "group_id": 3
+        "id": "para_3",
+        "text_source": "paragraph_3",
+        "group_id": 2,
+        "flow_group_id": 2
       },
       {
         "zone": {
           "xMm": 0,
-          "yMm": 118.5625,
-          "wMm": 178,
-          "hMm": 129.5
+          "yMm": 16.95252,
+          "wMm": 56.666666666666664,
+          "hMm": 75.94019999999999
         },
-        "slice": "Typography exists between communication and expression. A paragraph conveys meaning, yet its density and alignment create an impression before it is read. A typeface may appear formal, intimate, mechanical, historical, or experimental. These visual qualities influence how the reader interprets the words and how much authority or emotion is attached to them. A page set in a restrained serif typeface may suggest continuity, scholarship, or literary tradition, while a compressed sans serif may evoke efficiency, urgency, or industrial production. These associations are not permanently fixed, but they demonstrate how typography frames language before the reader consciously analyzes its content. The visual form of a text establishes expectations about who is speaking, what kind of knowledge is being presented, and how seriously that knowledge should be received. Typography can make a statement appear official or informal, permanent or temporary, distant or personal. It can invite a reader into a text or produce a deliberate sense of resistance. In this way, typography participates in the social life of language. It gives visible form to institutions, communities, commercial identities, political movements, and individual voices. Public signs, books, advertisements, protest banners, museum labels, and digital interfaces all use letterforms to establish particular relationships with their audiences. The choice of scale, alignment, color, and typeface affects whose voices",
+        "slice": "Do Ho Suh’s work asks what remains of a place after we leave it. A former home survives through fragments: a doorway, a corridor, a switch, a sink, or the distance between a handle and the floor. These details often become visible only after the space is gone.",
         "role": "body",
-        "id": "para_7",
-        "text_source": "paragraph_7",
-        "group_id": 3
+        "id": "para_4",
+        "text_source": "paragraph_4",
+        "group_id": 2,
+        "flow_group_id": 2
       }
     ]
   },
@@ -274,13 +103,14 @@
     "type": "layout-plan-page",
     "images": [
       {
-        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785227446424_3_4._Type_Exhibition_image__4_.jpg",
+        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785917446348_2_1__2_.png",
         "xMm": 0,
         "yMm": 0,
         "wMm": 210,
         "hMm": 297,
         "fullBleed": true,
-        "objectPosition": "center"
+        "objectPosition": "center",
+        "fit": "contain"
       }
     ],
     "textZone": null,
@@ -293,10 +123,376 @@
     "textZone": {
       "xMm": 0,
       "yMm": 0,
-      "wMm": 178,
-      "hMm": 111.13199999999999
+      "wMm": 55.333333333333336,
+      "hMm": 102.4002
     },
-    "textSlice": "participates in constructing that space. The surrounding architecture also changes how letters are perceived. A word printed in a book remains within the limits of the page, but a word installed on a wall enters into a relationship with light, surface, distance, and the movement of the viewer. Its meaning is affected by whether it appears above the head, near the floor, across a corner, or behind another structure. The act of reading is therefore shaped by the body as much as by the eye. Typography may slow a visitor down, draw attention toward a particular direction, or establish a sequence between different parts of an exhibition. It can divide a large interior into smaller zones or connect separate spaces through a repeated visual language. In this context, letters function as both information and environment. Their scale can make language feel public and collective, while smaller forms create a more private encounter. A monumental title may announce an institutional voice, whereas handwritten or irregular lettering may suggest intimacy, immediacy, or personal expression. Typography in space is thus never neutral. It establishes relationships between language, authority, architecture, and the people who move through them.",
+    "textSlice": "Suh isolates sockets, locks, vents, faucets, cables, and other domestic fittings as specimens. Removed from their original rooms, they reveal how architecture is stored through repeated gestures. A switch records the movement of a hand; a lock recalls security, departure, and return. The home becomes an archive of objects, habits, and bodily memory.",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 0,
+          "wMm": 56.666666666666664,
+          "hMm": 102.4002
+        },
+        "slice": "Suh isolates sockets, locks, vents, faucets, cables, and other domestic fittings as specimens. Removed from their original rooms, they reveal how architecture is stored through repeated gestures. A switch records the movement of a hand; a lock recalls security, departure, and return. The home becomes an archive of objects, habits, and bodily memory.",
+        "role": "body",
+        "id": "para_5",
+        "text_source": "paragraph_5",
+        "group_id": 3,
+        "flow_group_id": 3
+      }
+    ]
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [
+      {
+        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785917446387_3_1__3_.png",
+        "xMm": 0,
+        "yMm": 0,
+        "wMm": 210,
+        "hMm": 297,
+        "fullBleed": true,
+        "objectPosition": "center",
+        "fit": "contain"
+      }
+    ],
+    "textZone": null,
+    "textSlice": null,
+    "textBlocks": []
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [],
+    "textZone": {
+      "xMm": 0,
+      "yMm": 0,
+      "wMm": 116.66666666666667,
+      "hMm": 5.292
+    },
+    "textSlice": "Architecture Without Weight",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 0,
+          "wMm": 56.666666666666664,
+          "hMm": 15.75252
+        },
+        "slice": "Architecture Without Weight",
+        "role": "section_label",
+        "id": "para_6",
+        "text_source": "paragraph_6",
+        "group_id": 4,
+        "flow_group_id": 4
+      },
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 16.95252,
+          "wMm": 56.666666666666664,
+          "hMm": 75.94019999999999
+        },
+        "slice": "Suh reconstructs walls, doors, windows, ceilings, and staircases in translucent fabric. Their dimensions remain precise, but their weight disappears. Architecture becomes a network of seams, outlines, frames, and openings through which light and bodies can pass.",
+        "role": "body",
+        "id": "para_7",
+        "text_source": "paragraph_7",
+        "group_id": 4,
+        "flow_group_id": 4
+      }
+    ]
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [
+      {
+        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785917446398_4_1__10_.png",
+        "xMm": 0,
+        "yMm": 0,
+        "wMm": 116.66666666666667,
+        "hMm": 95.625,
+        "fullBleed": false,
+        "objectPosition": "center",
+        "fit": "contain"
+      }
+    ],
+    "textZone": {
+      "xMm": 0,
+      "yMm": 98.625,
+      "wMm": 116.66666666666667,
+      "hMm": 44.188199999999995
+    },
+    "textSlice": "Transparency reflects the layered nature of memory. One room overlaps with another, and a visitor can be seen through several surfaces at once. Colors mix where fabrics intersect, while a wall that appears solid from one angle nearly vanishes from another. The work changes as the viewer moves.",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 98.625,
+          "wMm": 116.66666666666667,
+          "hMm": 44.188199999999995
+        },
+        "slice": "Transparency reflects the layered nature of memory. One room overlaps with another, and a visitor can be seen through several surfaces at once. Colors mix where fabrics intersect, while a wall that appears solid from one angle nearly vanishes from another. The work changes as the viewer moves.",
+        "role": "body",
+        "id": "para_8",
+        "text_source": "paragraph_8",
+        "group_id": 5,
+        "flow_group_id": 5
+      }
+    ]
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [
+      {
+        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785917446466_5_1__11_.png",
+        "xMm": 0,
+        "yMm": 0,
+        "wMm": 116.66666666666667,
+        "hMm": 95.625,
+        "fullBleed": false,
+        "objectPosition": "center",
+        "fit": "contain"
+      }
+    ],
+    "textZone": {
+      "xMm": 0,
+      "yMm": 98.625,
+      "wMm": 116.66666666666667,
+      "hMm": 5.292
+    },
+    "textSlice": "Portable and Displaced Home",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 98.625,
+          "wMm": 116.66666666666667,
+          "hMm": 5.292
+        },
+        "slice": "Portable and Displaced Home",
+        "role": "section_label",
+        "id": "para_9",
+        "text_source": "paragraph_9",
+        "group_id": 6,
+        "flow_group_id": 6
+      },
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 105.917,
+          "wMm": 116.66666666666667,
+          "hMm": 65.3562
+        },
+        "slice": "These works refer to specific buildings, not to a general image of home. Doorframes, ornaments, hinges, tiles, and fixtures are carefully measured and reconstructed. Yet fabric cannot reproduce the weight, sound, temperature, or history of the original place.\nThis gap between accuracy and loss is central to Suh’s practice. Once translated into cloth, architecture can be folded, packed, and installed elsewhere. A home becomes portable, like clothing carried with the body.",
+        "role": "body",
+        "id": "para_10",
+        "text_source": "paragraph_10",
+        "group_id": 6,
+        "flow_group_id": 6
+      }
+    ]
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [],
+    "textZone": {
+      "xMm": 0,
+      "yMm": 0,
+      "wMm": 116.66666666666667,
+      "hMm": 28.3122
+    },
+    "textSlice": "The reconstructed building and the gallery remain visible at the same time. Neither replaces the other. Their overlap creates a temporary space shaped by migration, distance, and memory.",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 0,
+          "wMm": 56.666666666666664,
+          "hMm": 54.7722
+        },
+        "slice": "The reconstructed building and the gallery remain visible at the same time. Neither replaces the other. Their overlap creates a temporary space shaped by migration, distance, and memory.",
+        "role": "body",
+        "id": "para_11",
+        "text_source": "paragraph_11",
+        "group_id": 7,
+        "flow_group_id": 7
+      },
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 57.7722,
+          "wMm": 56.666666666666664,
+          "hMm": 6.7032
+        },
+        "slice": "The Body as Measure",
+        "role": "section_label",
+        "id": "para_12",
+        "text_source": "paragraph_12",
+        "group_id": 8,
+        "flow_group_id": 8
+      },
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 65.6754,
+          "wMm": 56.666666666666664,
+          "hMm": 65.3562
+        },
+        "slice": "Architecture is understood through movement. A door is known by opening it, a stair by climbing it, and a corridor by crossing it. Suh preserves these bodily relationships even when solid structures become fabric.",
+        "role": "body",
+        "id": "para_13",
+        "text_source": "paragraph_13",
+        "group_id": 8,
+        "flow_group_id": 8
+      }
+    ]
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [
+      {
+        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785917446501_6_1__12_.png",
+        "xMm": 0,
+        "yMm": 0,
+        "wMm": 116.66666666666667,
+        "hMm": 112.5625,
+        "fullBleed": false,
+        "objectPosition": "center",
+        "fit": "contain"
+      }
+    ],
+    "textZone": {
+      "xMm": 0,
+      "yMm": 115.5625,
+      "wMm": 116.66666666666667,
+      "hMm": 60.0642
+    },
+    "textSlice": "A handle remains positioned for the hand, and a doorway keeps the width required for a body. Even empty installations feel inhabited because they retain traces of repeated actions.\nWhen visitors move behind translucent walls, their figures briefly merge with the architecture. The body becomes a temporary layer of shadow, color, and motion. The room survives its occupants through familiar proportions, routes, and objects.",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 115.5625,
+          "wMm": 116.66666666666667,
+          "hMm": 60.0642
+        },
+        "slice": "A handle remains positioned for the hand, and a doorway keeps the width required for a body. Even empty installations feel inhabited because they retain traces of repeated actions.\nWhen visitors move behind translucent walls, their figures briefly merge with the architecture. The body becomes a temporary layer of shadow, color, and motion. The room survives its occupants through familiar proportions, routes, and objects.",
+        "role": "body",
+        "id": "para_14",
+        "text_source": "paragraph_14",
+        "group_id": 9,
+        "flow_group_id": 9
+      }
+    ]
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [
+      {
+        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785917446539_7_1__8_.png",
+        "xMm": 0,
+        "yMm": 0,
+        "wMm": 210,
+        "hMm": 297,
+        "fullBleed": true,
+        "objectPosition": "center",
+        "fit": "contain"
+      }
+    ],
+    "textZone": null,
+    "textSlice": null,
+    "textBlocks": []
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [],
+    "textZone": {
+      "xMm": 0,
+      "yMm": 0,
+      "wMm": 116.66666666666667,
+      "hMm": 5.292
+    },
+    "textSlice": "Corridors and Thresholds",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 0,
+          "wMm": 56.666666666666664,
+          "hMm": 15.75252
+        },
+        "slice": "Corridors and Thresholds",
+        "role": "section_label",
+        "id": "para_15",
+        "text_source": "paragraph_15",
+        "group_id": 10,
+        "flow_group_id": 10
+      },
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 16.95252,
+          "wMm": 56.666666666666664,
+          "hMm": 65.3562
+        },
+        "slice": "Corridors and doorways are spaces of transition. Their meaning is created through passage, repetition, and expectation. The body remembers where to turn, how long a hallway lasts, and what waits beyond an opening.",
+        "role": "body",
+        "id": "para_16",
+        "text_source": "paragraph_16",
+        "group_id": 10,
+        "flow_group_id": 10
+      }
+    ]
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [
+      {
+        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785917446578_8_1__9_.png",
+        "xMm": 0,
+        "yMm": 0,
+        "wMm": 116.66666666666667,
+        "hMm": 95.625,
+        "fullBleed": false,
+        "objectPosition": "center",
+        "fit": "contain"
+      }
+    ],
+    "textZone": {
+      "xMm": 0,
+      "yMm": 98.625,
+      "wMm": 116.66666666666667,
+      "hMm": 38.89619999999999
+    },
+    "textSlice": "In Suh’s translucent thresholds, both sides remain visible. Inside and outside are no longer clearly divided. Suspended architectural fragments create a similar uncertainty: they retain the appearance of weight while floating apart from their original foundations.",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 98.625,
+          "wMm": 116.66666666666667,
+          "hMm": 38.89619999999999
+        },
+        "slice": "In Suh’s translucent thresholds, both sides remain visible. Inside and outside are no longer clearly divided. Suspended architectural fragments create a similar uncertainty: they retain the appearance of weight while floating apart from their original foundations.",
+        "role": "body",
+        "id": "para_17",
+        "text_source": "paragraph_17",
+        "group_id": 11,
+        "flow_group_id": 11
+      }
+    ]
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [],
+    "textZone": {
+      "xMm": 0,
+      "yMm": 0,
+      "wMm": 116.66666666666667,
+      "hMm": 23.0202
+    },
+    "textSlice": "These structures resemble memories removed from their sites—recognizable, detailed, and present, yet no longer fully attached to the world from which they came.",
     "textBlocks": [
       {
         "zone": {
@@ -305,53 +501,12 @@
           "wMm": 56.666666666666664,
           "hMm": 49.480199999999996
         },
-        "slice": "voice, and an exclamation mark changes the emotional force of a sentence. Parentheses interrupt the main direction of thought, while a colon opens a sentence toward",
+        "slice": "These structures resemble memories removed from their sites—recognizable, detailed, and present, yet no longer fully attached to the world from which they came.",
         "role": "body",
-        "id": "body_overflow_1"
-      },
-      {
-        "zone": {
-          "xMm": 0,
-          "yMm": 52.480199999999996,
-          "wMm": 56.666666666666664,
-          "hMm": 212.5198
-        },
-        "slice": "explanation or enumeration. These signs do not merely separate grammatical units; they shape the imagined voice through which a text is heard. When punctuation marks are enlarged, they reveal strong graphic qualities. A comma becomes a curved object, a numeral becomes a composition of lines and counters, and an exclamation mark becomes a vertical structure balanced above a point. Enlarged beyond their ordinary reading size, familiar glyphs lose some of their linguistic certainty and begin to resemble images, symbols, or architectural forms. Experimental typography develops this visual potential by challenging the idea that language must always remain orderly and immediately readable. Letters may rotate, overlap, stretch, scatter, or dissolve across",
-        "role": "body",
-        "id": "body_overflow_2"
-      },
-      {
-        "zone": {
-          "xMm": 60.666666666666664,
-          "yMm": 0,
-          "wMm": 56.666666666666664,
-          "hMm": 265
-        },
-        "slice": "the page. These changes allow typography to express sound, movement, tension, speed, and emotion. The viewer encounters language as an image before fully understanding it as text. Such experiments reveal the tension between reading and seeing. A highly legible text communicates efficiently, but an irregular composition may express qualities that ordinary sentences cannot. Handwritten gestures, broken forms, repeated symbols, and unstable alignments record the energy of their production. Typography becomes not only a carrier of information, but also a visual trace of movement and thought. This tension has accompanied typography throughout its history. Standardized printing made language repeatable and widely distributable, but artists and designers repeatedly disrupted that regularity to recover the presence of the hand, the body, and the individual voice. The constructed letter therefore exists between two opposing desires: the desire",
-        "role": "body",
-        "id": "body_overflow_2"
-      },
-      {
-        "zone": {
-          "xMm": 121.33333333333333,
-          "yMm": 0,
-          "wMm": 56.666666666666664,
-          "hMm": 38.89619999999999
-        },
-        "slice": "for a stable system and the desire for expressive difference. Every typeface negotiates this opposition in its own way.",
-        "role": "body",
-        "id": "body_overflow_2"
-      },
-      {
-        "zone": {
-          "xMm": 121.33333333333333,
-          "yMm": 41.89619999999999,
-          "wMm": 56.666666666666664,
-          "hMm": 223.1038
-        },
-        "slice": "appear dominant and whose remain secondary. Even apparently neutral typography is the result of cultural conventions and design decisions. The history of typography is therefore not a simple movement toward greater clarity. It is an ongoing negotiation between order and freedom, standardization and individuality, reading and seeing. At certain moments, designers have pursued rational systems that promise universal communication. At others, they have emphasized irregularity, cultural specificity, or personal gesture. Neither approach can completely replace the other. A text must be sufficiently stable to be understood, yet it also acquires meaning through the particular form in which it appears. Typography occupies this uncertain boundary. It must support language without disappearing",
-        "role": "body",
-        "id": "body_overflow_3"
+        "id": "para_18",
+        "text_source": "paragraph_18",
+        "group_id": 12,
+        "flow_group_id": 12
       }
     ]
   },
@@ -359,18 +514,91 @@
     "type": "layout-plan-page",
     "images": [
       {
-        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785227446511_8_4._Type_Exhibition_image.jpg",
+        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785917446618_9_1__7_.png",
         "xMm": 0,
         "yMm": 0,
-        "wMm": 210,
-        "hMm": 297,
-        "fullBleed": true,
-        "objectPosition": "center"
+        "wMm": 116.66666666666667,
+        "hMm": 95.625,
+        "fullBleed": false,
+        "objectPosition": "center",
+        "fit": "contain"
       }
     ],
-    "textZone": null,
-    "textSlice": null,
-    "textBlocks": []
+    "textZone": {
+      "xMm": 0,
+      "yMm": 98.625,
+      "wMm": 116.66666666666667,
+      "hMm": 5.292
+    },
+    "textSlice": "Drawing the Trace of Presence",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 98.625,
+          "wMm": 116.66666666666667,
+          "hMm": 5.292
+        },
+        "slice": "Drawing the Trace of Presence",
+        "role": "section_label",
+        "id": "para_19",
+        "text_source": "paragraph_19",
+        "group_id": 13,
+        "flow_group_id": 13
+      },
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 105.917,
+          "wMm": 116.66666666666667,
+          "hMm": 60.0642
+        },
+        "slice": "Suh’s stitched structures often resemble architectural drawings expanded into space. Lines describe frames, stairs, cables, and decorative details without reproducing their physical mass.\nThread and fabric allow precision and uncertainty to coexist. A staircase may remain clearly recognizable while loose lines spread beyond its form. Memory works in a similar way: some details remain sharp while others become tangled or incomplete.",
+        "role": "body",
+        "id": "para_20",
+        "text_source": "paragraph_20",
+        "group_id": 13,
+        "flow_group_id": 13
+      }
+    ]
+  },
+  {
+    "type": "layout-plan-page",
+    "images": [
+      {
+        "path": "C:\\Users\\mjungpk\\Desktop\\Imprint(Image+Text)\\uploads\\1785917446654_10_1__5_.png",
+        "xMm": 0,
+        "yMm": 0,
+        "wMm": 116.66666666666667,
+        "hMm": 95.625,
+        "fullBleed": false,
+        "objectPosition": "center",
+        "fit": "contain"
+      }
+    ],
+    "textZone": {
+      "xMm": 0,
+      "yMm": 98.625,
+      "wMm": 116.66666666666667,
+      "hMm": 33.6042
+    },
+    "textSlice": "The blurred body behind a translucent wall becomes a temporary trace. Architecture can be measured and reconstructed, but the people who inhabited it survive only indirectly—through gestures, routes, worn surfaces, and familiar objects.",
+    "textBlocks": [
+      {
+        "zone": {
+          "xMm": 0,
+          "yMm": 98.625,
+          "wMm": 116.66666666666667,
+          "hMm": 33.6042
+        },
+        "slice": "The blurred body behind a translucent wall becomes a temporary trace. Architecture can be measured and reconstructed, but the people who inhabited it survive only indirectly—through gestures, routes, worn surfaces, and familiar objects.",
+        "role": "body",
+        "id": "para_21",
+        "text_source": "paragraph_21",
+        "group_id": 14,
+        "flow_group_id": 14
+      }
+    ]
   },
   {
     "type": "layout-plan-page",
@@ -378,32 +606,38 @@
     "textZone": {
       "xMm": 0,
       "yMm": 0,
-      "wMm": 178,
-      "hMm": 111.13199999999999
+      "wMm": 116.66666666666667,
+      "hMm": 28.3122
     },
-    "textSlice": "participates in constructing that space. The surrounding architecture also changes how letters are perceived. A word printed in a book remains within the limits of the page, but a word installed on a wall enters into a relationship with light, surface, distance, and the movement of the viewer. Its meaning is affected by whether it appears above the head, near the floor, across a corner, or behind another structure. The act of reading is therefore shaped by the body as much as by the eye. Typography may slow a visitor down, draw attention toward a particular direction, or establish a sequence between different parts of an exhibition. It can divide a large interior into smaller zones or connect separate spaces through a repeated visual language. In this context, letters function as both information and environment. Their scale can make language feel public and collective, while smaller forms create a more private encounter. A monumental title may announce an institutional voice, whereas handwritten or irregular lettering may suggest intimacy, immediacy, or personal expression. Typography in space is thus never neutral. It establishes relationships between language, authority, architecture, and the people who move through them.",
+    "textSlice": "Suh’s work presents memory as an active process of measuring, rebuilding, transporting, and inhabiting. The original home cannot return unchanged, but its spatial patterns continue within the body.",
     "textBlocks": [
       {
         "zone": {
           "xMm": 0,
           "yMm": 0,
           "wMm": 56.666666666666664,
-          "hMm": 265
+          "hMm": 60.0642
         },
-        "slice": "entirely, and it must express visual character without preventing communication. Digital media have made this relationship even more complex. On a screen, letters are no longer fixed to a single physical surface. They may resize, reflow, animate, or respond to the actions of the reader. A typographic composition can change according to screen dimensions, language settings, accessibility needs, or the passage of time. Typography becomes a set of behaviors as well as a collection of forms. Nevertheless, its central task remains connected to an ancient human desire: to preserve speech, organize thought, and make language present when the speaker is absent. Whether printed in a book, enlarged on a museum wall, or animated on a screen, typography continues to give visible form to language and to the culture in which that language is produced. It records the technologies through which people communicate, the institutions that distribute",
+        "slice": "Suh’s work presents memory as an active process of measuring, rebuilding, transporting, and inhabiting. The original home cannot return unchanged, but its spatial patterns continue within the body.",
         "role": "body",
-        "id": "body_overflow_3"
+        "id": "para_22",
+        "text_source": "paragraph_22",
+        "group_id": 15,
+        "flow_group_id": 15
       },
       {
         "zone": {
-          "xMm": 60.666666666666664,
-          "yMm": 0,
+          "xMm": 0,
+          "yMm": 63.0642,
           "wMm": 56.666666666666664,
-          "hMm": 75.94019999999999
+          "hMm": 70.64819999999999
         },
-        "slice": "knowledge, and the aesthetic values through which a society imagines itself. To study typography is therefore to study more than letters. It is to examine the changing relationship between language, image, material, technology, and human perception.",
+        "slice": "The feet remember the rhythm of a staircase. The hand remembers the position of a switch. The eye remembers the light at the end of a corridor. Home becomes not only a place, but also an internal architecture carried after departure.",
         "role": "body",
-        "id": "body_overflow_3"
+        "id": "para_23",
+        "text_source": "paragraph_23",
+        "group_id": 16,
+        "flow_group_id": 16
       }
     ]
   }

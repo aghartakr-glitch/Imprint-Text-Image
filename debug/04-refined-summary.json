@@ -1,9 +1,11 @@
 {
   "stage": "refined",
-  "page_count": 11,
-  "image_count": 8,
-  "text_block_count": 11,
+  "page_count": 20,
+  "image_count": 10,
+  "text_block_count": 23,
   "image_ids": [
+    "image_1",
+    "image_1",
     "image_1",
     "image_1",
     "image_1",
@@ -14,16 +16,28 @@
     "image_1"
   ],
   "text_block_ids": [
-    "para_1",
+    "para_title",
     "para_2",
     "para_3",
     "para_4",
     "para_5",
     "para_6",
     "para_7",
-    "body_overflow_0",
-    "body_overflow_1",
-    "body_overflow_2",
-    "body_overflow_3"
+    "para_8",
+    "para_9",
+    "para_10",
+    "para_11",
+    "para_12",
+    "para_13",
+    "para_14",
+    "para_15",
+    "para_16",
+    "para_17",
+    "para_18",
+    "para_19",
+    "para_20",
+    "para_21",
+    "para_22",
+    "para_23"
   ]
 }

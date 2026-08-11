@@ -283,11 +283,10 @@ export function refineLayout(resolvedPages, {
     const pageImages = Array.isArray(page.images) ? page.images : []
     const images = pageImages.map((img) => {
       const ratio = readImageRatio(img, imagePaths, imageAspectRatios)
-      // Full-bleed images used to always early-return here, skipping cover-crop entirely -- so
-      // resolveGridPage.js setting fit:'cover' on them had no effect, and every full-bleed page
-      // rendered letterboxed (contain) instead of truly filling the page edge-to-edge. Full-bleed
-      // images must go through the same cover-crop path as any other cover-fit image.
-      if (img.fullBleed) return ratio ? coverImageInBox(img, ratio) : img
+      // Full-bleed images are no longer special-cased to always cover-crop (2026-08-04, reverted
+      // per user feedback: cropping a landscape photo's top/bottom to fill a full-bleed page's
+      // empty space is unwanted -- fit to width and leave the gap). They now go through the exact
+      // same path as any other image: cover-crop only when the plan explicitly set fit:'cover'.
       if (!ratio || !shouldCoverCrop(img)) return { ...img, fit: img.fit || 'contain' }
       objectPositionAdjusted = true
       return coverImageInBox(img, ratio)

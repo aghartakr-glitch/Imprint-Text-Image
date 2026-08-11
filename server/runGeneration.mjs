@@ -26,6 +26,7 @@ import { validateResolvedLayout, assertResolvedPagesInsideBounds } from '../src/
 import { assertNoMarkdownInResolvedPages } from '../src/core/validation/validateTextIntegrity.js'
 import { repairResolvedLayout } from '../src/core/layout/repairResolvedLayout.js'
 import { reorganizeTextOnlyPages } from '../src/core/reorganizeTextOnlyPages.js'
+import { fillFullBleedGaps } from '../src/core/layout/fillFullBleedGaps.js'
 import { selectLayoutFamily } from '../src/core/layout/selectLayoutFamily.js'
 import { selectTextFlowMode } from '../src/core/layout/selectTextFlowMode.js'
 import { tryBuildSpecializedLayout } from '../src/core/layout/builders/index.js'
@@ -516,6 +517,14 @@ export async function runGeneration({
       contentWidthMm: pageGeometry.textBoxWidthMm,
       contentHeightMm: pageGeometry.textBoxHeightMm,
     })
+    // A landscape full-bleed image on a portrait page leaves real empty space below it (contain-fit
+    // binds by width) -- per user decision (2026-08-05), move the next page's body text into that
+    // space instead of leaving it blank, whenever that's provably safe (see fillFullBleedGaps.js).
+    // Runs before the validation gate below so any issue it could theoretically introduce is caught
+    // by the exact same checks as everything else, not trusted blindly.
+    finalResolvedPages = fillFullBleedGaps(finalResolvedPages, {
+      imagePaths, imageAspectRatios: imageRatios, geometry: pageGeometry,
+    })
     // Snapshot the pre-repair state (repair reassigns finalResolvedPages below, so this is the only
     // chance to capture what validation actually saw on the first pass).
     const preRepairPages = finalResolvedPages
@@ -589,6 +598,11 @@ export async function runGeneration({
           repair_unresolved: repairUnresolvedIssues.slice(0, 5),
           second_validation: finalIssues.slice(0, 5).map(summarizeResolvedIssue),
         })
+        // Indexed per-candidate, not just the first: a resolved-validation failure is not
+        // guaranteed to hit candidate 0, and debugThisCandidate-gated writes previously left no
+        // trace at all when it didn't (the file just stayed stale from whichever earlier run last
+        // passed on candidate 0, making a real failure look unreproducible).
+        writeDebugStage(`06-validation-report-${candidateIdx}.json`, buildValidationReport())
         if (debugThisCandidate) writeDebugStage('06-validation-report.json', buildValidationReport())
         // Return undefined candidate
         return null
@@ -662,12 +676,16 @@ export async function runGeneration({
   // 14. Best Layout Selector
   // CRITICAL: Fail hard if all candidates were rejected by resolved layout validation
   if (scoredCandidates.length === 0) {
-    const errorMsg = 'All layout candidates failed resolved layout validation (page boundary/collision checks)'
+    // resolvedValidationFailures is populated throughout the map() above with each candidate's
+    // actual page/element/issue details -- it used to be discarded here in favor of a hardcoded
+    // [], so this failure surfaced with zero diagnostic content no matter how much detail the
+    // validator itself produced.
+    const errorMsg = `All layout candidates failed resolved layout validation (page boundary/collision checks): ${JSON.stringify(resolvedValidationFailures)}`
     console.error(`[GENERATION FAILED] ${errorMsg}`)
     return {
       ok: false,
       error: errorMsg,
-      validationFailures: [],
+      validationFailures: resolvedValidationFailures,
     }
   }
 

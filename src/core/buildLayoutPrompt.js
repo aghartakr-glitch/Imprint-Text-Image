@@ -74,7 +74,10 @@ Fixed constraints:
   * Heading blocks (short, from a Markdown heading level) → prominent placement as a section header (role: section_label), never merged into a body box
   * The shallowest heading level present acts as the strongest break: give it the most surrounding space
   * A short trailing line at the end of a content group that has an image → treat as a caption-like credit (role: body), small, placed directly against that image's edge
-  * Long prose paragraphs → give them a readable measure; prefer fewer, wider columns over many narrow ones
+  * Long prose paragraphs → give them a readable measure by increasing that paragraph's col_span
+    (how many of the grid's columns THIS box spans), never by shrinking grid_spec.columns itself --
+    the user's requested column count is fixed (see rule above), so "fewer, wider columns" here
+    means fewer, wider TEXT BOXES within that same grid, not a smaller grid.
   * The opening content group of the document may be given extra space as an opener, if the layout benefits
 
   Image-Text Proximity: full rule and the exact groups for this input are given below in the

@@ -289,7 +289,27 @@ export function buildPagesLatex(resolvedPages, { runningHeadText, geometry = DEF
         parts.push(textBlock(page.textZone, pageNumber, page.textSlice, 'body', geometry))
       }
       parts.push(runningHeadBlock(pageNumber, runningHeadText, geometry))
-      return parts.join('\n')
+      let pageLatex = parts.join('\n')
+      // Auto-repair (2026-08-05): two independent real generations both produced a \BodyText
+      // textblock* whose \end{textblock*} is missing -- always the exact same shape, \end{minipage}
+      // immediately followed by the NEXT element's \begin{textblock*} (sometimes with a blank line
+      // between, sometimes not), with no \end{textblock*} in between. Root cause not pinned down
+      // (traced to textBlock()'s single-block render path, but its source unconditionally appends
+      // the closing tag, so the exact trigger is still unclear) -- but the broken shape itself is
+      // narrow and unambiguous enough to detect and fix directly: XeTeX would otherwise silently
+      // swallow the rest of the document into one unterminated group, wasting a full compile.
+      pageLatex = pageLatex.replace(
+        /\\end\{minipage\}\n(\s*\n)?(?=\\begin\{textblock\*\})/g,
+        (_match, blankLine) => `\\end{minipage}\n\\end{textblock*}\n${blankLine || ''}`,
+      )
+      // Final balance check: if the shape above didn't cover it, fail loudly with the page number
+      // instead of producing unreadable LaTeX that XeTeX only rejects at \end{document}.
+      const beginCount = (pageLatex.match(/\\begin\{textblock\*\}/g) || []).length
+      const endCount = (pageLatex.match(/\\end\{textblock\*\}/g) || []).length
+      if (beginCount !== endCount) {
+        throw new Error(`buildPagesLatex: page ${pageNumber} has ${beginCount} \\begin{textblock*} but ${endCount} \\end{textblock*} -- unbalanced LaTeX would fail to compile`)
+      }
+      return pageLatex
     })
     .join('\n\\newpage\n')
 }

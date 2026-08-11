@@ -135,6 +135,7 @@ function placementOrder(placement) {
 // vocabulary. "JSON parses" isn't checked here -- that's the caller's job via JSON.parse.
 export function validateLayoutPlan(plan, {
   imageCount, textBlocks, contentGroupModel, forcedFullBleedImages = [], allowUnforcedFullBleed = true,
+  requiredColumns,
 } = {}) {
   const issues = []
   // Design-quality observations that should NOT block rendering (a candidate with only warnings
@@ -637,6 +638,16 @@ export function validateLayoutPlan(plan, {
     }
     if (!Number.isInteger(gs.rows) || gs.rows < 1) {
       issues.push(`grid_spec.rows는 양의 정수여야 합니다 (받은 값: ${gs.rows})`)
+    }
+    // The prompt tells the model to "prefer fewer, wider columns" for long prose readability, and
+    // it has been literally reinterpreting that as license to redefine grid_spec.columns itself
+    // (confirmed 2026-08-04: a user who selected 6 columns in the UI got grid_spec.columns: 2 back,
+    // with the model's own design_sequence citing "2-col grid suits long prose readability" as the
+    // reason) -- that guidance was meant to control how many columns ONE text box SPANS within the
+    // user's grid, never the grid itself. A user's explicit column count is a hard constraint, not
+    // a suggestion the model can override for taste.
+    if (Number.isInteger(requiredColumns) && Number.isInteger(gs.columns) && gs.columns !== requiredColumns) {
+      issues.push(`grid_spec.columns(${gs.columns})가 사용자가 선택한 단수(${requiredColumns})와 다릅니다. 그리드 자체의 열 수는 항상 사용자 설정을 따라야 하며, 가독성을 위해 조정할 수 있는 것은 각 텍스트 박스의 col_span(그리드 안에서 몇 칸을 차지할지)입니다.`)
     }
     if (typeof gs.gutter_mm !== 'number' || gs.gutter_mm < 0) {
       issues.push(`grid_spec.gutter_mm는 음이 아닌 숫자여야 합니다 (받은 값: ${gs.gutter_mm})`)

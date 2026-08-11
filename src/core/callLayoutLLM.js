@@ -240,8 +240,14 @@ export async function callLayoutLLM({
 }, options = {}) {
   const forcedFullBleedImages = promptContext?.userLayoutSettings?.forced_full_bleed_images ?? []
   const allowUnforcedFullBleed = promptContext?.userLayoutSettings?.allow_unforced_full_bleed !== false
+  // The model has been silently redefining grid_spec.columns for its own readability preference
+  // even when the user picked an explicit column count (confirmed 2026-08-04) -- enforce it as a
+  // hard validation constraint rather than trusting the prompt's wording alone.
+  const requiredColumns = Number.isInteger(promptContext?.userLayoutSettings?.columns)
+    ? promptContext.userLayoutSettings.columns
+    : undefined
   const validationOpts = {
-    imageCount, textBlocks, contentGroupModel, forcedFullBleedImages, allowUnforcedFullBleed, imageAspectRatios,
+    imageCount, textBlocks, contentGroupModel, forcedFullBleedImages, allowUnforcedFullBleed, imageAspectRatios, requiredColumns,
   }
   const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY
   const mockMode = options.mockMode ?? process.env.MOCK_MODE === 'true'

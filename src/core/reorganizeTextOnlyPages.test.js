@@ -1,6 +1,6 @@
 import assert from 'assert'
 import { reorganizeTextOnlyPages } from './reorganizeTextOnlyPages.js'
-import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM, MIN_READABLE_COLUMN_WIDTH_MM } from './layoutConstants.js'
+import { TEXT_BOX_WIDTH_MM, TEXT_BOX_HEIGHT_MM } from './layoutConstants.js'
 
 // Fixture 1: Single text block, convert to 2-column
 const fixture1 = [
@@ -105,17 +105,25 @@ function test5() {
   console.log('✓ Test 5: Multiple short blocks pack vertically before opening a new column')
 }
 
-// Test 6: Column spacing (gutter). columns=1 is never affected by the readable-width cap, so this
-// isolates the gutter-aware width formula from the cap tested separately in test8/test9. (A
-// columns=3 request used to be asserted here, but raising MIN_READABLE_COLUMN_WIDTH_MM to 45mm
-// means 3 columns' 36mm width is now correctly capped down to 2 columns -- that capping behavior
-// belongs to test8/test9, not this gutter-math test.)
+// Test 6: Column spacing (gutter), and that a requested column count is honored exactly -- no
+// readable-width downgrade. (Per user decision 2026-08-04: a user picking N columns must always
+// get N columns; readability at narrow widths is their call, not this function's to override.)
 function test6() {
   const result = reorganizeTextOnlyPages(fixture1, { columns: 1 })
   const expectedWidth = TEXT_BOX_WIDTH_MM // 1 column, no gutter to subtract
   const block = result[0].textBlocks[0]
   assert.strictEqual(block.zone.wMm, expectedWidth, `1-column width should be ${expectedWidth}`)
   console.log('✓ Test 6: Column spacing correct')
+}
+
+// Test 6b: columns=3 on A5's ~116mm content width used to be silently downgraded to 2 columns
+// because 36mm fell under the old 45mm readable-width floor. It must now come back as exactly 3.
+function test6b() {
+  const result = reorganizeTextOnlyPages(fixture1, { columns: 3 })
+  const expectedWidth = (TEXT_BOX_WIDTH_MM - 4 * 2) / 3
+  const block = result[0].textBlocks[0]
+  assert.strictEqual(block.zone.wMm, expectedWidth, `columns=3 should produce ${expectedWidth}mm columns, not be downgraded to 2`)
+  console.log('✓ Test 6b: a requested column count is never silently downgraded')
 }
 
 // Test 7: No column's right edge exceeds the content box, even when text spans every column
@@ -137,21 +145,23 @@ function test7() {
   console.log('✓ Test 7: no block exceeds content box even when text spans every column and page')
 }
 
-// Test 8: a high grid column setting (chosen for image alignment) doesn't force body text into
-// unreadably narrow columns (confirmed 2026-07-16: columns=5 produced 23.2mm columns, ~7 Korean
-// characters per line)
+// Test 8: a high grid column setting (chosen for image alignment) is honored exactly, even though
+// it produces narrow columns -- readability used to silently override this (confirmed 2026-07-16:
+// columns=5 produced 23.2mm columns), but per user decision (2026-08-04) the requested column
+// count always wins; the user explicitly asked for it.
 function test8() {
   const result = reorganizeTextOnlyPages(fixture1, { columns: 5 })
+  const expectedWidth = (TEXT_BOX_WIDTH_MM - 4 * 4) / 5
   const block = result[0].textBlocks[0]
-  assert.ok(block.zone.wMm >= MIN_READABLE_COLUMN_WIDTH_MM, `column width ${block.zone.wMm} should be at least ${MIN_READABLE_COLUMN_WIDTH_MM}mm`)
-  console.log('✓ Test 8: high column count is capped so body text stays readable width')
+  assert.strictEqual(block.zone.wMm, expectedWidth, `columns=5 should produce ${expectedWidth}mm columns, not be capped wider`)
+  console.log('✓ Test 8: a high column count is never silently capped')
 }
 
-// Test 9: a low column setting that was never too narrow passes through unchanged
+// Test 9: a low column setting that was never affected by the old cap still behaves the same
 function test9() {
   const result = reorganizeTextOnlyPages(fixture1, { columns: 2 })
   const block = result[0].textBlocks[0]
-  assert.strictEqual(block.zone.wMm, (TEXT_BOX_WIDTH_MM - 4) / 2, 'columns=2 should be unaffected by the readable-width cap')
+  assert.strictEqual(block.zone.wMm, (TEXT_BOX_WIDTH_MM - 4) / 2, 'columns=2 should be unaffected either way')
   console.log('✓ Test 9: a column count that was already readable is left unchanged')
 }
 
@@ -168,7 +178,8 @@ function test10() {
   }
   const result = reorganizeTextOnlyPages([page], { columns: 5 })
   const headingBlocks = result[0].textBlocks.filter((b) => b.role === 'section_label')
-  assert.ok(headingBlocks.every((b) => b.zone.wMm >= MIN_READABLE_COLUMN_WIDTH_MM), 'headings should use readable column width')
+  const expectedWidth = (TEXT_BOX_WIDTH_MM - 4 * 4) / 5
+  assert.ok(headingBlocks.every((b) => b.zone.wMm === expectedWidth), `headings should use the requested column width (${expectedWidth}mm), not a readability-capped one`)
   assert.ok(headingBlocks.every((b) => b.zone.hMm >= 3), 'headings should reserve role-aware height')
   console.log('✓ Test 10: heading-role blocks reflow with role-aware height')
 }
@@ -236,6 +247,7 @@ try {
   test4()
   test5()
   test6()
+  test6b()
   test7()
   test8()
   test9()

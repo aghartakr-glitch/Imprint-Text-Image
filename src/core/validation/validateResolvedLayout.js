@@ -349,9 +349,15 @@ export function validateResolvedLayout(resolvedPages, { contentWidthMm = DEFAULT
       return
     }
 
+    // A body text_source legitimately appears on more than 2 boxes: reorganizeTextOnlyPages.js
+    // splits one long paragraph into as many column-width slices as it takes to fit (confirmed
+    // 2026-07-30 -- a paragraph reflowed into 3 slices across one 2-column page and a real 3rd
+    // slice tripped this exact check even though every slice held different, non-overlapping
+    // text). The placement COUNT was never a reliable duplicate signal on its own; an actual
+    // duplicate is an identical slice appearing twice, which uniqueSlices below already catches.
     const nonEmptySlices = placements.map((p) => p.slice).filter(Boolean)
     const uniqueSlices = new Set(nonEmptySlices)
-    if (placements.length > 2 || uniqueSlices.size < nonEmptySlices.length) {
+    if (uniqueSlices.size < nonEmptySlices.length) {
       issues.push({
         type: 'duplicate_text_source',
         page: placements[1].page,

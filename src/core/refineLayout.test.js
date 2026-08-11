@@ -62,7 +62,12 @@ test('a contain image keeps the planned box without cover-crop metadata', () => 
 })
 
 
-test('a full-bleed image is cover-cropped to fill the page edge-to-edge, not letterboxed', () => {
+// Reverted 2026-08-04 per user feedback: cover-cropping a full-bleed image to fill both
+// dimensions cuts off part of a landscape photo just to eliminate empty space -- unwanted. A
+// full-bleed image without an explicit fit:'cover' must render uncropped (plain contain), same as
+// any other image; buildLatex.js's keepaspectratio then picks the binding dimension from the
+// photo's own aspect ratio, leaving a gap on the other axis instead of cropping it away.
+test('a full-bleed image without explicit fit:cover is left uncropped (contain, not cover)', () => {
   const page = {
     type: 'full-bleed', images: [{
       path: '/img0.jpg', xMm: 0, yMm: 0, wMm: 148, hMm: 210, fullBleed: true,
@@ -75,11 +80,8 @@ test('a full-bleed image is cover-cropped to fill the page edge-to-edge, not let
   assert.equal(img.yMm, 0)
   assert.equal(img.wMm, 148)
   assert.equal(img.hMm, 210)
-  // Image (ratio 1.5) is proportionally wider than the page (148/210 ~= 0.70), so it's rendered at
-  // full page height * ratio = 315mm wide and the horizontal overflow is trimmed away, instead of
-  // shrinking to fit width and leaving letterbox bars top/bottom.
-  assert.ok(Math.abs(img.cover.renderWMm - 315) < 1e-9)
-  assert.ok(Math.abs(img.cover.trimLeftMm - 83.5) < 1e-9)
+  assert.equal(img.fit, 'contain')
+  assert.equal(img.cover, undefined, 'must not be cover-cropped without an explicit fit:cover')
 })
 
 test('flags a page with no images and no text as empty', () => {
