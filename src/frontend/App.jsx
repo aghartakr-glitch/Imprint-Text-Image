@@ -1,7 +1,91 @@
 import React, { useState } from 'react'
 import { T, FS, GLOBAL_CSS } from './theme.js'
 
-const LAYOUT_TYPE_LABELS = { 'image-first': '이미지 중심', balanced: '균형', 'text-first': '텍스트 중심' }
+// All user-facing UI chrome text lives here so the KOR/ENG toggle only has one place to touch --
+// content the user actually types (title/body/running head) is never translated, only labels,
+// buttons, hints, and messages.
+const STRINGS = {
+  ko: {
+    apiKeyLabel: 'Anthropic API 키',
+    apiKeyPlaceholder: 'sk-ant-... (선택, 비우면 규칙 기반)',
+    heading: '새 레이아웃 만들기',
+    subheading: '이미지와 본문 텍스트를 넣으면 편집디자인 레이아웃을 자동으로 생성합니다.',
+    imagesLabel: '이미지',
+    addImages: '이미지 추가',
+    imagesCount: (n) => `${n}장 선택됨 — 다시 선택하면 기존 목록에 추가됩니다.`,
+    imagesHint: '체크한 이미지만 풀페이지로 강제됩니다. image_1, 2, 3... 순서로 배치에 사용되니 순서가 다르면 제거 후 원하는 순서로 다시 추가하세요.',
+    titleLabel: '제목 (선택)',
+    bodyLabel: '본문 텍스트',
+    runningHeadLabel: '면주 (반복 상단 텍스트, 선택)',
+    runningHeadPlaceholder: '예: 2026/2027    TREND REPORT',
+    gridLabel: '판형 · 그리드 설정',
+    pageSizeOptions: { A5: 'A5', A4: 'A4', B5: 'B5' },
+    columnsOptions: { 1: '1단', 2: '2단', 3: '3단', 4: '4단', 5: '5단', 6: '6단' },
+    gridModeOptions: { strict: '엄격한 그리드', flexible: '유연한 그리드' },
+    generate: 'Generate',
+    generating: '생성 중...',
+    errNoImage: '이미지를 1장 이상 선택하세요.',
+    errNoText: '본문 텍스트를 입력하세요.',
+    errGenerateFailed: '생성에 실패했습니다.',
+    bestLayout: '최적 레이아웃 —',
+    styleLine: (style, runId) => `스타일: ${style} · outputs/${runId}/`,
+    reasonLine: '선택 이유:',
+    openPages: '낱장 PDF 열기',
+    openSpread: '스프레드 미리보기 열기',
+    compileFail: '컴파일 실패 — 로그를 확인하세요.',
+    reference: '참고',
+    usage: '사용 방법',
+    usageItems: [
+      '이미지와 본문 텍스트를 넣으면, 입력 조건을 분석해 가장 적합한 편집디자인 레이아웃 1개를 만듭니다.',
+      '제목을 넣으면 섹션 오프너 페이지가 추가됩니다. 비워두면 본문 레이아웃만 생성됩니다.',
+      '본문 텍스트는 빈 줄로 구분하면 문단별로 나뉘어 배치됩니다.',
+      '판형, 단 수를 선택하면 이미지·텍스트가 그 그리드 안에서 각자 정해진 단수(1~n단)로 배치됩니다.',
+      '체크한 이미지는 다른 텍스트/이미지 없이 단독으로 페이지 전체를 채웁니다.',
+      '면주에 입력한 텍스트는 매 페이지 상단 안쪽에, 쪽번호는 상단 바깥쪽 모서리에 반복해서 들어갑니다.',
+    ],
+    layoutTypeLabels: { 'image-first': '이미지 중심', balanced: '균형', 'text-first': '텍스트 중심' },
+  },
+  en: {
+    apiKeyLabel: 'Anthropic API key',
+    apiKeyPlaceholder: 'sk-ant-... (optional, falls back to rule-based)',
+    heading: 'Create a new layout',
+    subheading: 'Add images and body text to automatically generate an editorial layout.',
+    imagesLabel: 'Images',
+    addImages: 'Add images',
+    imagesCount: (n) => `${n} selected — picking again adds to the existing list.`,
+    imagesHint: 'Only checked images are forced full-page. They’re used in order as image_1, 2, 3… — remove and re-add to reorder.',
+    titleLabel: 'Title (optional)',
+    bodyLabel: 'Body text',
+    runningHeadLabel: 'Running head (repeats on every page, optional)',
+    runningHeadPlaceholder: 'e.g. 2026/2027    TREND REPORT',
+    gridLabel: 'Page size · grid settings',
+    pageSizeOptions: { A5: 'A5', A4: 'A4', B5: 'B5' },
+    columnsOptions: { 1: '1 col', 2: '2 col', 3: '3 col', 4: '4 col', 5: '5 col', 6: '6 col' },
+    gridModeOptions: { strict: 'Strict grid', flexible: 'Flexible grid' },
+    generate: 'Generate',
+    generating: 'Generating...',
+    errNoImage: 'Select at least one image.',
+    errNoText: 'Enter body text.',
+    errGenerateFailed: 'Generation failed.',
+    bestLayout: 'Best layout —',
+    styleLine: (style, runId) => `Style: ${style} · outputs/${runId}/`,
+    reasonLine: 'Why this layout:',
+    openPages: 'Open single pages PDF',
+    openSpread: 'Open spread preview',
+    compileFail: 'Compile failed — check the logs.',
+    reference: 'Reference',
+    usage: 'How to use',
+    usageItems: [
+      'Add images and body text; the input is analyzed to produce the single best-fitting editorial layout.',
+      'A title adds a section-opener page. Leave it blank to generate only the body layout.',
+      'Body text separated by blank lines is split and placed paragraph by paragraph.',
+      'Choose a page size and column count and images/text are placed within that grid, each with its own span (1–n columns).',
+      'A checked image fills the entire page on its own, with no other text or image.',
+      'Running head text repeats on the inner top edge of every page; the page number repeats on the outer top corner.',
+    ],
+    layoutTypeLabels: { 'image-first': 'Image-first', balanced: 'Balanced', 'text-first': 'Text-first' },
+  },
+}
 
 // Icons are stroke-only, single-weight (1.6), matching the geometric/editorial feel of 42dot Sans
 // rather than a filled glyph pack that would read as a generic web-app icon set.
@@ -48,6 +132,8 @@ const dropzoneStyle = {
 }
 
 export default function App() {
+  const [lang, setLang] = useState(localStorage.getItem('imprint_lang') || 'ko')
+  const s = STRINGS[lang]
   const [apiKey, setApiKey] = useState(localStorage.getItem('anthropic_api_key') || '')
   const [images, setImages] = useState([])
   const [title, setTitle] = useState('')
@@ -60,6 +146,11 @@ export default function App() {
   const [gridMode, setGridMode] = useState('flexible')
   const [forcedFullBleedIndices, setForcedFullBleedIndices] = useState(new Set())
   const [runningHeadText, setRunningHeadText] = useState('')
+
+  function handleLangChange(next) {
+    setLang(next)
+    localStorage.setItem('imprint_lang', next)
+  }
 
   function handleApiKeyChange(e) {
     const newKey = e.target.value
@@ -107,11 +198,11 @@ export default function App() {
 
   async function handleGenerate() {
     if (images.length < 1) {
-      setError('이미지를 1장 이상 선택하세요.')
+      setError(s.errNoImage)
       return
     }
     if (!text.trim()) {
-      setError('본문 텍스트를 입력하세요.')
+      setError(s.errNoText)
       return
     }
     setError(null)
@@ -134,7 +225,7 @@ export default function App() {
       const response = await fetch('/api/generate', { method: 'POST', body: form })
       const body = await response.json()
       if (!body.ok) {
-        setError(body.error || '생성에 실패했습니다.')
+        setError(body.error || s.errGenerateFailed)
         setStatus('idle')
         return
       }
@@ -158,12 +249,34 @@ export default function App() {
         <span style={{ fontSize: FS.md, fontWeight: 800, letterSpacing: -0.2 }}>Imprint</span>
         <span style={{ fontSize: FS.sm, fontWeight: 500, color: T.muted }}>(Image+Text)</span>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: FS.xs, color: T.muted, whiteSpace: 'nowrap' }}>Anthropic API 키</span>
+        <div style={{ display: 'flex', border: `1px solid ${T.border}`, borderRadius: 8, overflow: 'hidden' }}>
+          <button
+            type="button"
+            onClick={() => handleLangChange('ko')}
+            style={{
+              border: 'none', cursor: 'pointer', padding: '5px 10px', fontSize: FS.xs, fontWeight: 700,
+              background: lang === 'ko' ? T.accent : T.surface, color: lang === 'ko' ? '#fff' : T.muted,
+            }}
+          >
+            KOR
+          </button>
+          <button
+            type="button"
+            onClick={() => handleLangChange('en')}
+            style={{
+              border: 'none', cursor: 'pointer', padding: '5px 10px', fontSize: FS.xs, fontWeight: 700,
+              background: lang === 'en' ? T.accent : T.surface, color: lang === 'en' ? '#fff' : T.muted,
+            }}
+          >
+            ENG
+          </button>
+        </div>
+        <span style={{ fontSize: FS.xs, color: T.muted, whiteSpace: 'nowrap' }}>{s.apiKeyLabel}</span>
         <input
           type="password"
           value={apiKey}
           onChange={handleApiKeyChange}
-          placeholder="sk-ant-... (선택, 비우면 규칙 기반)"
+          placeholder={s.apiKeyPlaceholder}
           style={{
             width: 260, boxSizing: 'border-box', border: `1px solid ${T.border}`, borderRadius: 8,
             padding: '5px 8px', fontSize: FS.xs, color: T.ink, background: T.bg,
@@ -173,20 +286,20 @@ export default function App() {
 
       <div style={{ maxWidth: 720, margin: '32px auto', padding: '0 24px' }}>
         <div style={{ background: T.surface, borderRadius: 12, padding: 24, boxShadow: '0 1px 2px rgba(17,17,17,0.04), 0 4px 16px rgba(17,17,17,0.06)' }}>
-          <h1 style={{ fontSize: FS.lg, fontWeight: 800, letterSpacing: -0.3, margin: '0 0 2px' }}>새 레이아웃 만들기</h1>
-          <p style={{ fontSize: FS.sm, color: T.muted, margin: '0 0 22px' }}>이미지와 본문 텍스트를 넣으면 편집디자인 레이아웃을 자동으로 생성합니다.</p>
+          <h1 style={{ fontSize: FS.lg, fontWeight: 800, letterSpacing: -0.3, margin: '0 0 2px' }}>{s.heading}</h1>
+          <p style={{ fontSize: FS.sm, color: T.muted, margin: '0 0 22px' }}>{s.subheading}</p>
 
           <div style={fieldWrapper}>
-            <div style={groupTitle}>이미지</div>
+            <div style={groupTitle}>{s.imagesLabel}</div>
             <label className="dropzone" style={dropzoneStyle}>
               <input type="file" accept="image/*" multiple onChange={handleImageChange} style={{ display: 'none' }} />
               <ImageIcon color={T.muted} />
-              이미지 추가
+              {s.addImages}
             </label>
-            <p style={{ fontSize: FS.xs, color: T.muted, marginTop: 8 }}>{images.length}장 선택됨 — 다시 선택하면 기존 목록에 추가됩니다.</p>
+            <p style={{ fontSize: FS.xs, color: T.muted, marginTop: 8 }}>{s.imagesCount(images.length)}</p>
             {images.length > 0 && (
               <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <p style={{ fontSize: FS.xs, color: T.muted, margin: '0 0 2px' }}>체크한 이미지만 풀페이지로 강제됩니다. image_1, 2, 3... 순서로 배치에 사용되니 순서가 다르면 제거 후 원하는 순서로 다시 추가하세요.</p>
+                <p style={{ fontSize: FS.xs, color: T.muted, margin: '0 0 2px' }}>{s.imagesHint}</p>
                 {images.map((file, i) => (
                   <div key={`${file.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: FS.sm, color: T.ink }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
@@ -212,52 +325,44 @@ export default function App() {
           </div>
 
           <div style={fieldWrapper}>
-            <div style={groupTitle}>제목 (선택)</div>
+            <div style={groupTitle}>{s.titleLabel}</div>
             <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
           </div>
 
           <div style={fieldWrapper}>
-            <div style={groupTitle}>본문 텍스트</div>
+            <div style={groupTitle}>{s.bodyLabel}</div>
             <textarea value={text} onChange={(e) => setText(e.target.value)} rows={10} style={inputStyle} />
           </div>
 
           <div style={fieldWrapper}>
-            <div style={groupTitle}>면주 (반복 상단 텍스트, 선택)</div>
+            <div style={groupTitle}>{s.runningHeadLabel}</div>
             <input
               type="text"
               value={runningHeadText}
               onChange={(e) => setRunningHeadText(e.target.value)}
-              placeholder="예: 2026/2027    TREND REPORT"
+              placeholder={s.runningHeadPlaceholder}
               style={inputStyle}
             />
           </div>
 
           <div style={fieldWrapper}>
-            <div style={groupTitle}>판형 · 그리드 설정</div>
+            <div style={groupTitle}>{s.gridLabel}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               <select value={pageSize} onChange={(e) => setPageSize(e.target.value)} style={selectStyle}>
-                <option value="A5">A5</option>
-                <option value="A4">A4</option>
-                <option value="B5">B5</option>
+                {Object.entries(s.pageSizeOptions).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
               <select value={columns} onChange={(e) => setColumns(e.target.value)} style={selectStyle}>
-                <option value="1">1단</option>
-                <option value="2">2단</option>
-                <option value="3">3단</option>
-                <option value="4">4단</option>
-                <option value="5">5단</option>
-                <option value="6">6단</option>
+                {Object.entries(s.columnsOptions).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
               <select value={gridMode} onChange={(e) => setGridMode(e.target.value)} style={selectStyle}>
-                <option value="strict">엄격한 그리드</option>
-                <option value="flexible">유연한 그리드</option>
+                {Object.entries(s.gridModeOptions).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </div>
           </div>
 
 
           <button type="button" onClick={handleGenerate} disabled={status === 'generating'} style={primaryBtn}>
-            {status === 'generating' ? '생성 중...' : 'Generate'}
+            {status === 'generating' ? s.generating : s.generate}
           </button>
 
           {error && <p style={{ fontSize: FS.sm, color: T.error, lineHeight: 1.5, marginTop: 14 }}>{error}</p>}
@@ -267,12 +372,12 @@ export default function App() {
           <div style={{ marginTop: 16 }}>
             <div style={{ background: T.surface, borderLeft: `3px solid ${T.accent}`, borderRadius: 8, padding: 16, boxShadow: '0 1px 2px rgba(17,17,17,0.04)' }}>
               <div style={groupTitle}>
-                최적 레이아웃 — {LAYOUT_TYPE_LABELS[result.layoutFamily] || result.layoutFamily}
+                {s.bestLayout} {s.layoutTypeLabels[result.layoutFamily] || result.layoutFamily}
               </div>
               <p style={{ fontSize: FS.xs, fontFamily: T.mono, color: T.muted }}>
-                스타일: {result.style} · outputs/{result.runId}/
+                {s.styleLine(result.style, result.runId)}
               </p>
-              {result.reason && <p style={{ fontSize: FS.sm, color: T.muted }}>선택 이유: {result.reason}</p>}
+              {result.reason && <p style={{ fontSize: FS.sm, color: T.muted }}>{s.reasonLine} {result.reason}</p>}
               {result.bestEffortUsed && (
                 <p style={{ fontSize: FS.sm, color: T.warning, background: '#FFF8E1', padding: '8px 10px', borderRadius: 8 }}>
                   ⚠️ {result.bestEffortWarning}
@@ -280,29 +385,24 @@ export default function App() {
               )}
               {result.compileOk ? (
                 <p style={{ fontSize: FS.base }}>
-                  <a href={result.pagesPdf} target="_blank" rel="noreferrer">낱장 PDF 열기</a>
+                  <a href={result.pagesPdf} target="_blank" rel="noreferrer">{s.openPages}</a>
                   {' | '}
-                  <a href={result.spreadPdf} target="_blank" rel="noreferrer">스프레드 미리보기 열기</a>
+                  <a href={result.spreadPdf} target="_blank" rel="noreferrer">{s.openSpread}</a>
                 </p>
               ) : (
-                <p style={{ fontSize: FS.sm, color: T.error }}>컴파일 실패 — 로그를 확인하세요.</p>
+                <p style={{ fontSize: FS.sm, color: T.error }}>{s.compileFail}</p>
               )}
             </div>
           </div>
         )}
 
         <div style={{ marginTop: 16, background: T.code, borderRadius: 8, padding: 20 }}>
-          <div style={groupTitle}>참고</div>
+          <div style={groupTitle}>{s.reference}</div>
 
           <div style={{ marginBottom: 14 }}>
-            <p style={{ fontSize: FS.sm, fontWeight: 700, color: T.ink, margin: '0 0 4px' }}>사용 방법</p>
+            <p style={{ fontSize: FS.sm, fontWeight: 700, color: T.ink, margin: '0 0 4px' }}>{s.usage}</p>
             <ul style={{ fontSize: FS.xs, color: T.muted, lineHeight: 1.7, margin: 0, paddingLeft: 18 }}>
-              <li>이미지와 본문 텍스트를 넣으면, 입력 조건을 분석해 가장 적합한 편집디자인 레이아웃 1개를 만듭니다.</li>
-              <li>제목을 넣으면 섹션 오프너 페이지가 추가됩니다. 비워두면 본문 레이아웃만 생성됩니다.</li>
-              <li>본문 텍스트는 빈 줄로 구분하면 문단별로 나뉘어 배치됩니다.</li>
-              <li>판형, 단 수를 선택하면 이미지·텍스트가 그 그리드 안에서 각자 정해진 단수(1~n단)로 배치됩니다.</li>
-              <li>체크한 이미지는 다른 텍스트/이미지 없이 단독으로 페이지 전체를 채웁니다.</li>
-              <li>면주에 입력한 텍스트는 매 페이지 상단 안쪽에, 쪽번호는 상단 바깥쪽 모서리에 반복해서 들어갑니다.</li>
+              {s.usageItems.map((item) => <li key={item}>{item}</li>)}
             </ul>
           </div>
         </div>
